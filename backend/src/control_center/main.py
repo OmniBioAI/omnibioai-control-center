@@ -78,16 +78,22 @@ def _workspace_root() -> Path:
     return Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
 
 
+def _reset_job_to_idle(delay_s: int = 5) -> None:
+    """Reset job status to idle after a short delay so reloaded pages see 'idle'."""
+    import time as _time
+    _time.sleep(delay_s)
+    with _job._lock:
+        if _job.status in ("done", "error"):
+            _job.status = "idle"
+
+
 def _run_report_job() -> None:
-    """
-    Background thread: runs generate_report.py against WORKSPACE_ROOT.
-    Updates _job state so the UI can poll /report/status.
-    """
     workspace = _workspace_root()
     script = workspace / "omnibioai-control-center" / "scripts" / "generate_report.py"
 
     if not script.exists():
         _job.fail(f"Report script not found: {script}")
+        threading.Thread(target=_reset_job_to_idle, daemon=True).start()
         return
 
     cmd = [
@@ -101,7 +107,7 @@ def _run_report_job() -> None:
             cmd,
             capture_output=True,
             text=True,
-            timeout=600,   # 10 min hard limit
+            timeout=600,
         )
         if proc.returncode == 0:
             _job.finish(proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else "Done")
@@ -111,6 +117,10 @@ def _run_report_job() -> None:
         _job.fail("Report generation timed out after 10 minutes")
     except Exception as e:
         _job.fail(f"{type(e).__name__}: {e}")
+
+    # Reset to idle after 30s so subsequent page loads don't see 'done'
+    # and trigger another reload loop.
+    threading.Thread(target=_reset_job_to_idle, daemon=True).start()
 
 
 @app.post("/report/generate")
@@ -128,7 +138,6 @@ def report_generate() -> JSONResponse:
 def report_status() -> JSONResponse:
     """Poll job state. Frontend polls this every 2s while running."""
     state = _job.as_dict()
-    # Also tell the frontend if the report file actually exists
     report_path = _workspace_root() / "out" / "reports" / "omnibioai_ecosystem_report.html"
     state["report_exists"] = report_path.exists()
     if report_path.exists():
@@ -146,17 +155,11 @@ def report_status() -> JSONResponse:
 
 @app.get("/", response_class=HTMLResponse)
 def root() -> HTMLResponse:
-    """
-    Main entry point — serves the generated report HTML with an injected
-    sticky control bar (Regenerate + View Dashboard buttons).
-    Falls back to a landing page if no report has been generated yet.
-    """
     report_path = _workspace_root() / "out" / "reports" / "omnibioai_ecosystem_report.html"
 
     if report_path.exists():
         report_html = report_path.read_text(encoding="utf-8")
         port = os.environ.get("CONTROL_CENTER_PORT", "7070")
-        # Inject sticky bar after <body> tag
         sticky_bar = f"""
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
@@ -186,7 +189,6 @@ def root() -> HTMLResponse:
   #omni-header .btn-outline {{ background:white;border-color:#d1d5db;color:#374151; }}
   #omni-header .btn-primary {{ background:#2563eb;border-color:#2563eb;color:white; }}
   #omni-header .btn-primary:disabled {{ background:#93c5fd;border-color:#93c5fd;cursor:not-allowed; }}
-  #omni-header .btn-light {{ background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8; }}
   #omni-spin {{ width:14px;height:14px;border:2px solid #e5e7eb;border-top-color:#2563eb;border-radius:50%;animation:omni-spin .8s linear infinite;display:none; }}
 </style>
 <header id="omni-header">
@@ -212,7 +214,29 @@ def root() -> HTMLResponse:
 </header>
 <script>
 (function() {{
-  // Show live service status badge
+  // ── Reload-loop prevention ────────────────────────────────────────────────
+  // We use sessionStorage so the "we already reloaded once" signal survives
+  // the page reload itself.  The flag is written immediately before calling
+  // window.location.reload() and consumed (and deleted) on the very next
+  // page load, so a second load never triggers another reload.
+  var RELOAD_KEY = 'omni_gen_reloaded';
+  var _justReloaded = sessionStorage.getItem(RELOAD_KEY) === '1';
+  if (_justReloaded) {{ sessionStorage.removeItem(RELOAD_KEY); }}
+
+  // _omniWasGenerating is still needed so we know the *current* page
+  // triggered the generation (vs. arriving on a page where status happens
+  // to be 'done' from an earlier run).
+  var _omniWasGenerating = false;
+
+  // Single timer handle — guarantees only one omniPollStatus chain runs at
+  // a time regardless of how many times omniGenerate is called.
+  var _pollTimer = null;
+
+  function _schedulePoll(ms) {{
+    clearTimeout(_pollTimer);
+    _pollTimer = setTimeout(omniPollStatus, ms === undefined ? 2000 : ms);
+  }}
+
   async function omniLoadStatus() {{
     try {{
       var res = await fetch('/summary');
@@ -227,8 +251,8 @@ def root() -> HTMLResponse:
     }} catch(e) {{}}
   }}
 
-  // Report status polling
   async function omniPollStatus() {{
+    _pollTimer = null;
     try {{
       var res = await fetch('/report/status');
       var state = await res.json();
@@ -240,14 +264,21 @@ def root() -> HTMLResponse:
         btn.disabled = true;
         spin.style.display = 'inline-block';
         prog.style.display = 'inline';
-        prog.textContent = 'Generating…';
-        setTimeout(omniPollStatus, 2000);
+        prog.textContent = 'Generating\u2026';
+        _schedulePoll();
       }} else if(state.status === 'done') {{
         btn.disabled = false;
         spin.style.display = 'none';
         prog.style.display = 'none';
-        // Reload page to show new report
-        window.location.reload();
+        // Reload only when:
+        //   1. The user clicked Regenerate in *this* page session, AND
+        //   2. We have not already reloaded once after this generation.
+        if(_omniWasGenerating && !_justReloaded) {{
+          _omniWasGenerating = false;
+          sessionStorage.setItem(RELOAD_KEY, '1');
+          window.location.reload();
+        }}
+        // No further polling needed — we are done or already reloaded.
       }} else if(state.status === 'error') {{
         btn.disabled = false;
         spin.style.display = 'none';
@@ -255,6 +286,7 @@ def root() -> HTMLResponse:
         prog.style.color = '#dc2626';
         prog.textContent = 'Error: ' + (state.message || 'unknown');
       }} else {{
+        // idle — show last generated timestamp
         btn.disabled = false;
         spin.style.display = 'none';
         prog.style.display = 'none';
@@ -269,24 +301,29 @@ def root() -> HTMLResponse:
     try {{
       var res = await fetch('/report/generate', {{method:'POST'}});
       if(res.status === 409) return;
+      _omniWasGenerating = true;
       var btn = document.getElementById('omni-btn-regen');
       var spin = document.getElementById('omni-spin');
       var prog = document.getElementById('omni-prog');
       btn.disabled = true;
       spin.style.display = 'inline-block';
       prog.style.display = 'inline';
-      prog.textContent = 'Generating… (2–5 min)';
-      setTimeout(omniPollStatus, 2000);
+      prog.style.color = '#6b7280';
+      prog.textContent = 'Generating\u2026 (2\u20135 min)';
+      _schedulePoll();
     }} catch(e) {{ console.error(e); }}
   }};
 
   omniLoadStatus();
   setInterval(omniLoadStatus, 15000);
+
+  // On page load: poll once to show the timestamp.
+  // If _justReloaded is true we already consumed the flag above, so this poll
+  // will see 'done' or 'idle' but _omniWasGenerating is false → no second reload.
   omniPollStatus();
 }})();
 </script>
 """
-        # Inject after opening <body> tag
         if '<body>' in report_html:
             report_html = report_html.replace('<body>', '<body>' + sticky_bar, 1)
         else:
@@ -329,39 +366,33 @@ def root() -> HTMLResponse:
     <div class="msg" id="msg"></div>
   </div>
 <script>
-  async function generate() {{
+  async function generate() {
     var btn=document.getElementById('btn'),spin=document.getElementById('spin'),msg=document.getElementById('msg');
-    btn.disabled=true;spin.style.display='inline-block';msg.textContent='Generating report… this takes 2–5 minutes';
-    try{{
-      await fetch('/report/generate',{{method:'POST'}});
+    btn.disabled=true;spin.style.display='inline-block';msg.textContent='Generating report\u2026 this takes 2\u20135 minutes';
+    try{
+      await fetch('/report/generate',{method:'POST'});
       poll();
-    }}catch(e){{msg.textContent='Error: '+e;btn.disabled=false;spin.style.display='none';}}
-  }}
-  async function poll(){{
-    try{{
+    }catch(e){msg.textContent='Error: '+e;btn.disabled=false;spin.style.display='none';}
+  }
+  async function poll(){
+    try{
       var res=await fetch('/report/status'),state=await res.json();
-      if(state.status==='done'){{window.location.reload();}}
-      else if(state.status==='error'){{
+      if(state.status==='done'){window.location.reload();}
+      else if(state.status==='error'){
         document.getElementById('msg').textContent='Error: '+(state.message||'unknown');
         document.getElementById('btn').disabled=false;
         document.getElementById('spin').style.display='none';
-      }}else{{setTimeout(poll,2000);}}
-    }}catch(e){{setTimeout(poll,3000);}}
-  }}
+      }else{setTimeout(poll,2000);}
+    }catch(e){setTimeout(poll,3000);}
+  }
 </script>
 </body>
 </html>
 """)
 
+
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard() -> str:
-    """
-    Live health dashboard with:
-    - Overall status banner
-    - Per-service health cards (auto-refresh every 10s)
-    - Generate Report button (triggers background job, polls /report/status)
-    - View Report button (links to /report once generated)
-    """
     return """<!doctype html>
 <html lang="en">
 <head>
@@ -524,7 +555,7 @@ def dashboard() -> str:
 <footer>&copy; 2025 Manish Kumar &middot; OmniBioAI Platform</footer>
 
 <script>
-  var rawVisible=false,pollTimer=null;
+  var rawVisible=false,pollTimer=null,_dashWasGenerating=false;
   function toggleRaw(){rawVisible=!rawVisible;document.getElementById('raw').style.display=rawVisible?'block':'none';document.querySelector('.raw-toggle').textContent=rawVisible?'Hide raw JSON':'Show raw JSON';}
   function esc(s){return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');}
   function badgeHtml(st){var c=st==='UP'?'badge-up':st==='WARN'?'badge-wn':'badge-dn';return '<span class="badge '+c+'">'+esc(st)+'</span>';}
@@ -588,25 +619,39 @@ def dashboard() -> str:
     }
   }
   function setReportUI(state){
-    var bg=document.getElementById('btn-generate'),bgh=document.getElementById('btn-generate-hdr');
-    var bv=document.getElementById('btn-view'),bvh=document.getElementById('btn-view-hdr');
-    var sp=document.getElementById('rpt-spinner'),pg=document.getElementById('rpt-progress');
-    var mt=document.getElementById('report-meta');
+    var bgh=document.getElementById('btn-generate-hdr');
+    var bvh=document.getElementById('btn-view-hdr');
+    var sp=document.getElementById('rpt-spinner-hdr'),pg=document.getElementById('rpt-progress-hdr');
     if(state.status==='running'){
-      bg.disabled=true;bgh.disabled=true;sp.style.display='inline-block';pg.style.display='inline';pg.className='progress-msg';pg.textContent='Generating\u2026 this takes 2\u20135 minutes';bv.style.display='none';bvh.style.display='none';
+      bgh.disabled=true;sp.style.display='inline-block';pg.style.display='inline';pg.className='progress-msg';pg.textContent='Generating\u2026 (2\u20135 min)';bvh.style.display='none';
     }else if(state.status==='done'){
-      bg.disabled=false;bgh.disabled=false;sp.style.display='none';pg.style.display='none';
-      if(state.report_generated_at)mt.textContent='Last generated: '+new Date(state.report_generated_at).toLocaleString()+' \u00b7 Architecture \u00b7 Projects \u00b7 Languages \u00b7 Coverage \u00b7 Health';
-      if(state.report_exists){bv.style.display='inline-flex';bvh.style.display='inline-flex';}
+      bgh.disabled=false;sp.style.display='none';pg.style.display='none';
+      if(state.report_exists){bvh.style.display='inline-flex';}
+      // Only redirect if user clicked Generate in this session
+      if(_dashWasGenerating){ _dashWasGenerating=false; window.location.href='/'; }
     }else if(state.status==='error'){
-      bg.disabled=false;bgh.disabled=false;sp.style.display='none';pg.style.display='inline';pg.className='progress-msg err';pg.textContent='Error: '+(state.message||'unknown');
+      bgh.disabled=false;sp.style.display='none';pg.style.display='inline';pg.className='progress-msg err';pg.textContent='Error: '+(state.message||'unknown');
     }else{
-      bg.disabled=false;bgh.disabled=false;sp.style.display='none';pg.style.display='none';
-      if(state.report_exists&&state.report_generated_at){mt.textContent='Last generated: '+new Date(state.report_generated_at).toLocaleString()+' \u00b7 Architecture \u00b7 Projects \u00b7 Languages \u00b7 Coverage \u00b7 Health';bv.style.display='inline-flex';bvh.style.display='inline-flex';}
+      bgh.disabled=false;sp.style.display='none';pg.style.display='none';
+      if(state.report_exists){bvh.style.display='inline-flex';}
     }
   }
-  async function pollReportStatus(){try{var res=await fetch('/report/status'),state=await res.json();setReportUI(state);pollTimer=state.status==='running'?setTimeout(pollReportStatus,2000):null;}catch(e){pollTimer=null;}}
-  async function generateReport(){try{var res=await fetch('/report/generate',{method:'POST'});if(res.status===409)return;setReportUI({status:'running'});pollTimer=setTimeout(pollReportStatus,2000);}catch(e){console.error(e);}}
+  async function pollReportStatus(){
+    try{
+      var res=await fetch('/report/status'),state=await res.json();
+      setReportUI(state);
+      pollTimer=state.status==='running'?setTimeout(pollReportStatus,2000):null;
+    }catch(e){pollTimer=null;}
+  }
+  async function generateReport(){
+    try{
+      var res=await fetch('/report/generate',{method:'POST'});
+      if(res.status===409)return;
+      _dashWasGenerating=true;
+      setReportUI({status:'running'});
+      pollTimer=setTimeout(pollReportStatus,2000);
+    }catch(e){console.error(e);}
+  }
   loadHealth();setInterval(loadHealth,10000);pollReportStatus();
 </script>
 </body>
