@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/api.ts","./src/main.tsx","./src/components/Header.tsx","./src/components/Sidebar.tsx","./src/components/StatsBar.tsx","./src/components/TopBar.tsx","./src/pages/ConfigPage.tsx","./src/pages/DockerPage.tsx","./src/pages/EcosystemPage.tsx","./src/pages/HealthPage.tsx"],"version":"5.9.3"}
