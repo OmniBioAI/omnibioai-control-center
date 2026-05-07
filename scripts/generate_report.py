@@ -54,7 +54,7 @@ import pandas as pd
 # ==============================================================================
 
 EXCLUDE_DIRS = (
-    "obsolete,staticfiles,node_modules,.venv,env,__pycache__,migrations,"
+    "obsolete,staticfiles,node_modules,.venv,env,__pycache__,migrations,node_modules" 
     "admin,venv,gnn_env,venv_sys,work,input,demo,md"
 )
 EXCLUDE_EXTS = "svg,json,txt,csv,lock,min.js,map,pyc"
@@ -73,6 +73,8 @@ DEFAULT_TARGETS = [
     "omnibioai-workflow-bundles",
     "omnibioai-model-registry",
     "omnibioai-tool-images",
+    "omnibioai-studio",  
+    "omnibioai-dev-hub",
 ]
 
 DEFAULT_OUT_RELPATH       = "out/reports/omnibioai_ecosystem_report.html"
@@ -391,7 +393,9 @@ _ARCH_LANES: List[Tuple[str, str, str]] = [
 _LANE_INDEX: Dict[str, int] = {n: i for i, (n, _, _) in enumerate(_ARCH_LANES)}
 
 _NODE_DEFS: Dict[str, Tuple[str, int]] = {
-    "omnibioai-dev-docker":       ("Dev / Clients", 0),
+    "omnibioai-studio":           ("Dev / Clients", 0),  # The new entry point
+    "omnibioai-dev-hub":         ("Dev / Clients", 0),  # The old entry point, still relevant
+    "omnibioai-dev-docker":       ("Dev / Clients", 1),
     "omnibioai_sdk":              ("Dev / Clients", 2),
     "omnibioai":                  ("Workbench",     1),
     "omnibioai-lims":             ("Workbench",     3),
@@ -406,6 +410,10 @@ _NODE_DEFS: Dict[str, Tuple[str, int]] = {
 }
 
 _ARCH_EDGES: List[Tuple[str, str, bool]] = [
+    # New Studio Edges
+    ("omnibioai-studio",           "omnibioai",               False),
+    ("omnibioai-dev-hub",          "omnibioai",               False),
+    ("omnibioai-studio",           "omnibioai-rag",           True),
     ("omnibioai-dev-docker",       "omnibioai",               False),
     ("omnibioai_sdk",              "omnibioai",               False),
     ("omnibioai",                  "omnibioai-lims",          True),
@@ -437,6 +445,8 @@ def _node_rect(lane: str, slot: int) -> Tuple[int, int, int, int]:
 
 def _short(name: str) -> str:
     for full, short in [
+        ("omnibioai-studio",           "studio"),
+        ("omnibioai-dev-hub",         "dev-hub"),
         ("omnibioai-workflow-bundles", "workflow-bundles"),
         ("omnibioai-model-registry",   "model-registry"),
         ("omnibioai-tool-runtime",     "tool-runtime"),
@@ -1254,10 +1264,10 @@ def build_report(
 
   <div class="global-kpi">
     <div class="global-kpi-card"><div class="lbl">Files</div><div class="val">{fmt_int(grand.files)}</div></div>
+    <div class="global-kpi-card"><div class="lbl">Documentation</div><div class="val">{fmt_int(doc_lines)}</div></div>
     <div class="global-kpi-card"><div class="lbl">Code lines</div><div class="val">{fmt_int(grand.code)}</div></div>
     <div class="global-kpi-card"><div class="lbl">Comment lines</div><div class="val">{fmt_int(grand.comment)}</div></div>
     <div class="global-kpi-card"><div class="lbl">Blank lines</div><div class="val">{fmt_int(grand.blank)}</div></div>
-    <div class="global-kpi-card"><div class="lbl">Documentation</div><div class="val">{fmt_int(doc_lines)}</div></div>
     <div class="global-kpi-card"><div class="lbl">Total lines</div><div class="val">{fmt_int(total_all)}</div></div>
   </div>
 
