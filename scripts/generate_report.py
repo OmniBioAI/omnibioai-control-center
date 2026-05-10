@@ -75,6 +75,7 @@ DEFAULT_TARGETS = [
     "omnibioai-tool-images",
     "omnibioai-studio",  
     "omnibioai-dev-hub",
+    "omnibioai-videos",
 ]
 
 DEFAULT_OUT_RELPATH       = "out/reports/omnibioai_ecosystem_report.html"
@@ -393,6 +394,7 @@ _ARCH_LANES: List[Tuple[str, str, str]] = [
 _LANE_INDEX: Dict[str, int] = {n: i for i, (n, _, _) in enumerate(_ARCH_LANES)}
 
 _NODE_DEFS: Dict[str, Tuple[str, int]] = {
+    "omnibioai-videos":           ("Dev / Clients", 0),  # The new entry point
     "omnibioai-studio":           ("Dev / Clients", 0),  # The new entry point
     "omnibioai-dev-hub":         ("Dev / Clients", 0),  # The old entry point, still relevant
     "omnibioai-dev-docker":       ("Dev / Clients", 1),
@@ -407,10 +409,12 @@ _NODE_DEFS: Dict[str, Tuple[str, int]] = {
     "omnibioai-tes":              ("Execution",     1),
     "omnibioai-tool-runtime":     ("Tool Runners",  1),
     "omnibioai-tool-images":      ("Tool Runners",  3),
+
 }
 
 _ARCH_EDGES: List[Tuple[str, str, bool]] = [
     # New Studio Edges
+    ("omnibioai-videos",           "omnibioai",               False),
     ("omnibioai-studio",           "omnibioai",               False),
     ("omnibioai-dev-hub",          "omnibioai",               False),
     ("omnibioai-studio",           "omnibioai-rag",           True),
@@ -445,6 +449,7 @@ def _node_rect(lane: str, slot: int) -> Tuple[int, int, int, int]:
 
 def _short(name: str) -> str:
     for full, short in [
+        ("omnibioai-videos",     "videos"),
         ("omnibioai-studio",           "studio"),
         ("omnibioai-dev-hub",         "dev-hub"),
         ("omnibioai-workflow-bundles", "workflow-bundles"),
