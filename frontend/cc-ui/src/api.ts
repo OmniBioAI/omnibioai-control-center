@@ -70,12 +70,17 @@ export interface SifImagesResponse {
 
 export interface PluginImage {
   plugin: string
+  name: string
+  category: string
   image: string
   local_status: 'present' | 'missing' | 'unknown'
+  size_mb: number
 }
 
 export interface PluginImagesResponse {
   plugins: PluginImage[]
+  present: number
+  missing: number
 }
 
 export async function fetchSummary(): Promise<SummaryResponse> {

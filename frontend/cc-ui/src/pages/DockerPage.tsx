@@ -326,6 +326,9 @@ function PluginsSection({ refreshKey }: { refreshKey: number }) {
   const [data, setData] = useState<PluginImagesResponse | null>(null)
   const [err, setErr]   = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [selCat, setSelCat] = useState<string | null>(null)
+  const [showMissingOnly, setShowMissingOnly] = useState(false)
 
   useEffect(() => {
     setLoading(true)
@@ -335,46 +338,128 @@ function PluginsSection({ refreshKey }: { refreshKey: number }) {
       .finally(() => setLoading(false))
   }, [refreshKey])
 
+  const plugins = data?.plugins ?? []
+
+  const cats = plugins.reduce<Record<string, number>>((acc, p) => {
+    acc[p.category] = (acc[p.category] ?? 0) + 1
+    return acc
+  }, {})
+  const catList = Object.entries(cats).sort((a, b) => b[1] - a[1])
+
+  const filtered = plugins.filter(p => {
+    const matchSearch = !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.plugin.toLowerCase().includes(search.toLowerCase())
+    const matchCat = !selCat || p.category === selCat
+    const matchStatus = !showMissingOnly || p.local_status === 'missing'
+    return matchSearch && matchCat && matchStatus
+  })
+
   return (
     <div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        {data && (
+          <>
+            <StatPill label="plugins" value={plugins.length} />
+            <StatPill label="present" value={data.present} color="#059669" />
+            <StatPill label="missing" value={data.missing} color="#dc2626" />
+          </>
+        )}
+      </div>
       {err && <ErrBox msg={err} />}
       {loading ? <Loading msg="Scanning plugin images…" /> : (
-        <div style={card}>
-          <div style={cardHead}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>Plugin Docker Images</span>
-          </div>
-          {!data?.plugins?.length ? (
-            <div style={{ padding: 24, textAlign: 'center', color: '#9ca3af', fontSize: 12 }}>
-              No plugin docker_image references found
+        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+          {/* Category sidebar */}
+          <div style={{ width: 168, flexShrink: 0 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#9ca3af', marginBottom: 8 }}>
+              Categories
             </div>
-          ) : (
-            <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  <th style={th}>Plugin</th>
-                  <th style={th}>Image</th>
-                  <th style={th}>Local Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.plugins.map((p, i) => (
-                  <tr key={i}>
-                    <td style={{ ...td, fontWeight: 600, color: '#111827' }}>{p.plugin}</td>
-                    <td style={{ ...td, fontFamily: 'var(--mono)', fontSize: 11, color: '#6b7280' }}>{p.image}</td>
-                    <td style={td}>
-                      <span style={{
-                        fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 99,
-                        background: p.local_status === 'present' ? '#dcfce7' : p.local_status === 'missing' ? '#fee2e2' : '#f3f4f6',
-                        color: p.local_status === 'present' ? '#15803d' : p.local_status === 'missing' ? '#b91c1c' : '#6b7280',
-                      }}>
-                        {p.local_status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+            {[['All', plugins.length] as [string, number], ...catList].map(([cat, count]) => {
+              const isAll = cat === 'All'
+              const active = isAll ? !selCat : selCat === cat
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setSelCat(isAll ? null : (selCat === cat ? null : cat))}
+                  style={{
+                    width: '100%', textAlign: 'left',
+                    padding: '6px 10px', borderRadius: 6, fontSize: 12,
+                    background: active ? '#eff6ff' : 'transparent',
+                    color: active ? '#2563eb' : '#374151',
+                    border: active ? '1px solid #bfdbfe' : '1px solid transparent',
+                    fontWeight: active ? 600 : 400, marginBottom: 2,
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat}</span>
+                  <span style={{ background: '#e5e7eb', color: '#6b7280', borderRadius: 99, fontSize: 10, fontWeight: 700, padding: '1px 6px', flexShrink: 0, marginLeft: 4 }}>
+                    {count}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Search + table */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ marginBottom: 10, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search plugins…"
+                style={{ maxWidth: 260 }}
+              />
+              <label style={{ fontSize: 12, color: '#374151', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                <input type="checkbox" checked={showMissingOnly} onChange={e => setShowMissingOnly(e.target.checked)} />
+                Missing only
+              </label>
+            </div>
+            <div style={card}>
+              {!filtered.length ? (
+                <div style={{ padding: 24, textAlign: 'center', color: '#9ca3af', fontSize: 12 }}>
+                  No plugins match the current filters
+                </div>
+              ) : (
+                <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={th}>Plugin</th>
+                      <th style={th}>Category</th>
+                      <th style={th}>Image</th>
+                      <th style={th}>Local Status</th>
+                      <th style={th}>Size</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((p, i) => (
+                      <tr key={i}>
+                        <td style={{ ...td, fontWeight: 600, color: '#111827', whiteSpace: 'nowrap' }}>{p.name}</td>
+                        <td style={td}><CategoryChip category={p.category} /></td>
+                        <td style={{ ...td, fontFamily: 'var(--mono)', fontSize: 11, color: '#6b7280', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {p.image}
+                        </td>
+                        <td style={td}>
+                          <span style={{
+                            fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 99,
+                            background: p.local_status === 'present' ? '#dcfce7' : '#fee2e2',
+                            color: p.local_status === 'present' ? '#15803d' : '#b91c1c',
+                          }}>
+                            {p.local_status}
+                          </span>
+                        </td>
+                        <td style={{ ...td, fontSize: 11, fontFamily: 'var(--mono)', color: '#6b7280', whiteSpace: 'nowrap' }}>
+                          {p.local_status === 'present' && p.size_mb > 0
+                            ? p.size_mb >= 1024
+                              ? `${(p.size_mb / 1024).toFixed(1)} GB`
+                              : `${p.size_mb} MB`
+                            : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

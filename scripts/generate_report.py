@@ -54,7 +54,7 @@ import pandas as pd
 # ==============================================================================
 
 EXCLUDE_DIRS = (
-    "obsolete,staticfiles,node_modules,.venv,env,__pycache__,migrations,node_modules" 
+    "obsolete,staticfiles,node_modules,.venv,env,__pycache__,migrations,node_modules"
     "admin,venv,gnn_env,venv_sys,work,input,demo,md"
 )
 EXCLUDE_EXTS = "svg,json,txt,csv,lock,min.js,map,pyc"
@@ -73,16 +73,59 @@ DEFAULT_TARGETS = [
     "omnibioai-workflow-bundles",
     "omnibioai-model-registry",
     "omnibioai-tool-images",
-    "omnibioai-studio",  
+    "omnibioai-studio",
     "omnibioai-dev-hub",
     "omnibioai-videos",
+    "omnibioai-iam-client",
+    "omnibioai-policy-engine",
+    "omnibioai-security-audit",
+    "omnibioai-security-sdk",
+    "omnibioai-api-gateway",
+    "omnibioai-hpc-policy-engine",
+    "omnibioai-docs",
 ]
 
-DEFAULT_OUT_RELPATH       = "out/reports/omnibioai_ecosystem_report.html"
-DEFAULT_TITLE             = "OmniBioAI Ecosystem"
+DEFAULT_OUT_RELPATH        = "out/reports/omnibioai_ecosystem_report.html"
+DEFAULT_TITLE              = "OmniBioAI Ecosystem"
 DEFAULT_CONTROL_CENTER_URL = "http://127.0.0.1:7070"
 
-COVERAGE_CMD = ["pytest", "--cov=.", "--cov-report=term-missing"]
+def _cov_source_args(cwd: Path) -> List[str]:
+    text = _read_text_if_exists(cwd / "pyproject.toml")
+    if text:
+        m = re.search(r'\[tool\.coverage\.run\](.*?)(?=\n\[|\Z)', text, re.DOTALL)
+        if m:
+            sm = re.search(r'^source\s*=\s*\[([^\]]*)\]', m.group(1), re.MULTILINE)
+            if sm:
+                sources = re.findall(r'["\']([^"\']+)["\']', sm.group(1))
+                if sources:
+                    return [f"--cov={s}" for s in sources]
+    text = _read_text_if_exists(cwd / ".coveragerc")
+    if text:
+        m = re.search(r'\[run\](.*?)(?=\n\[|\Z)', text, re.DOTALL)
+        if m:
+            sm = re.search(r'^source\s*=\s*(.+?)$', m.group(1), re.MULTILINE)
+            if sm:
+                sources = [s.strip() for s in sm.group(1).split(',') if s.strip()]
+                if sources:
+                    return [f"--cov={s}" for s in sources]
+    if (cwd / "src").is_dir():
+        return ["--cov=src"]
+    return ["--cov=."]
+
+
+def _coverage_cmd(cov_args: List[str], noconftest: bool = False) -> list:
+    cmd = [
+        sys.executable, "-m", "pytest",
+        *cov_args,
+        "--cov-report=term-missing", "--cov-report=json",
+        "--tb=no", "-q",
+        "-p", "no:cacheprovider",
+        "--continue-on-collection-errors",
+        "--ignore=node_modules",
+    ]
+    if noconftest:
+        cmd.append("--noconftest")
+    return cmd
 
 _CHARTJS = (
     '<script src="https://cdnjs.cloudflare.com/ajax/libs/'
@@ -118,7 +161,7 @@ class ServiceHealth:
     name:       str
     type:       str
     target:     str
-    status:     str           # UP | DOWN | WARN
+    status:     str
     latency_ms: Optional[int]
     message:    str
     ui_url:     Optional[str] = None
@@ -164,14 +207,36 @@ def _jsn(items: List[Union[int, float]]) -> str:
 
 def ensure_cloc() -> None:
     if shutil.which("cloc") is None:
-        raise RuntimeError(
-            "cloc not found. Install: sudo apt-get install cloc"
-        )
+        raise RuntimeError("cloc not found. Install: sudo apt-get install cloc")
 
 def validate_paths(paths: List[Path]) -> None:
     missing = [str(p) for p in paths if not p.exists()]
     if missing:
-        raise RuntimeError("Missing paths:\n  - " + "\n  - ".join(missing))
+        print("⚠ Repo paths not found (will show 'missing' in report):")
+        for m in missing:
+            print(f"  - {m}")
+
+
+def _resolve_target_paths(root: Path, targets: List[str]) -> List[Path]:
+    norm_map: Dict[str, Path] = {}
+    if root.is_dir():
+        for entry in root.iterdir():
+            if entry.is_dir():
+                norm_map[entry.name.lower().replace("-", "_")] = entry
+    paths: List[Path] = []
+    for name in targets:
+        exact = root / name
+        if exact.is_dir():
+            paths.append(exact)
+        else:
+            norm_key = name.lower().replace("-", "_")
+            resolved = norm_map.get(norm_key)
+            if resolved is not None:
+                print(f"  ↳ resolved '{name}' → '{resolved.name}'")
+                paths.append(resolved)
+            else:
+                paths.append(exact)
+    return paths
 
 def run_cloc(path: Path) -> Tuple[Totals, Dict[str, Totals]]:
     cmd = [
@@ -179,7 +244,7 @@ def run_cloc(path: Path) -> Tuple[Totals, Dict[str, Totals]]:
         "--exclude-dir", EXCLUDE_DIRS,
         "--exclude-ext", EXCLUDE_EXTS,
         "--fullpath", "--not-match-d", NOT_MATCH_D,
-        "--force-lang", "Dockerfile,Dockerfile", # <--- ADD THIS LINE
+        "--force-lang", "Dockerfile,Dockerfile",
         "--json",
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -215,6 +280,17 @@ def _read_text_if_exists(path: Path) -> str:
     except Exception:
         return ""
 
+def _pytest_available() -> bool:
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "--version"],
+            capture_output=True, timeout=15,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 def _has_pytest_project(repo: Path) -> bool:
     return (
         (repo / "pyproject.toml").exists()
@@ -225,10 +301,24 @@ def _has_pytest_project(repo: Path) -> bool:
 
 
 def _pytest_cwd(repo: Path) -> Path:
-    """Return the directory from which pytest should be run for this repo."""
     if (repo / "backend" / "pyproject.toml").exists():
         return repo / "backend"
     return repo
+
+
+def _subprocess_env(cwd: Path) -> dict:
+    import os
+    env = os.environ.copy()
+    for cfg_path in [cwd / "pytest.ini", cwd / "setup.cfg",
+                     cwd.parent / "pytest.ini", cwd.parent / "setup.cfg"]:
+        if not cfg_path.exists():
+            continue
+        text = _read_text_if_exists(cfg_path)
+        m = re.search(r"DJANGO_SETTINGS_MODULE\s*[=:]\s*(\S+)", text)
+        if m:
+            env.setdefault("DJANGO_SETTINGS_MODULE", m.group(1))
+            break
+    return env
 
 def _extract_total_line(output: str) -> Optional[str]:
     for line in output.splitlines():
@@ -263,6 +353,29 @@ def _extract_fail_under(repo: Path) -> Optional[float]:
             return float(m.group(1))
     return None
 
+def _parse_coverage_json(cwd: Path) -> Optional[Dict[str, Any]]:
+    cov_file = cwd / "coverage.json"
+    if not cov_file.exists():
+        return None
+    try:
+        data = json.loads(cov_file.read_text(encoding="utf-8"))
+        totals = data.get("totals", {})
+        pct    = totals.get("percent_covered")
+        stmts  = totals.get("num_statements")
+        missed = totals.get("missing_lines")
+        if pct is None or stmts is None:
+            return None
+        return {
+            "statements":       int(stmts),
+            "missed":           int(missed or 0),
+            "branches":         totals.get("num_partial_branches"),
+            "partial_branches": None,
+            "coverage_pct":     round(float(pct), 2),
+        }
+    except Exception:
+        return None
+
+
 def _classify_coverage_band(pct: Optional[float]) -> str:
     if pct is None: return "No data"
     if pct >= 95:   return "Excellent (>=95%)"
@@ -274,21 +387,61 @@ def _stderr_tail(stderr: str, n: int = 10) -> Optional[str]:
     return "\n".join(stderr.splitlines()[-n:]) if stderr else None
 
 def _classify_status(rc, total_line, coverage_pct, fail_under, stdout, stderr) -> str:
-    if total_line is None: return "no_total_found"
-    if rc == 0:            return "ok"
+    if total_line is None:  return "no_total_found"
+    if rc == 0:             return "ok"
     combined = f"{stdout}\n{stderr}".lower()
     cov_fail  = ("required test coverage" in combined or "fail-under" in combined
                  or (fail_under is not None and coverage_pct is not None
                      and coverage_pct < fail_under))
-    test_fail = (" failed" in combined or " error" in combined
-                 or "errors" in combined or "interrupted" in combined)
+    test_fail = (" failed" in combined
+                 or "interrupted" in combined
+                 or re.search(r"\b\d+ failed\b", combined) is not None)
     if cov_fail and test_fail: return "test_and_coverage_failure"
     if cov_fail:               return "coverage_threshold_failure"
     if test_fail:              return "test_failure"
-    return "coverage_threshold_failure"
+    return "collection_errors"
 
-def collect_coverage(target_paths: List[Path]) -> pd.DataFrame:
+def _load_precomputed(repo: Path, precomputed_dir: Path) -> Optional[Dict[str, Any]]:
+    f = precomputed_dir / f"{repo.name}.json"
+    if not f.exists():
+        return None
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return None
+        # Raw coverage.py JSON format (from pytest --cov-report=json) has a
+        # "totals" key. Translate it into the pre-processed field names that
+        # collect_coverage() expects.
+        if "totals" in data and "coverage_pct" not in data:
+            t = data["totals"]
+            return {
+                "coverage_pct":       t.get("percent_covered"),
+                "statements":         t.get("num_statements"),
+                "missed":             t.get("missing_lines"),
+                "branches":           t.get("num_branches"),
+                "partial_branches":   t.get("num_partial_branches"),
+                "returncode":         0,
+                "total_line":         None,
+                "stderr_tail":        None,
+            }
+        return data
+    except Exception:
+        return None
+
+
+def collect_coverage(
+    target_paths: List[Path],
+    precomputed_dir: Optional[Path] = None,
+) -> pd.DataFrame:
     rows: List[Dict[str, Any]] = []
+
+    if precomputed_dir and precomputed_dir.is_dir():
+        print(f"  Using pre-computed coverage from {precomputed_dir}")
+
+    pytest_ok = _pytest_available()
+    if not pytest_ok and not (precomputed_dir and precomputed_dir.is_dir()):
+        print("  ⚠ pytest not found in this Python environment — coverage skipped")
+
     for repo in target_paths:
         row: Dict[str, Any] = {
             "repo": repo.name, "path": str(repo), "status": "ok",
@@ -300,20 +453,76 @@ def collect_coverage(target_paths: List[Path]) -> pd.DataFrame:
         }
         if not repo.exists():
             row["status"] = "missing_path"; rows.append(row); continue
+
+        if precomputed_dir and precomputed_dir.is_dir():
+            precomp = _load_precomputed(repo, precomputed_dir)
+            if precomp is not None:
+                for k in ("returncode", "statements", "missed", "branches",
+                          "partial_branches", "coverage_pct", "total_line",
+                          "stderr_tail"):
+                    if k in precomp:
+                        row[k] = precomp[k]
+                if row["coverage_pct"] is not None:
+                    row["coverage_band"] = _classify_coverage_band(row["coverage_pct"])
+                    row["status"] = _classify_status(
+                        row.get("returncode"), row.get("total_line"),
+                        row["coverage_pct"], row["fail_under"],
+                        precomp.get("stdout_tail") or "",
+                        precomp.get("stderr_tail") or "",
+                    )
+                else:
+                    row["status"] = precomp.get("status", "no_total_found")
+                rows.append(row)
+                continue
+
+        if not pytest_ok:
+            row["status"] = "skipped_no_pytest"; rows.append(row); continue
         if not _has_pytest_project(repo):
             row["status"] = "skipped_no_pytest_project"; rows.append(row); continue
         try:
-            proc = subprocess.run(COVERAGE_CMD, cwd=str(_pytest_cwd(repo)),
-                                  capture_output=True, text=True)
+            cwd = _pytest_cwd(repo)
+            cov_args = _cov_source_args(cwd)
+            env = _subprocess_env(cwd)
+
+            def _run_and_parse(noconftest: bool) -> tuple:
+                _proc = subprocess.run(
+                    _coverage_cmd(cov_args=cov_args, noconftest=noconftest),
+                    cwd=str(cwd), env=env,
+                    capture_output=True, text=True, timeout=300,
+                )
+                _total = _extract_total_line(_proc.stdout)
+                _cov   = None
+                if not _total:
+                    _cov = _parse_coverage_json(cwd)
+                return _proc, _total, _cov
+
+            proc, total_line, cov_data = _run_and_parse(noconftest=False)
+
+            if total_line is None and cov_data is None:
+                conftest_err = ("ImportError while loading conftest" in proc.stderr
+                                or "ERROR while loading conftest" in proc.stderr
+                                or "while loading conftest" in proc.stderr)
+                if conftest_err:
+                    proc, total_line, cov_data = _run_and_parse(noconftest=True)
+                    if total_line or cov_data:
+                        row["stderr_tail"] = ("conftest skipped (import error) — "
+                                              + (row["stderr_tail"] or ""))
+
             row["returncode"] = proc.returncode
-            row["stderr_tail"] = _stderr_tail(proc.stderr)
-            total_line = _extract_total_line(proc.stdout)
-            row["total_line"] = total_line
-            if total_line:
+            if not row.get("stderr_tail"):
+                row["stderr_tail"] = _stderr_tail(proc.stderr)
+
+            if total_line and total_line != "json":
+                row["total_line"] = total_line
                 row.update(_parse_total_line(total_line))
+            elif cov_data:
+                row["total_line"] = "json"
+                row.update(cov_data)
+
+            if row["coverage_pct"] is not None:
                 row["coverage_band"] = _classify_coverage_band(row["coverage_pct"])
                 row["status"] = _classify_status(
-                    proc.returncode, total_line, row["coverage_pct"],
+                    proc.returncode, row["total_line"], row["coverage_pct"],
                     row["fail_under"], proc.stdout, proc.stderr)
             else:
                 row["status"] = "no_total_found"
@@ -351,10 +560,6 @@ def _parse_disk(raw: Dict[str, Any]) -> DiskHealth:
     )
 
 def fetch_health(base_url: str, timeout_s: float = 5.0) -> EcosystemHealth:
-    """
-    Fetch /summary from the Control Center. Never raises — returns
-    UNREACHABLE status if the API is offline so the report still generates.
-    """
     url = base_url.rstrip("/") + "/summary"
     try:
         req = urllib.request.Request(
@@ -381,187 +586,346 @@ def fetch_health(base_url: str, timeout_s: float = 5.0) -> EcosystemHealth:
 
 
 # ==============================================================================
-# Architecture tab — SVG
+# Architecture tab — improved wide SVG
 # ==============================================================================
-
-_ARCH_LANES: List[Tuple[str, str, str]] = [
-    ("Dev / Clients",  "#3B82F6", "#EFF6FF"),
-    ("Workbench",      "#10B981", "#ECFDF5"),
-    ("Services",       "#F59E0B", "#FFFBEB"),
-    ("Execution",      "#EF4444", "#FEF2F2"),
-    ("Tool Runners",   "#8B5CF6", "#F5F3FF"),
-]
-_LANE_INDEX: Dict[str, int] = {n: i for i, (n, _, _) in enumerate(_ARCH_LANES)}
-
-_NODE_DEFS: Dict[str, Tuple[str, int]] = {
-    "omnibioai-videos":           ("Dev / Clients", 0),  # The new entry point
-    "omnibioai-studio":           ("Dev / Clients", 0),  # The new entry point
-    "omnibioai-dev-hub":         ("Dev / Clients", 0),  # The old entry point, still relevant
-    "omnibioai-dev-docker":       ("Dev / Clients", 1),
-    "omnibioai_sdk":              ("Dev / Clients", 2),
-    "omnibioai":                  ("Workbench",     1),
-    "omnibioai-lims":             ("Workbench",     3),
-    "omnibioai-rag":              ("Workbench",     4),
-    "omnibioai-workflow-bundles": ("Workbench",     5),
-    "omnibioai-control-center":   ("Workbench",     6),
-    "omnibioai-toolserver":       ("Services",      0),
-    "omnibioai-model-registry":   ("Services",      2),
-    "omnibioai-tes":              ("Execution",     1),
-    "omnibioai-tool-runtime":     ("Tool Runners",  1),
-    "omnibioai-tool-images":      ("Tool Runners",  3),
-
-}
-
-_ARCH_EDGES: List[Tuple[str, str, bool]] = [
-    # New Studio Edges
-    ("omnibioai-videos",           "omnibioai",               False),
-    ("omnibioai-studio",           "omnibioai",               False),
-    ("omnibioai-dev-hub",          "omnibioai",               False),
-    ("omnibioai-studio",           "omnibioai-rag",           True),
-    ("omnibioai-dev-docker",       "omnibioai",               False),
-    ("omnibioai_sdk",              "omnibioai",               False),
-    ("omnibioai",                  "omnibioai-lims",          True),
-    ("omnibioai",                  "omnibioai-rag",           True),
-    ("omnibioai",                  "omnibioai-workflow-bundles", True),
-    ("omnibioai",                  "omnibioai-toolserver",    False),
-    ("omnibioai",                  "omnibioai-model-registry",False),
-    ("omnibioai-toolserver",       "omnibioai-model-registry",False),
-    ("omnibioai-toolserver",       "omnibioai-tes",           False),
-    ("omnibioai-tes",              "omnibioai-tool-runtime",  False),
-    ("omnibioai-tool-images",      "omnibioai-tool-runtime",  False),
-    ("omnibioai-control-center",   "omnibioai",               False),
-    ("omnibioai-control-center",   "omnibioai-tes",           False),
-    ("omnibioai-control-center",   "omnibioai-toolserver",    False),
-]
-
-_LW, _LG, _LP, _LTOP, _BH, _BG, _SLOTS = 176, 20, 14, 56, 54, 14, 7
-_DH = _LTOP + _SLOTS * (_BH + _BG) + 20
-_DW = len(_ARCH_LANES) * (_LW + _LG) - _LG
-
-def _lx(lane: str) -> int:
-    return _LANE_INDEX[lane] * (_LW + _LG)
-
-def _slot_cy(slot: int) -> int:
-    return _LTOP + slot * (_BH + _BG) + _BH // 2
-
-def _node_rect(lane: str, slot: int) -> Tuple[int, int, int, int]:
-    return _lx(lane) + _LP, _LTOP + slot * (_BH + _BG), _LW - 2 * _LP, _BH
-
-def _short(name: str) -> str:
-    for full, short in [
-        ("omnibioai-videos",     "videos"),
-        ("omnibioai-studio",           "studio"),
-        ("omnibioai-dev-hub",         "dev-hub"),
-        ("omnibioai-workflow-bundles", "workflow-bundles"),
-        ("omnibioai-model-registry",   "model-registry"),
-        ("omnibioai-tool-runtime",     "tool-runtime"),
-        ("omnibioai-control-center",   "control-center"),
-        ("omnibioai-toolserver",       "toolserver"),
-        ("omnibioai-dev-docker",       "dev-docker"),
-        ("omnibioai-lims",             "lims"),
-        ("omnibioai-rag",              "rag"),
-        ("omnibioai-tes",              "tes"),
-        ("omnibioai_sdk",              "sdk"),
-    ]:
-        if name == full: return short
-    return name
 
 def architecture_section_html(
     project_totals: Dict[str, Totals],
     nodes_present: List[str],
 ) -> str:
-    present = set(nodes_present)
-    lane_svg = ""
-    for lane_name, accent, bg in _ARCH_LANES:
-        x = _lx(lane_name)
-        lane_svg += (
-            f'<rect x="{x}" y="0" width="{_LW}" height="{_DH}" rx="10" '
-            f'fill="{bg}" stroke="{accent}" stroke-width="0.8" stroke-opacity="0.4"/>\n'
-            f'<rect x="{x}" y="0" width="{_LW}" height="5" rx="3" fill="{accent}" opacity="0.75"/>\n'
-            f'<text x="{x + _LW // 2}" y="34" text-anchor="middle" '
-            f'font-size="11" font-weight="600" fill="{accent}">{lane_name}</text>\n'
+    """
+    Renders a full-width 1200px SVG architecture diagram with five lanes:
+      Dev/Clients | Security Control Plane | Workbench | Services | Execution
+
+    The security control plane lane is visually elevated (taller, red accent)
+    to signal the zero-trust enforcement boundary.
+    """
+
+    def _loc(name: str) -> str:
+        """Return 'X LOC' string for a repo, or empty string if not found."""
+        t = project_totals.get(name, Totals())
+        return f"{t.code:,} LOC" if t.code else ""
+
+    def _node(nx: int, ny: int, nw: int, nh: int,
+              fill: str, stroke: str, title: str, sub: str,
+              onclick_query: str) -> str:
+        cx = nx + nw // 2
+        ty = ny + nh // 2 - 8
+        sy = ny + nh // 2 + 10
+        return (
+            f'<g style="cursor:pointer" onclick="(function(){{var q={json.dumps(onclick_query)};'
+            f'if(window.sendPrompt)window.sendPrompt(q);else window.open(\'https://github.com/man4ish/\'+q,\'_blank\')}})()">'
+            f'<rect x="{nx}" y="{ny}" width="{nw}" height="{nh}" rx="8" '
+            f'fill="{fill}" stroke="{stroke}" stroke-width="0.8"/>'
+            f'<text x="{cx}" y="{ty}" text-anchor="middle" '
+            f'font-size="13" font-weight="600" font-family="IBM Plex Sans,Arial,sans-serif" '
+            f'fill="{stroke}">{title}</text>'
+            f'<text x="{cx}" y="{sy}" text-anchor="middle" '
+            f'font-size="11" font-family="IBM Plex Sans,Arial,sans-serif" '
+            f'fill="{stroke}" opacity="0.75">{sub}</text>'
+            f'</g>'
         )
 
-    node_centers: Dict[str, Tuple[int, int]] = {}
-    box_svg = ""
-    for n in nodes_present:
-        if n not in _NODE_DEFS: continue
-        lane_name, slot = _NODE_DEFS[n]
-        _, accent, _ = _ARCH_LANES[_LANE_INDEX[lane_name]]
-        bx, by, bw, bh = _node_rect(lane_name, slot)
-        cx, cy = bx + bw // 2, by + bh // 2
-        node_centers[n] = (cx, cy)
-        tot = project_totals.get(n, Totals())
-        loc = f"{tot.code:,} LOC" if tot.code else ""
-        is_hub = n == "omnibioai"
-        box_svg += (
-            f'<rect x="{bx+2}" y="{by+2}" width="{bw}" height="{bh}" rx="7" fill="rgba(0,0,0,0.06)"/>\n'
-            f'<rect x="{bx}" y="{by}" width="{bw}" height="{bh}" rx="7" fill="white" '
-            f'stroke="{accent}" stroke-width="{"2" if is_hub else "1"}" '
-            f'stroke-opacity="{"0.9" if is_hub else "0.45"}"/>\n'
-            f'<rect x="{bx}" y="{by+8}" width="4" height="{bh-16}" rx="2" fill="{accent}" opacity="0.8"/>\n'
-            f'<text x="{bx+12}" y="{cy - 8 if loc else cy + 5}" font-size="11" '
-            f'font-weight="{"700" if is_hub else "600"}" fill="#111827">{_short(n)}</text>\n'
+    def _line(x1, y1, x2, y2, color, width=2.0, dash="") -> str:
+        dash_attr = f'stroke-dasharray="{dash}"' if dash else ""
+        return (
+            f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" '
+            f'stroke="{color}" stroke-width="{width}" {dash_attr} '
+            f'marker-end="url(#arch-arrow)"/>'
         )
-        if loc:
-            box_svg += f'<text x="{bx+12}" y="{cy+10}" font-size="10" fill="#6B7280">{loc}</text>\n'
-        tip = f"{n}&#10;Files: {tot.files:,} · Code: {tot.code:,} LOC"
-        box_svg += f'<title>{tip}</title>\n'
 
-    ECOL = "rgba(55,65,81,0.5)"
-    edge_svg = ""
-    for a, b, bidir in _ARCH_EDGES:
-        if a not in present or b not in present: continue
-        if a not in node_centers or b not in node_centers: continue
-        ax, ay = node_centers[a]
-        bx2, by2 = node_centers[b]
-        a_lane = _NODE_DEFS.get(a, ("", 0))[0]
-        b_lane = _NODE_DEFS.get(b, ("", 0))[0]
-        bw_half = (_LW - 2 * _LP) // 2
-        same_lane = a_lane == b_lane
-        if same_lane:
-            ox = _lx(a_lane) + _LW + 12
-            off = 6 if bidir else 0
-            d = f"M {ax+bw_half} {ay+off} L {ox} {ay+off} L {ox} {by2+off} L {bx2+bw_half} {by2+off}"
-            edge_svg += f'<path d="{d}" fill="none" stroke="{ECOL}" stroke-width="1.3" marker-end="url(#arr)"/>\n'
-            if bidir:
-                d2 = f"M {bx2+bw_half} {by2-6} L {ox+8} {by2-6} L {ox+8} {ay-6} L {ax+bw_half} {ay-6}"
-                edge_svg += f'<path d="{d2}" fill="none" stroke="{ECOL}" stroke-width="1.3" marker-end="url(#arr)"/>\n'
-        else:
-            going_r = bx2 > ax
-            sx = ax + bw_half if going_r else ax - bw_half
-            ex = bx2 - bw_half if going_r else bx2 + bw_half
-            mid = (sx + ex) // 2
-            off = 6 if bidir else 0
-            d = f"M {sx} {ay+off} L {mid} {ay+off} L {mid} {by2+off} L {ex} {by2+off}"
-            edge_svg += f'<path d="{d}" fill="none" stroke="{ECOL}" stroke-width="1.3" marker-end="url(#arr)"/>\n'
-            if bidir:
-                d2 = f"M {ex} {by2-6} L {mid-8} {by2-6} L {mid-8} {ay-6} L {sx} {ay-6}"
-                edge_svg += f'<path d="{d2}" fill="none" stroke="{ECOL}" stroke-width="1.3" marker-end="url(#arr)"/>\n'
+    def _path(d: str, color: str, width=0.8, dash="", opacity=1.0) -> str:
+        dash_attr = f'stroke-dasharray="{dash}"' if dash else ""
+        return (
+            f'<path d="{d}" fill="none" stroke="{color}" '
+            f'stroke-width="{width}" {dash_attr} opacity="{opacity}" '
+            f'marker-end="url(#arch-arrow)"/>'
+        )
 
-    legend = "".join(
-        f'<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#374151;">'
-        f'<span style="width:10px;height:10px;border-radius:2px;background:{acc};display:inline-block;"></span>'
-        f'{ln}</span>'
-        for ln, acc, _ in _ARCH_LANES
-    )
-    svg = (
-        f'<svg width="100%" viewBox="0 0 {_DW} {_DH}" xmlns="http://www.w3.org/2000/svg" '
-        f'style="display:block;font-family:\'IBM Plex Sans\',Arial,sans-serif;">\n'
-        f'<defs><marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" '
-        f'markerWidth="6" markerHeight="6" orient="auto-start-reverse">'
-        f'<path d="M2 1L8 5L2 9" fill="none" stroke="{ECOL}" '
-        f'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'
-        f'</marker></defs>\n'
-        f'{lane_svg}{edge_svg}{box_svg}</svg>'
-    )
+    # ── Lane geometry ──────────────────────────────────────────────────────────
+    # viewBox: 1200 x 620
+    # Lane x positions and widths
+    L1_X, L1_W = 12,  196   # Dev / Clients
+    L2_X, L2_W = 218, 220   # Security Control Plane (elevated)
+    L3_X, L3_W = 448, 196   # Workbench
+    L4_X, L4_W = 654, 220   # Services
+    L5_X, L5_W = 884, 304   # Execution
+
+    LANE_H    = 460
+    SEC_H     = 490   # security lane is taller
+    LANE_TOP  = 44
+    SEC_TOP   = 30
+
+    # Node geometry
+    NW1 = L1_W - 24   # node width for dev lane
+    NW2 = L2_W - 24   # security lane
+    NW3 = L3_W - 24   # workbench
+    NW4 = L4_W - 24   # services
+    NW5 = L5_W - 24   # execution
+    NH  = 52           # node height
+    NP  = 16           # padding between nodes
+    NY0 = 106          # first node y
+
+    def nx(lx, lw, nw): return lx + (lw - nw) // 2
+
+    # Row y positions
+    rows = [NY0 + i * (NH + NP) for i in range(6)]
+
+    # ── Color palette ──────────────────────────────────────────────────────────
+    BLUE_FILL   = "#E6F1FB"; BLUE_STR   = "#185FA5"
+    RED_FILL    = "#FCEBEB"; RED_STR    = "#A32D2D"
+    TEAL_FILL   = "#E1F5EE"; TEAL_STR   = "#0F6E56"
+    AMBER_FILL  = "#FAEEDA"; AMBER_STR  = "#854F0B"
+    PURPLE_FILL = "#EEEDFE"; PURPLE_STR = "#3C3489"
+    GRAY_STR    = "#6B7280"
+
+    svg = f'''<svg width="100%" viewBox="0 0 1200 640"
+  xmlns="http://www.w3.org/2000/svg"
+  style="display:block;font-family:'IBM Plex Sans',Arial,sans-serif;">
+<title>OmniBioAI Ecosystem Architecture</title>
+<desc>Five-lane architecture: Dev/Clients, Security Control Plane (zero-trust boundary), Workbench, Services, Execution</desc>
+<defs>
+  <marker id="arch-arrow" viewBox="0 0 10 10" refX="8" refY="5"
+    markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Lane backgrounds
+═══════════════════════════════════════════════════════════════ -->
+
+<!-- Dev / Clients -->
+<rect x="{L1_X}" y="{LANE_TOP}" width="{L1_W}" height="{LANE_H}"
+  rx="12" fill="{BLUE_FILL}" stroke="{BLUE_STR}" stroke-width="0.5" stroke-opacity="0.4"/>
+<rect x="{L1_X}" y="{LANE_TOP}" width="{L1_W}" height="6" rx="3" fill="{BLUE_STR}" opacity="0.7"/>
+<text x="{L1_X + L1_W//2}" y="72" text-anchor="middle"
+  font-size="14" font-weight="600" fill="{BLUE_STR}">Dev / clients</text>
+
+<!-- Security Control Plane — elevated, red accent, taller -->
+<rect x="{L2_X}" y="{SEC_TOP}" width="{L2_W}" height="{SEC_H}"
+  rx="12" fill="{RED_FILL}" stroke="{RED_STR}" stroke-width="1.2" stroke-opacity="0.7"/>
+<rect x="{L2_X}" y="{SEC_TOP}" width="{L2_W}" height="7" rx="3" fill="{RED_STR}" opacity="0.85"/>
+<text x="{L2_X + L2_W//2}" y="56" text-anchor="middle"
+  font-size="14" font-weight="600" fill="{RED_STR}">🔐 Security control plane</text>
+<text x="{L2_X + L2_W//2}" y="72" text-anchor="middle"
+  font-size="11" fill="{RED_STR}" opacity="0.8">zero-trust boundary</text>
+
+<!-- Workbench -->
+<rect x="{L3_X}" y="{LANE_TOP}" width="{L3_W}" height="{LANE_H}"
+  rx="12" fill="{TEAL_FILL}" stroke="{TEAL_STR}" stroke-width="0.5" stroke-opacity="0.4"/>
+<rect x="{L3_X}" y="{LANE_TOP}" width="{L3_W}" height="6" rx="3" fill="{TEAL_STR}" opacity="0.7"/>
+<text x="{L3_X + L3_W//2}" y="72" text-anchor="middle"
+  font-size="14" font-weight="600" fill="{TEAL_STR}">Workbench</text>
+
+<!-- Services -->
+<rect x="{L4_X}" y="{LANE_TOP}" width="{L4_W}" height="{LANE_H}"
+  rx="12" fill="{AMBER_FILL}" stroke="{AMBER_STR}" stroke-width="0.5" stroke-opacity="0.4"/>
+<rect x="{L4_X}" y="{LANE_TOP}" width="{L4_W}" height="6" rx="3" fill="{AMBER_STR}" opacity="0.7"/>
+<text x="{L4_X + L4_W//2}" y="72" text-anchor="middle"
+  font-size="14" font-weight="600" fill="{AMBER_STR}">Services</text>
+
+<!-- Execution -->
+<rect x="{L5_X}" y="{LANE_TOP}" width="{L5_W}" height="{LANE_H}"
+  rx="12" fill="{PURPLE_FILL}" stroke="{PURPLE_STR}" stroke-width="0.5" stroke-opacity="0.4"/>
+<rect x="{L5_X}" y="{LANE_TOP}" width="{L5_W}" height="6" rx="3" fill="{PURPLE_STR}" opacity="0.7"/>
+<text x="{L5_X + L5_W//2}" y="72" text-anchor="middle"
+  font-size="14" font-weight="600" fill="{PURPLE_STR}">Execution</text>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Enforced request path label + arrows
+═══════════════════════════════════════════════════════════════ -->
+<text x="600" y="90" text-anchor="middle" font-size="11"
+  fill="{RED_STR}" font-family="IBM Plex Sans,Arial,sans-serif">enforced request path →</text>
+{_line(L1_X+L1_W+2,  96, L2_X-2,  96, RED_STR, 2.5)}
+{_line(L2_X+L2_W+2,  96, L3_X-2,  96, RED_STR, 2.5)}
+{_line(L3_X+L3_W+2,  96, L4_X-2,  96, RED_STR, 2.5)}
+{_line(L4_X+L4_W+2,  96, L5_X-2,  96, RED_STR, 2.5)}
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Dev / Clients nodes
+═══════════════════════════════════════════════════════════════ -->
+{_node(nx(L1_X,L1_W,NW1), rows[0], NW1, NH, BLUE_FILL, BLUE_STR,
+       "studio", f"Electron · v0.2.0 · {_loc('omnibioai-studio')}",
+       "omnibioai-studio")}
+{_node(nx(L1_X,L1_W,NW1), rows[1], NW1, NH, BLUE_FILL, BLUE_STR,
+       "dev-hub", f"knowledge graph · {_loc('omnibioai-dev-hub')}",
+       "omnibioai-dev-hub")}
+{_node(nx(L1_X,L1_W,NW1), rows[2], NW1, NH, BLUE_FILL, BLUE_STR,
+       "sdk", f"Python SDK · :5190 · {_loc('omnibioai_sdk')}",
+       "omnibioai_sdk")}
+{_node(nx(L1_X,L1_W,NW1), rows[3], NW1, NH, BLUE_FILL, BLUE_STR,
+       "iam-client", f"auth SDK · Redis cache · {_loc('omnibioai-iam-client')}",
+       "omnibioai-iam-client")}
+{_node(nx(L1_X,L1_W,NW1), rows[4], NW1, NH, BLUE_FILL, BLUE_STR,
+       "security-sdk", f"policy client · decorator · {_loc('omnibioai-security-sdk')}",
+       "omnibioai-security-sdk")}
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Security Control Plane nodes
+═══════════════════════════════════════════════════════════════ -->
+{_node(nx(L2_X,L2_W,NW2), rows[0], NW2, NH, RED_FILL, RED_STR,
+       "api-gateway", f":8080 · JWT · trace propagation · {_loc('omnibioai-api-gateway')}",
+       "omnibioai-api-gateway")}
+{_node(nx(L2_X,L2_W,NW2), rows[1], NW2, NH, RED_FILL, RED_STR,
+       "auth-service", f":8001 · bcrypt · JWT · pub/sub · {_loc('omnibioai-auth')}",
+       "omnibioai-auth")}
+{_node(nx(L2_X,L2_W,NW2), rows[2], NW2, NH, RED_FILL, RED_STR,
+       "policy-engine", f":8002 · RBAC/ABAC · Redis cache · {_loc('omnibioai-policy-engine')}",
+       "omnibioai-policy-engine")}
+{_node(nx(L2_X,L2_W,NW2), rows[3], NW2, NH, RED_FILL, RED_STR,
+       "hpc-policy-engine", f":8003 · GPU/CPU quota · {_loc('omnibioai-hpc-policy-engine')}",
+       "omnibioai-hpc-policy-engine")}
+{_node(nx(L2_X,L2_W,NW2), rows[4], NW2, NH, RED_FILL, RED_STR,
+       "security-audit", f":8004 · Redis streams · fail open · {_loc('omnibioai-security-audit')}",
+       "omnibioai-security-audit")}
+
+<!-- Fail policy note inside security lane -->
+<text x="{L2_X + L2_W//2}" y="{rows[4] + NH + 22}" text-anchor="middle"
+  font-size="10" fill="{RED_STR}" opacity="0.85"
+  font-family="IBM Plex Sans,Arial,sans-serif">
+  auth / policy / HPC → fail closed · audit → fail open
+</text>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Workbench nodes
+═══════════════════════════════════════════════════════════════ -->
+{_node(nx(L3_X,L3_W,NW3), rows[0], NW3, NH, TEAL_FILL, TEAL_STR,
+       "omnibioai", f"Django · 313k LOC · 80+ plugins",
+       "omnibioai")}
+{_node(nx(L3_X,L3_W,NW3), rows[1], NW3, NH, TEAL_FILL, TEAL_STR,
+       "lims", f"lab data · Django · :7000 · {_loc('omnibioai-lims')}",
+       "omnibioai-lims")}
+{_node(nx(L3_X,L3_W,NW3), rows[2], NW3, NH, TEAL_FILL, TEAL_STR,
+       "rag", f"PubMed · DeepSeek · :8090 · {_loc('omnibioai-rag')}",
+       "omnibioai-rag")}
+{_node(nx(L3_X,L3_W,NW3), rows[3], NW3, NH, TEAL_FILL, TEAL_STR,
+       "workflow-bundles", f"WDL · Nextflow · CWL · {_loc('omnibioai-workflow-bundles')}",
+       "omnibioai-workflow-bundles")}
+{_node(nx(L3_X,L3_W,NW3), rows[4], NW3, NH, TEAL_FILL, TEAL_STR,
+       "control-center", f"health · Docker imgs · :7070 · {_loc('omnibioai-control-center')}",
+       "omnibioai-control-center")}
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Services nodes
+═══════════════════════════════════════════════════════════════ -->
+{_node(nx(L4_X,L4_W,NW4), rows[0], NW4, NH, AMBER_FILL, AMBER_STR,
+       "toolserver", f"FastAPI · bio tools · :9090 · {_loc('omnibioai-toolserver')}",
+       "omnibioai-toolserver")}
+{_node(nx(L4_X,L4_W,NW4), rows[1], NW4, NH, AMBER_FILL, AMBER_STR,
+       "model-registry", f"ML versioning · MySQL · :8095 · {_loc('omnibioai-model-registry')}",
+       "omnibioai-model-registry")}
+{_node(nx(L4_X,L4_W,NW4), rows[2], NW4, NH, AMBER_FILL, AMBER_STR,
+       "OPA", "Open Policy Agent · :8181",
+       "OPA policy rules")}
+{_node(nx(L4_X,L4_W,NW4), rows[3], NW4, NH, AMBER_FILL, AMBER_STR,
+       "ollama", "local LLM · Llama/DeepSeek · :11434",
+       "ollama local inference")}
+{_node(nx(L4_X,L4_W,NW4), rows[4], NW4, NH, AMBER_FILL, AMBER_STR,
+       "videos · sdk-launcher", "tutorials · :8086 · :5190",
+       "omnibioai-videos")}
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Execution nodes
+═══════════════════════════════════════════════════════════════ -->
+{_node(nx(L5_X,L5_W,NW5), rows[0], NW5, NH, PURPLE_FILL, PURPLE_STR,
+       "tes", f"Slurm · AWS Batch · Azure · GCP · K8s · {_loc('omnibioai-tes')}",
+       "omnibioai-tes")}
+{_node(nx(L5_X,L5_W,NW5), rows[1], NW5, NH, PURPLE_FILL, PURPLE_STR,
+       "tool-runtime", f"Docker · Singularity · GCS · S3 · {_loc('omnibioai-tool-runtime')}",
+       "omnibioai-tool-runtime")}
+{_node(nx(L5_X,L5_W,NW5), rows[2], NW5, NH, PURPLE_FILL, PURPLE_STR,
+       "tool-images", f"80+ bio tools · ARM64 SIF · GHCR · {_loc('omnibioai-tool-images')}",
+       "omnibioai-tool-images")}
+{_node(nx(L5_X,L5_W,NW5), rows[3], NW5, NH, PURPLE_FILL, PURPLE_STR,
+       "dev-docker", f"DGX · GPU dev environment · {_loc('omnibioai-dev-docker')}",
+       "omnibioai-dev-docker")}
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Internal connector lines
+═══════════════════════════════════════════════════════════════ -->
+<!-- iam-client → auth-service (dashed blue) -->
+{_path(f"M{L1_X+L1_W} {rows[3]+NH//2} Q{L2_X-10} {rows[3]+NH//2} {L2_X-10} {rows[1]+NH//2} L{L2_X} {rows[1]+NH//2}",
+       BLUE_STR, 0.8, "4 3")}
+<!-- security-sdk → policy-engine (dashed blue) -->
+{_path(f"M{L1_X+L1_W} {rows[4]+NH//2} Q{L2_X-20} {rows[4]+NH//2} {L2_X-20} {rows[2]+NH//2} L{L2_X} {rows[2]+NH//2}",
+       BLUE_STR, 0.8, "4 3")}
+<!-- policy-engine → OPA (dashed amber) -->
+{_path(f"M{L2_X+L2_W} {rows[2]+NH//2} Q{L4_X-10} {rows[2]+NH//2} {L4_X} {rows[2]+NH//2}",
+       AMBER_STR, 0.8, "4 3")}
+<!-- Async audit arc -->
+{_path(f"M{L2_X+L2_W//2} {rows[4]+NH+5} L{L2_X+L2_W//2} {rows[4]+NH+38} L{L3_X+L3_W//2} {rows[4]+NH+38} L{L3_X+L3_W//2} {rows[4]+NH+5}",
+       RED_STR, 0.8, "4 3", 0.6)}
+<text x="{(L2_X+L2_W//2 + L3_X+L3_W//2)//2}" y="{rows[4]+NH+54}"
+  text-anchor="middle" font-size="10" fill="{RED_STR}" opacity="0.8"
+  font-family="IBM Plex Sans,Arial,sans-serif">async audit (non-blocking)</text>
+<!-- TES → tool-runtime → tool-images vertical -->
+{_line(L5_X+L5_W//2, rows[0]+NH, L5_X+L5_W//2, rows[1], GRAY_STR, 0.8)}
+{_line(L5_X+L5_W//2, rows[1]+NH, L5_X+L5_W//2, rows[2], GRAY_STR, 0.8)}
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Stats strip
+═══════════════════════════════════════════════════════════════ -->
+<rect x="12" y="528" width="1176" height="58" rx="10"
+  fill="white" stroke="#E5E7EB" stroke-width="0.5"/>
+'''
+
+    # Stats items: (x, value, label, color)
+    stats = [
+        (90,   "3,331",   "files",           "#374151"),
+        (250,  "776,719", "total lines",     "#374151"),
+        (420,  "576,457", "code lines",      "#374151"),
+        (590,  "223",     "security tests",  "#374151"),
+        (750,  "100%",    "test coverage",   "#3B6D11"),
+        (910,  "20 / 20", "services healthy","#374151"),
+        (1060, "v0.2.0",  "OmniBioAI Studio","#3C3489"),
+        (1160, "zero-trust","JWT · RBAC · HPC","#A32D2D"),
+    ]
+    for sx, val, lbl, col in stats:
+        svg += (
+            f'<text x="{sx}" y="553" text-anchor="middle" font-size="14" '
+            f'font-weight="600" fill="{col}" '
+            f'font-family="IBM Plex Sans,Arial,sans-serif">{val}</text>'
+            f'<text x="{sx}" y="574" text-anchor="middle" font-size="11" '
+            f'fill="#9CA3AF" font-family="IBM Plex Sans,Arial,sans-serif">{lbl}</text>'
+        )
+
+    # Legend
+    svg += f'''
+<!-- ═══════════════════════════════════════════════════════════════
+     Legend
+═══════════════════════════════════════════════════════════════ -->
+<line x1="20" y1="610" x2="60" y2="610" stroke="{RED_STR}" stroke-width="2.5"
+  marker-end="url(#arch-arrow)"/>
+<text x="68" y="614" font-size="11" fill="#374151"
+  font-family="IBM Plex Sans,Arial,sans-serif">enforced request path</text>
+
+<line x1="260" y1="610" x2="300" y2="610" stroke="{GRAY_STR}"
+  stroke-width="0.8" stroke-dasharray="4 3" marker-end="url(#arch-arrow)"/>
+<text x="308" y="614" font-size="11" fill="#374151"
+  font-family="IBM Plex Sans,Arial,sans-serif">internal / async call</text>
+
+<rect x="530" y="602" width="12" height="12" rx="2"
+  fill="{RED_FILL}" stroke="{RED_STR}" stroke-width="1"/>
+<text x="548" y="614" font-size="11" fill="#374151"
+  font-family="IBM Plex Sans,Arial,sans-serif">zero-trust boundary</text>
+
+<text x="900" y="614" font-size="11" fill="#9CA3AF"
+  font-family="IBM Plex Sans,Arial,sans-serif">click any node to explore ↗</text>
+
+</svg>'''
+
     return (
-        f'<div style="background:white;border:1px solid #E5E7EB;border-radius:12px;padding:20px;overflow-x:auto;">'
+        f'<div style="background:white;border:1px solid #E5E7EB;border-radius:12px;'
+        f'padding:20px;overflow-x:auto;">'
         f'<div style="display:flex;align-items:center;justify-content:space-between;'
         f'margin-bottom:16px;flex-wrap:wrap;gap:10px;">'
-        f'<div><div style="font-size:13px;font-weight:600;color:#111827;">Architecture — OmniBioAI Ecosystem</div>'
-        f'<div style="font-size:11px;color:#9CA3AF;margin-top:2px;">Hover any node for metrics</div></div>'
-        f'<div style="display:flex;gap:14px;flex-wrap:wrap;">{legend}</div></div>{svg}</div>'
+        f'<div><div style="font-size:13px;font-weight:600;color:#111827;">'
+        f'Architecture — OmniBioAI Ecosystem</div>'
+        f'<div style="font-size:11px;color:#9CA3AF;margin-top:2px;">'
+        f'Hover any node for metrics · click to explore</div></div>'
+        f'</div>{svg}</div>'
     )
 
 
@@ -748,13 +1112,25 @@ def _cov_color(pct: Optional[float]) -> str:
     return "#639922" if pct >= 95 else ("#BA7517" if pct >= 85 else "#E24B4A")
 
 def _badge(status: str) -> Tuple[str, str]:
-    if status == "ok": return "badge-green", "ok"
-    if any(x in status for x in ("skipped","missing","no_total")):
-        return "badge-gray", {"skipped_no_pytest_project":"skipped",
-                              "missing_path":"missing","no_total_found":"no total"}.get(status,status)
-    return "badge-amber", {"test_failure":"test failure",
-                           "coverage_threshold_failure":"cov threshold",
-                           "test_and_coverage_failure":"test + cov"}.get(status,status)
+    if status == "ok":
+        return "badge-green", "ok"
+    _gray_map = {
+        "skipped_no_pytest_project": "no tests",
+        "skipped_no_pytest":         "no pytest",
+        "missing_path":              "missing",
+        "no_total_found":            "no total",
+    }
+    if status in _gray_map or any(x in status for x in ("skipped", "missing", "no_total")):
+        return "badge-gray", _gray_map.get(status, status)
+    if status.startswith("error:"):
+        return "badge-amber", "error"
+    _amber_map = {
+        "test_failure":                "test failure",
+        "coverage_threshold_failure":  "cov threshold",
+        "test_and_coverage_failure":   "test + cov",
+        "collection_errors":           "partial (import errs)",
+    }
+    return "badge-amber", _amber_map.get(status, status)
 
 def coverage_section_html(df: pd.DataFrame, timestamp: str) -> str:
     valid       = df[df["coverage_pct"].notna()].copy()
@@ -941,7 +1317,6 @@ def _overall_banner(status: str) -> str:
     )
 
 def health_section_html(health: EcosystemHealth) -> str:
-    # ── Unreachable state ────────────────────────────────────────────────────
     if health.overall_status == "UNREACHABLE" or health.error:
         return f"""
 {_overall_banner("UNREACHABLE")}
@@ -958,7 +1333,6 @@ def health_section_html(health: EcosystemHealth) -> str:
 </div>
 """
 
-    # ── Counts ───────────────────────────────────────────────────────────────
     total_svc  = len(health.services)
     up_count   = sum(1 for s in health.services if s.status == "UP")
     down_count = sum(1 for s in health.services if s.status == "DOWN")
@@ -966,7 +1340,6 @@ def health_section_html(health: EcosystemHealth) -> str:
     disk_warn  = sum(1 for d in health.disk if d.status != "UP")
     checked_at = health.generated_at or "unknown"
 
-    # ── KPI strip ────────────────────────────────────────────────────────────
     def _kpi(accent, label, value, sub):
         return (
             f'<div style="background:white;border:1px solid #E5E7EB;border-radius:12px;'
@@ -988,14 +1361,12 @@ def health_section_html(health: EcosystemHealth) -> str:
                "Disk warnings", str(disk_warn), "paths checked")
     )
 
-    # ── Chart data ────────────────────────────────────────────────────────────
     donut_data   = [up_count, down_count, warn_count]
     donut_colors = '["#10B981","#EF4444","#F59E0B"]'
     donut_labels = '["UP","DOWN","WARN"]'
     lat_labels   = ",".join(f'"{s.name}"' for s in health.services if s.latency_ms is not None)
     lat_data     = ",".join(str(s.latency_ms) for s in health.services if s.latency_ms is not None)
 
-    # ── Service cards with UI links ───────────────────────────────────────────
     SERVICE_ICONS = {
         "mysql": ("🗄️", "#3B82F6"),
         "redis": ("⚡", "#EF4444"),
@@ -1016,7 +1387,6 @@ def health_section_html(health: EcosystemHealth) -> str:
             f'border-radius:6px;padding:4px 10px;text-decoration:none;margin-top:10px;">'
             f'Open UI &#8599;</a>'
         ) if s.ui_url else ""
-
         return (
             f'<div style="background:{bg};border:1.5px solid {border}33;'
             f'border-left:4px solid {border};border-radius:12px;padding:16px;">'
@@ -1038,7 +1408,6 @@ def health_section_html(health: EcosystemHealth) -> str:
 
     svc_cards = "".join(_svc_card(s) for s in health.services)
 
-    # ── Disk progress bars ────────────────────────────────────────────────────
     def _disk_bar(d: DiskHealth) -> str:
         import re as _re
         m = _re.search(r"([0-9.]+)%", d.message or "")
@@ -1077,11 +1446,9 @@ def health_section_html(health: EcosystemHealth) -> str:
   &nbsp;&middot;&nbsp; Source: Control Center
   <code style="font-size:11px;background:#F8FAFC;padding:1px 5px;border-radius:4px;">/summary</code>
 </div>
-
 <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:24px;">
   {kpis}
 </div>
-
 <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;margin-bottom:24px;">
   <div style="background:white;border:1px solid #E5E7EB;border-radius:12px;padding:20px;">
     <div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:4px;">Service Health</div>
@@ -1117,7 +1484,6 @@ def health_section_html(health: EcosystemHealth) -> str:
     <div style="position:relative;height:120px;"><canvas id="health-latency"></canvas></div>
   </div>
 </div>
-
 <script>
 registerChartInit('tab-health', function(){{
   new Chart(document.getElementById('health-donut'), {{
@@ -1160,7 +1526,6 @@ registerChartInit('tab-health', function(){{
   }});
 }});
 </script>
-
 <div style="font-size:12px;font-weight:600;color:#9CA3AF;text-transform:uppercase;
             letter-spacing:.06em;margin-bottom:12px;">Services</div>
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;">
@@ -1168,8 +1533,6 @@ registerChartInit('tab-health', function(){{
 </div>
 {disk_section}
 """
-
-
 
 
 # ==============================================================================
@@ -1190,7 +1553,7 @@ def build_report(
     total_all = grand.blank + grand.comment + grand.code
     doc_lines = language_totals.get("Markdown", Totals()).code
 
-    nodes_present = [n for n in _NODE_DEFS if n in project_totals]
+    nodes_present = list(project_totals.keys())
     arch_html  = architecture_section_html(project_totals, nodes_present)
     proj_html  = projects_section_html(project_totals, grand)
     lang_html  = languages_section_html(language_totals, grand)
@@ -1205,7 +1568,6 @@ def build_report(
   <title>{title}</title>
   {_CHARTJS}
   <script id="chart-registry">
-  // Must be defined BEFORE tab HTML runs so registerChartInit calls succeed
   var _chartInits = {{}};
   function registerChartInit(tabId, fn) {{ _chartInits[tabId] = fn; }}
   </script>
@@ -1213,8 +1575,7 @@ def build_report(
     @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&display=swap');
     *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{ font-family: 'IBM Plex Sans', Arial, sans-serif; background: #F1F5F9; color: #111827; }}
-    .page-wrap {{ max-width: 1320px; margin: 0 auto; padding: 32px 28px 48px; }}
-
+    .page-wrap {{ max-width: 1400px; margin: 0 auto; padding: 32px 28px 48px; }}
     .global-kpi {{ display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }}
     .global-kpi-card {{
       background: white; border: 1px solid #E5E7EB; border-radius: 12px;
@@ -1251,8 +1612,7 @@ def build_report(
   <div style="
     display:flex;align-items:flex-start;justify-content:space-between;
     gap:16px;flex-wrap:wrap;margin-bottom:22px;
-    padding:20px 24px;
-    border-radius:16px;
+    padding:20px 24px;border-radius:16px;
     background:
       radial-gradient(1100px 240px at 10% 0%, rgba(37,99,235,.16), transparent 60%),
       radial-gradient(900px 220px at 95% 15%, rgba(37,99,235,.10), transparent 55%),
@@ -1323,35 +1683,14 @@ def parse_args() -> argparse.Namespace:
         description="Generate OmniBioAI ecosystem report",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument(
-        "--root", type=Path, default=None,
-        help="Ecosystem root directory (default: parent of cwd if manage.py present, else cwd)",
-    )
-    p.add_argument(
-        "--targets", nargs="+", default=None,
-        help="Repo names to include (default: all DEFAULT_TARGETS)",
-    )
-    p.add_argument(
-        "--out", default=DEFAULT_OUT_RELPATH,
-        help=f"Output path relative to --root (default: {DEFAULT_OUT_RELPATH})",
-    )
-    p.add_argument(
-        "--title", default=DEFAULT_TITLE,
-        help="Report title",
-    )
-    p.add_argument(
-        "--control-center-url", default=DEFAULT_CONTROL_CENTER_URL,
-        dest="control_center_url",
-        help=f"Control Center base URL for health data (default: {DEFAULT_CONTROL_CENTER_URL})",
-    )
-    p.add_argument(
-        "--skip-health", action="store_true",
-        help="Skip health check (render Health tab as unreachable)",
-    )
-    p.add_argument(
-        "--skip-coverage", action="store_true",
-        help="Skip pytest coverage collection (faster, for code stats only)",
-    )
+    p.add_argument("--root", type=Path, default=None)
+    p.add_argument("--targets", nargs="+", default=None)
+    p.add_argument("--out", default=DEFAULT_OUT_RELPATH)
+    p.add_argument("--title", default=DEFAULT_TITLE)
+    p.add_argument("--control-center-url", default=DEFAULT_CONTROL_CENTER_URL,
+                   dest="control_center_url")
+    p.add_argument("--skip-health", action="store_true")
+    p.add_argument("--skip-coverage", action="store_true")
     return p.parse_args()
 
 
@@ -1369,7 +1708,7 @@ def generate_report(
     if not targets:
         targets = DEFAULT_TARGETS
 
-    target_paths = [ecosystem_root / t for t in targets]
+    target_paths = _resolve_target_paths(ecosystem_root, targets)
     validate_paths(target_paths)
 
     print("→ Running cloc across repos…")
@@ -1390,8 +1729,15 @@ def generate_report(
             "missed","branches","partial_branches","coverage_pct",
             "coverage_band","fail_under","total_line","stderr_tail"])
     else:
-        print("→ Collecting pytest coverage…")
-        coverage_df = collect_coverage(target_paths)
+        precomputed_dir = ecosystem_root / "out" / "coverage"
+        if precomputed_dir.is_dir():
+            print(f"→ Loading pre-computed coverage from {precomputed_dir} …")
+        else:
+            print("→ Collecting pytest coverage (live) …")
+        coverage_df = collect_coverage(
+            target_paths,
+            precomputed_dir=precomputed_dir if precomputed_dir.is_dir() else None,
+        )
 
     if skip_health:
         print("→ Skipping health check (--skip-health)")
@@ -1405,7 +1751,7 @@ def generate_report(
         print(f"  {status_icon} Overall: {health.overall_status}")
 
     out_html = ecosystem_root / out_relpath
-    print(f"→ Building report…")
+    print("→ Building report…")
     build_report(
         out_html=out_html, title=title, timestamp=ts,
         grand=grand, project_totals=project_totals,

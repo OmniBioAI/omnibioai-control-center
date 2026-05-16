@@ -1,49 +1,38 @@
 services:
   mysql:
     type: mysql
-    host: omnibioai-mysql
+    host: mysql
     port: 3306
-
   redis:
     type: redis
-    host: omnibioai-redis
+    host: redis
     port: 6379
-
   toolserver:
     type: http
-    url: http://omnibioai-toolserver:9090/health
+    url: http://toolserver:9090/health
     timeout_s: 2
-    ui_url: http://127.0.0.1:9090
-
+    ui_url: http://192.168.86.234:9090
   tes:
     type: http
-    url: http://omnibioai-tes:8081/health
+    url: http://tes:8081/health
     timeout_s: 2
-    ui_url: http://127.0.0.1:8081
-
-  omnibioai:
+    ui_url: http://192.168.86.234:8081
+  workbench:
     type: http
-    url: http://omnibioai-workbench:8000/health/
+    url: http://workbench:8000/health/
     timeout_s: 2
-    ui_url: http://127.0.0.1:8000
-
-  lims-x:
+    ui_url: http://192.168.86.234:8000
+  lims:
     type: http
-    url: http://lims-x:7000/
+    url: http://lims:7000/
     timeout_s: 2
-    ui_url: http://127.0.0.1:7000/core/
-
+    ui_url: http://192.168.86.234:7000
   model-registry:
     type: http
-    url: http://omnibioai-model-registry:8095/health
+    url: http://model-registry:8095/health
     timeout_s: 2
-    ui_url: http://127.0.0.1:8095
-
+    ui_url: http://192.168.86.234:8095
 system:
   disk_checks:
-    - path: /workspace/out
+    - path: /workspace
       warn_pct_free_below: 15
-    - path: /workspace/tmpdata
-      warn_pct_free_below: 10
-    - path: /workspace/local_registry
-      warn_pct_free_below: 10

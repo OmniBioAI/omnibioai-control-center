@@ -156,9 +156,10 @@ _DOCKER_INJECT_JS = r"""<style>
         '</div>' +
       '</div>' +
       '<div id="omni-d-pl" style="display:none">' +
+        '<div id="omni-d-pl-pills" class="omni-d-pills"></div>' +
         '<div class="omni-d-card"><table class="omni-d-table">' +
-          '<thead><tr><th>Plugin</th><th>Image</th><th>Local Status</th></tr></thead>' +
-          '<tbody id="omni-d-pl-tbody"><tr><td colspan="3" class="omni-d-loading">Scanning plugin images…</td></tr></tbody>' +
+          '<thead><tr><th>Plugin</th><th>Category</th><th>Image</th><th>Local Status</th><th>Size</th></tr></thead>' +
+          '<tbody id="omni-d-pl-tbody"><tr><td colspan="5" class="omni-d-loading">Scanning plugin images…</td></tr></tbody>' +
         '</table></div>' +
       '</div>';
     return el;
@@ -315,28 +316,38 @@ _DOCKER_INJECT_JS = r"""<style>
 
   async function omniLoadPl() {
     var tb = document.getElementById('omni-d-pl-tbody');
-    tb.innerHTML = '<tr><td colspan="3" class="omni-d-loading">Scanning plugin images…</td></tr>';
+    tb.innerHTML = '<tr><td colspan="5" class="omni-d-loading">Scanning plugin images…</td></tr>';
     try {
       var res = await fetch('/docker/plugin-images'), d = await res.json();
       var ps = d.plugins || [];
+      var pills = '';
+      if (d.present != null) pills += '<span class="omni-d-pill">' + ps.length + ' plugins</span>';
+      if (d.present != null) pills += '<span class="omni-d-pill" style="color:#059669">' + d.present + ' present</span>';
+      if (d.missing != null) pills += '<span class="omni-d-pill" style="color:#dc2626">' + d.missing + ' missing</span>';
+      document.getElementById('omni-d-pl-pills').innerHTML = pills;
       if (!ps.length) {
-        tb.innerHTML = '<tr><td colspan="3" class="omni-d-loading">No plugin docker_image references found</td></tr>';
+        tb.innerHTML = '<tr><td colspan="5" class="omni-d-loading">No plugins found</td></tr>';
         return;
       }
       var rows = '';
       for (var i = 0; i < ps.length; i++) {
         var p = ps[i], st = p.local_status || 'unknown';
-        var pbg = st === 'present' ? '#dcfce7' : st === 'missing' ? '#fee2e2' : '#f3f4f6';
-        var pcol = st === 'present' ? '#15803d' : st === 'missing' ? '#b91c1c' : '#6b7280';
+        var pbg = st === 'present' ? '#dcfce7' : '#fee2e2';
+        var pcol = st === 'present' ? '#15803d' : '#b91c1c';
+        var cc = CAT_COLORS[p.category] || ['#f3f4f6', '#6b7280'];
+        var szHtml = '—';
+        if (st === 'present' && p.size_mb > 0) { szHtml = p.size_mb >= 1024 ? (p.size_mb / 1024).toFixed(1) + ' GB' : p.size_mb + ' MB'; }
         rows += '<tr>' +
-          '<td style="font-weight:600;padding:10px 14px">' + omniEsc(p.plugin || '—') + '</td>' +
-          '<td style="font-size:11px;color:#6b7280;padding:10px 14px;font-family:monospace">' + omniEsc(p.image || '—') + '</td>' +
+          '<td style="font-weight:600;padding:10px 14px;white-space:nowrap">' + omniEsc(p.name || p.plugin || '—') + '</td>' +
+          '<td style="padding:10px 14px"><span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:99px;background:' + cc[0] + ';color:' + cc[1] + ';white-space:nowrap">' + omniEsc(p.category || 'general') + '</span></td>' +
+          '<td style="font-size:11px;color:#6b7280;padding:10px 14px;font-family:monospace;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + omniEsc(p.image || '—') + '</td>' +
           '<td style="padding:10px 14px"><span style="font-size:10px;font-weight:700;padding:3px 9px;border-radius:99px;background:' + pbg + ';color:' + pcol + '">' + st + '</span></td>' +
+          '<td style="font-size:11px;color:#6b7280;padding:10px 14px;font-family:monospace;white-space:nowrap">' + szHtml + '</td>' +
           '</tr>';
       }
       tb.innerHTML = rows;
     } catch(e) {
-      tb.innerHTML = '<tr><td colspan="3" style="text-align:center;padding:24px;color:#dc2626;font-size:12px">' + omniEsc(String(e)) + '</td></tr>';
+      tb.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:24px;color:#dc2626;font-size:12px">' + omniEsc(String(e)) + '</td></tr>';
     }
   }
 
@@ -918,6 +929,7 @@ def dashboard() -> str:
 
     <!-- C: Plugin Docker Images -->
     <div id="docker-panel-plugins" style="display:none;">
+      <div class="stat-pills" id="pl-pills"></div>
       <div class="omni-card">
         <div class="omni-card-h">
           <span class="omni-card-t">Plugin Docker Images</span>
@@ -925,8 +937,8 @@ def dashboard() -> str:
         </div>
         <div style="padding:0;">
           <table class="svc-table" style="width:100%;">
-            <thead><tr><th>Plugin</th><th>Image</th><th>Local Status</th></tr></thead>
-            <tbody id="pl-tbody"><tr><td colspan="3" class="loading-row">Loading&hellip;</td></tr></tbody>
+            <thead><tr><th>Plugin</th><th>Category</th><th>Image</th><th>Local Status</th><th>Size</th></tr></thead>
+            <tbody id="pl-tbody"><tr><td colspan="5" class="loading-row">Loading&hellip;</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -1181,25 +1193,34 @@ def dashboard() -> str:
 
   /* ── docker: plugin images ──────────────────────────────────── */
   async function loadPlugins(){
-    document.getElementById('pl-tbody').innerHTML='<tr><td colspan="3" class="loading-row">Scanning plugin images…</td></tr>';
+    document.getElementById('pl-tbody').innerHTML='<tr><td colspan="5" class="loading-row">Scanning plugin images…</td></tr>';
     try{
       var res=await fetch('/docker/plugin-images'),d=await res.json();
       var ps=d.plugins||[];
-      if(!ps.length){document.getElementById('pl-tbody').innerHTML='<tr><td colspan="3" class="loading-row">No plugin docker_image references found</td></tr>';return;}
+      var pills='';
+      if(d.present!=null)pills+='<span class="stat-pill">'+ps.length+' plugins</span>';
+      if(d.present!=null)pills+='<span class="stat-pill" style="color:#059669;">'+d.present+' present</span>';
+      if(d.missing!=null)pills+='<span class="stat-pill" style="color:#dc2626;">'+d.missing+' missing</span>';
+      document.getElementById('pl-pills').innerHTML=pills;
+      if(!ps.length){document.getElementById('pl-tbody').innerHTML='<tr><td colspan="5" class="loading-row">No plugins found</td></tr>';return;}
       var rows='';
       for(var i=0;i<ps.length;i++){
         var p=ps[i],st=p.local_status||'unknown';
-        var pbg=st==='present'?'#dcfce7':st==='missing'?'#fee2e2':'#f3f4f6';
-        var pcol=st==='present'?'#15803d':st==='missing'?'#b91c1c':'#6b7280';
+        var pbg=st==='present'?'#dcfce7':'#fee2e2';
+        var pcol=st==='present'?'#15803d':'#b91c1c';
+        var szHtml='—';
+        if(st==='present'&&p.size_mb>0){szHtml=p.size_mb>=1024?(p.size_mb/1024).toFixed(1)+' GB':p.size_mb+' MB';}
         rows+='<tr>'
-          +'<td style="font-weight:600;color:#111827;padding:10px 14px;">'+esc(p.plugin||'—')+'</td>'
-          +'<td class="mono" style="font-size:11px;color:#6b7280;padding:10px 14px;">'+esc(p.image||'—')+'</td>'
+          +'<td style="font-weight:600;color:#111827;padding:10px 14px;white-space:nowrap;">'+esc(p.name||p.plugin||'—')+'</td>'
+          +'<td style="padding:10px 14px;">'+catChip(p.category||'general')+'</td>'
+          +'<td class="mono target-cell" style="font-size:11px;color:#6b7280;padding:10px 14px;max-width:300px;">'+esc(p.image||'—')+'</td>'
           +'<td style="padding:10px 14px;"><span style="font-size:10px;font-weight:700;padding:3px 9px;border-radius:99px;background:'+pbg+';color:'+pcol+';">'+st+'</span></td>'
+          +'<td class="mono" style="font-size:11px;color:#6b7280;padding:10px 14px;white-space:nowrap;">'+szHtml+'</td>'
           +'</tr>';
       }
       document.getElementById('pl-tbody').innerHTML=rows;
     }catch(e){
-      document.getElementById('pl-tbody').innerHTML='<tr><td colspan="3" style="text-align:center;padding:24px;color:#dc2626;font-size:12px;">'+esc(String(e))+'</td></tr>';
+      document.getElementById('pl-tbody').innerHTML='<tr><td colspan="5" style="text-align:center;padding:24px;color:#dc2626;font-size:12px;">'+esc(String(e))+'</td></tr>';
     }
   }
 

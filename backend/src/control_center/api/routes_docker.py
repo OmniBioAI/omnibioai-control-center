@@ -126,39 +126,67 @@ def get_sif_images() -> JSONResponse:
     return JSONResponse({"images": result, "built": built, "missing": missing, "total_gb": total_gb})
 
 
+def _parse_docker_size_mb(size_str: str) -> float:
+    """Convert docker images Size string (e.g. '452MB', '1.48GB') to MB."""
+    s = size_str.strip()
+    try:
+        if s.endswith("GB"):
+            return round(float(s[:-2]) * 1024, 1)
+        if s.endswith("MB"):
+            return round(float(s[:-2]), 1)
+        if s.endswith("kB"):
+            return round(float(s[:-2]) / 1024, 1)
+        if s.endswith("B"):
+            return round(float(s[:-1]) / (1024 * 1024), 1)
+    except ValueError:
+        pass
+    return 0.0
+
+
 @router.get("/docker/plugin-images")
 def get_plugin_images() -> JSONResponse:
-    images_found: dict[str, dict] = {}
-    _IMG_RE = re.compile(
-        r'(?:docker_image|DOCKER_IMAGE|SCANPY_IMAGE|QC_IMAGE|WF_IMAGE|plugin_image|[A-Z_]*_IMAGE)\s*[=:]\s*["\']?([a-zA-Z0-9._/:-][^\s"\'#,}\]]+)["\']?'
-    )
+    # Collect all locally present images in a single docker call
+    local_images: dict[str, float] = {}  # image -> size_mb
+    try:
+        r = subprocess.run(
+            ["docker", "images", "--format", "{{json .}}"],
+            capture_output=True, text=True, timeout=30,
+        )
+        for line in r.stdout.strip().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                repo = obj.get("Repository", "")
+                tag = obj.get("Tag", "")
+                if repo and tag:
+                    local_images[f"{repo}:{tag}"] = _parse_docker_size_mb(obj.get("Size", "0B"))
+            except json.JSONDecodeError:
+                pass
+    except Exception:
+        pass
 
-    EXCLUDE_DIRS = {"work", "out", "tmpdata", "data", ".git", "__pycache__", "node_modules", "htmlcov", "obsolete", "backup_plugins", "backup"}
-
-    if _OMNIBIOAI_BASE.exists():
-        for ext in ("*.py", "*.yaml", "*.yml"):
-            for fpath in _OMNIBIOAI_BASE.rglob(ext):
-                # Skip runtime/output directories
-                if any(part in EXCLUDE_DIRS for part in fpath.parts):
-                    continue
-                try:
-                    content = fpath.read_text(encoding="utf-8", errors="ignore")
-                except OSError:
-                    continue
-                for match in _IMG_RE.finditer(content):
-                    img = match.group(1).strip().rstrip("'\"")
-                    if img and "/" in img or ":" in img:
-                        plugin = fpath.parent.name
-                        if img not in images_found:
-                            images_found[img] = {"plugin": plugin, "image": img, "local_status": "unknown"}
-
+    # Auto-discover all plugins from plugin.json files
     results: list[dict] = []
-    for img, info in images_found.items():
-        try:
-            r = subprocess.run(["docker", "image", "inspect", img], capture_output=True, timeout=10)
-            info["local_status"] = "present" if r.returncode == 0 else "missing"
-        except Exception:
-            info["local_status"] = "unknown"
-        results.append(info)
+    plugins_dir = _OMNIBIOAI_BASE / "plugins"
+    if plugins_dir.exists():
+        for plugin_json in sorted(plugins_dir.glob("*/plugin.json")):
+            try:
+                data = json.loads(plugin_json.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            slug = data.get("slug") or plugin_json.parent.name
+            image = f"ghcr.io/man4ish/omnibioai-plugin-{slug.replace('_', '-')}:latest"
+            size_mb = local_images.get(image, 0.0)
+            results.append({
+                "plugin": slug,
+                "name": data.get("name", slug),
+                "category": data.get("category", "general"),
+                "image": image,
+                "local_status": "present" if image in local_images else "missing",
+                "size_mb": size_mb,
+            })
 
-    return JSONResponse({"plugins": results})
+    present = sum(1 for r in results if r["local_status"] == "present")
+    return JSONResponse({"plugins": results, "present": present, "missing": len(results) - present})
