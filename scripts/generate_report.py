@@ -19,7 +19,7 @@ Options
 -------
 --root PATH              ecosystem root (default: auto-detect)
 --health-url URL         default http://127.0.0.1:7070 (alias: --control-center-url)
---out RELPATH            default out/reports/omnibioai_ecosystem_report.html
+--out RELPATH            default work/out/reports/omnibioai_ecosystem_report.html
 --skip-health            skip live health fetch
 --skip-coverage          skip pytest coverage collection
 """
@@ -61,7 +61,7 @@ DEFAULT_TARGETS = [
     "omnibioai-api-gateway", "omnibioai-hpc-policy-engine", "omnibioai-docs",
 ]
 
-DEFAULT_OUT_RELPATH        = "out/reports/omnibioai_ecosystem_report.html"
+DEFAULT_OUT_RELPATH        = "work/out/reports/omnibioai_ecosystem_report.html"
 DEFAULT_TITLE              = "OmniBioAI Ecosystem"
 DEFAULT_CONTROL_CENTER_URL = "http://127.0.0.1:7070"
 
