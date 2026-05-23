@@ -58,7 +58,7 @@ DEFAULT_TARGETS = [
     "omnibioai-tool-images", "omnibioai-studio", "omnibioai-dev-hub",
     "omnibioai-videos", "omnibioai-iam-client", "omnibioai-policy-engine",
     "omnibioai-security-audit", "omnibioai-security-sdk",
-    "omnibioai-api-gateway", "omnibioai-hpc-policy-engine", "omnibioai-docs",
+    "omnibioai-api-gateway", "omnibioai-hpc-policy-engine", "omnibioai-docs", "omnibioai-auth", "omnibioai-landing", "omnibioai-design-tokens", "omnibioai-ui",
 ]
 
 DEFAULT_OUT_RELPATH        = "work/out/reports/omnibioai_ecosystem_report.html"
@@ -1914,7 +1914,7 @@ def generate_report(ecosystem_root: Path,
             "branches","partial_branches","coverage_pct","coverage_band",
             "fail_under","total_line","stderr_tail"])
     else:
-        precomputed_dir = ecosystem_root / "out" / "coverage"
+        precomputed_dir = ecosystem_root / "work" / "out" / "coverage"
         if precomputed_dir.is_dir():
             print(f"→ Loading pre-computed coverage from {precomputed_dir}…")
         else:
