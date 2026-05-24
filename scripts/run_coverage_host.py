@@ -1,3 +1,5 @@
+# omnibioai-control-center/scripts/run_coverage_host.py
+
 #!/usr/bin/env python3
 """
 run_coverage_host.py — Run pytest coverage for each OmniBioAI repo on the host.
@@ -50,7 +52,7 @@ REPOS = [
     "omnibioai-tool-runtime",
     "omnibioai-control-center",
     "omnibioai-dev-docker",
-    "omnibioai_sdk",
+    "omnibioai-sdk",
     "omnibioai-workflow-bundles",
     "omnibioai-model-registry",
     "omnibioai-tool-images",
