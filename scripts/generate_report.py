@@ -1,3 +1,5 @@
+# omnibioai-control-center/scripts/generate_report.py
+
 #!/usr/bin/env python3
 """
 OmniBioAI Ecosystem Report — scripts/generate_report.py  (redesigned)
