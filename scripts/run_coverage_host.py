@@ -56,14 +56,14 @@ REPOS = [
     "omnibioai-workflow-bundles",
     "omnibioai-model-registry",
     "omnibioai-tool-images",
-    "omnibioai-studio",
     "omnibioai-dev-hub",
     "omnibioai-videos",
 ]
 
 # Repos that need more than the default 300s timeout
 REPO_TIMEOUTS: Dict[str, int] = {
-    "omnibioai": 1800,   # 30 min — 80+ plugins each with tests
+    "omnibioai": 3600,          # 60 min — 200+ plugins each with tests
+    "omnibioai-tool-images": 300,
 }
 
 DEFAULT_TIMEOUT = 300
@@ -279,6 +279,114 @@ def run_repo(repo: Path, timeout_override: int | None = None) -> Dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# omnibioai special handler — two-domain coverage (services + plugins)
+# --------------------------------------------------------------------------- #
+
+def run_omnibioai(repo: Path, timeout_override: int | None = None) -> Dict[str, Any]:
+    """
+    Special handler for omnibioai — runs two separate pytest domains
+    (services + plugins) and merges their coverage, matching run_coverage.sh.
+    """
+    result: Dict[str, Any] = {
+        "repo":             repo.name,
+        "path":             str(repo),
+        "generated_at":     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "returncode":       None,
+        "statements":       None,
+        "missed":           None,
+        "branches":         None,
+        "partial_branches": None,
+        "coverage_pct":     None,
+        "total_line":       None,
+        "stdout_tail":      None,
+        "stderr_tail":      None,
+        "status":           "ok",
+    }
+
+    if not repo.exists():
+        result["status"] = "missing_path"
+        return result
+
+    env = _subprocess_env(repo)
+    timeout = timeout_override or REPO_TIMEOUTS.get(repo.name, 3600)
+
+    # ── Domain 1: services ────────────────────────────────────────────
+    print(f"    [1/2] services (timeout={timeout}s) …", end=" ", flush=True)
+    svc_cmd = [
+        sys.executable, "-m", "pytest", "tests/",
+        "--ignore=tests/test_performance_baselines.py",
+        "--ignore=tests/utils/",
+        "--cov=omnibioai/services",
+        "--cov-report=json:coverage_services.json",
+        "--cov-report=term-missing",
+        "--tb=no", "-q",
+        "-p", "no:cacheprovider",
+        "--continue-on-collection-errors",
+    ]
+    svc_proc = subprocess.run(
+        svc_cmd, cwd=str(repo), env=env,
+        capture_output=True, text=True, timeout=timeout,
+    )
+    print(f"rc={svc_proc.returncode}")
+
+    # ── Domain 2: plugins ─────────────────────────────────────────────
+    print(f"    [2/2] plugins (timeout={timeout}s) …", end=" ", flush=True)
+    plg_cmd = [
+        sys.executable, "-m", "pytest", "plugins/",
+        "--cov=plugins",
+        "--cov-report=json:coverage_plugins.json",
+        "--cov-report=term-missing",
+        "--tb=no", "-q",
+        "-p", "no:cacheprovider",
+        "--continue-on-collection-errors",
+    ]
+    plg_proc = subprocess.run(
+        plg_cmd, cwd=str(repo), env=env,
+        capture_output=True, text=True, timeout=timeout,
+    )
+    print(f"rc={plg_proc.returncode}")
+
+    result["returncode"] = max(svc_proc.returncode, plg_proc.returncode)
+    result["stdout_tail"] = (
+        (svc_proc.stdout.strip() + "\n" + plg_proc.stdout.strip())[-2000:]
+    )
+    result["stderr_tail"] = (
+        (svc_proc.stderr.strip() + "\n" + plg_proc.stderr.strip())[-500:]
+    )
+
+    # ── Merge coverage JSON files ─────────────────────────────────────
+    try:
+        svc_data = json.loads((repo / "coverage_services.json").read_text())
+        plg_data = json.loads((repo / "coverage_plugins.json").read_text())
+
+        svc_totals = svc_data.get("totals", {})
+        plg_totals = plg_data.get("totals", {})
+
+        total_stmts   = (svc_totals.get("num_statements", 0) +
+                         plg_totals.get("num_statements", 0))
+        total_covered = (svc_totals.get("covered_lines", 0) +
+                         plg_totals.get("covered_lines", 0))
+        total_missing = (svc_totals.get("missing_lines", 0) +
+                         plg_totals.get("missing_lines", 0))
+        total_pct     = (total_covered / total_stmts * 100
+                         if total_stmts else 0.0)
+
+        result["statements"]   = total_stmts
+        result["missed"]       = total_missing
+        result["coverage_pct"] = round(total_pct, 2)
+        result["total_line"]   = "merged:services+plugins"
+        result["status"]       = "ok"
+
+        print(f"    → merged: {total_covered}/{total_stmts} = {total_pct:.2f}%")
+
+    except Exception as e:
+        result["status"] = "no_total_found"
+        print(f"    → merge failed: {e}")
+
+    return result
+
+
+# --------------------------------------------------------------------------- #
 # Main
 # --------------------------------------------------------------------------- #
 
@@ -315,7 +423,11 @@ def main() -> int:
         repo = _resolve_repo(root, name)
         print(f"[{repo.name}]")
 
-        result  = run_repo(repo, timeout_override=args.timeout)
+        # omnibioai needs special two-domain coverage collection
+        if repo.name == "omnibioai":
+            result = run_omnibioai(repo, timeout_override=args.timeout)
+        else:
+            result  = run_repo(repo, timeout_override=args.timeout)
         out_f   = out_dir / f"{repo.name}.json"
         out_f.write_text(json.dumps(result, indent=2), encoding="utf-8")
 
