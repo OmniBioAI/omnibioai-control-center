@@ -1,3 +1,5 @@
 *.pyc
 coverage.json
 **/__pycache__/
+backend/coverage.json
+**/*.egg-info/
