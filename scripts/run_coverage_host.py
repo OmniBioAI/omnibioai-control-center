@@ -44,6 +44,7 @@ from typing import Dict, List, Optional, Any
 # --------------------------------------------------------------------------- #
 
 REPOS = [
+    # Core services
     "omnibioai-tes",
     "omnibioai",
     "omnibioai-rag",
@@ -51,13 +52,21 @@ REPOS = [
     "omnibioai-toolserver",
     "omnibioai-tool-runtime",
     "omnibioai-control-center",
-    "omnibioai-dev-docker",
     "omnibioai-sdk",
     "omnibioai-workflow-bundles",
     "omnibioai-model-registry",
     "omnibioai-tool-images",
     "omnibioai-dev-hub",
     "omnibioai-videos",
+    "omnibioai-launcher",
+    # Security plane
+    "omnibioai-auth",
+    "omnibioai-api-gateway",
+    "omnibioai-policy-engine",
+    "omnibioai-hpc-policy-engine",
+    "omnibioai-security-audit",
+    "omnibioai-security-sdk",
+    "omnibioai-iam-client",
 ]
 
 # Repos that need more than the default 300s timeout
