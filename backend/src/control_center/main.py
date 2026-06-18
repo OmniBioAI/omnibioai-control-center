@@ -32,9 +32,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from control_center.api.routes_cloud import router as cloud_router
 from control_center.api.routes_config import router as config_router
 from control_center.api.routes_docker import router as docker_router
 from control_center.api.routes_health import router as health_router
+from control_center.api.routes_llm import router as llm_router
 from control_center.api.routes_report import router as report_router
 from control_center.api.routes_services import router as services_router
 from control_center.api.routes_summary import router as summary_router
@@ -86,6 +88,8 @@ app.include_router(summary_router)
 app.include_router(report_router)
 app.include_router(config_router)
 app.include_router(docker_router)
+app.include_router(llm_router)
+app.include_router(cloud_router)
 
 
 # ==============================================================================

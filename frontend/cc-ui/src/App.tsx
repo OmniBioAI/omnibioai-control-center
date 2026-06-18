@@ -6,6 +6,8 @@ import HealthPage from './pages/HealthPage'
 import DockerPage from './pages/DockerPage'
 import EcosystemPage from './pages/EcosystemPage'
 import ConfigPage from './pages/ConfigPage'
+import LlmPage from './pages/LlmPage'
+import CloudPage from './pages/CloudPage'
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('health')
@@ -67,6 +69,8 @@ export default function App() {
           {tab === 'docker'    && <DockerPage    refreshKey={refreshKey} />}
           {tab === 'ecosystem' && <EcosystemPage refreshKey={refreshKey} />}
           {tab === 'config'    && <ConfigPage    refreshKey={refreshKey} />}
+          {tab === 'llms'      && <LlmPage       refreshKey={refreshKey} />}
+          {tab === 'cloud'     && <CloudPage     refreshKey={refreshKey} />}
         </div>
       </div>
     </div>

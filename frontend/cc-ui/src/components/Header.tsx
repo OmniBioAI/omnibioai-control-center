@@ -1,4 +1,4 @@
-export type Tab = 'health' | 'docker' | 'ecosystem' | 'config'
+export type Tab = 'health' | 'docker' | 'ecosystem' | 'config' | 'llms' | 'cloud'
 
 interface Props {
   tab: Tab
@@ -17,6 +17,8 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'docker',    label: 'Docker Images' },
   { id: 'ecosystem', label: 'Ecosystem Report' },
   { id: 'config',    label: 'Config' },
+  { id: 'llms',      label: 'LLMs' },
+  { id: 'cloud',     label: 'Cloud' },
 ]
 
 const STATUS_CFG = {
