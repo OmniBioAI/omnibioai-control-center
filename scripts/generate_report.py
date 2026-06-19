@@ -1510,7 +1510,7 @@ def llm_section_html(control_center_url: str) -> str:
     ollama_badge = "🟢 running" if ollama_status == "running" else "🔴 unreachable"
 
     return f"""
-<div class="tab-section" id="tab-llms" style="display:none">
+<div class="tab-section">
   <h2 style="font-size:18px;font-weight:700;margin-bottom:4px">Local LLMs</h2>
   <p style="color:var(--color-text-muted);font-size:13px;margin-bottom:20px">
     Ollama models installed on this machine · API key configuration status
@@ -1612,7 +1612,7 @@ def cloud_section_html(control_center_url: str) -> str:
         cards = '<p style="color:var(--color-text-muted)">Could not reach control center</p>'
 
     return f"""
-<div class="tab-section" id="tab-cloud" style="display:none">
+<div class="tab-section">
   <h2 style="font-size:18px;font-weight:700;margin-bottom:4px">Execution Backends</h2>
   <p style="color:var(--color-text-muted);font-size:13px;margin-bottom:20px">
     Cloud and HPC execution backend configuration status
