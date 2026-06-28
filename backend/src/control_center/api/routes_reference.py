@@ -26,12 +26,17 @@ DATABASES = ["clinvar", "cosmic", "dbsnp", "gnomad", "go",
 
 
 def _dir_exists_nonempty(path: Path) -> bool:
+    """Return True if path exists and contains at least one file > 0 bytes."""
     if not path.exists():
         return False
     if path.is_file():
-        return True
+        return path.stat().st_size > 0
     try:
-        return any(True for _ in path.iterdir())
+        return any(
+            f.stat().st_size > 0
+            for f in path.rglob("*")
+            if f.is_file()
+        )
     except Exception:
         return False
 
