@@ -39,12 +39,21 @@ def _dir_exists_nonempty(path: Path) -> bool:
 @router.get("/reference")
 def get_reference() -> JSONResponse:
     workspace = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
-    ref_root = workspace / "omnibioai-data" / "reference"
+    # omnibioai-data is a symlink on host that doesn't resolve in container
+    # Try multiple candidate paths
+    ref_root = None
+    for candidate in [
+        workspace / "omnibioai-data" / "reference",
+        workspace / "data" / "reference",
+    ]:
+        if candidate.exists():
+            ref_root = candidate
+            break
 
-    if not ref_root.exists():
+    if ref_root is None:
         return JSONResponse({
             "available": False,
-            "ref_root": str(ref_root),
+            "ref_root": str(workspace / "omnibioai-data" / "reference"),
             "organisms": [],
             "databases": {},
             "annotation": {},
