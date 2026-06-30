@@ -1878,11 +1878,11 @@ def storage_section_html(control_center_url: str) -> str:
     data: dict = {}
     try:
         with urllib.request.urlopen(
-            f"{control_center_url.rstrip('/')}/storage", timeout=30
+            f"{control_center_url.rstrip('/')}/storage", timeout=120
         ) as r:
             data = json.loads(r.read())
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[report] storage_section_html failed: {type(e).__name__}: {e}", flush=True)
 
     if not data:
         return '<div class="tab-section"><h2 style="font-size:18px;font-weight:700;margin-bottom:4px">Storage</h2><p style="color:var(--color-text-muted);font-size:13px">Unavailable</p></div>'
