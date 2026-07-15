@@ -179,7 +179,7 @@ def get_plugin_images() -> JSONResponse:
             except Exception:
                 continue
             slug = data.get("slug") or plugin_json.parent.name
-            image = f"ghcr.io/man4ish/omnibioai-plugin-{slug.replace('_', '-')}:latest"
+            image = f"ghcr.io/omnibioai/omnibioai-plugin-{slug.replace('_', '-')}:latest"
             size_mb = local_images.get(image, 0.0)
             results.append({
                 "plugin": slug,

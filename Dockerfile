@@ -7,7 +7,7 @@ COPY frontend/cc-ui/ ./
 RUN npm run build
 
 # ── Stage 2: Python backend ────────────────────────────────────────────────────
-FROM ghcr.io/man4ish/omnibioai-base:latest AS backend
+FROM ghcr.io/omnibioai/omnibioai-base:latest AS backend
 LABEL org.opencontainers.image.source=https://github.com/man4ish/omnibioai
 WORKDIR /app
 

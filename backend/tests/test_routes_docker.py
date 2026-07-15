@@ -257,8 +257,8 @@ class TestGetPluginImages:
         plugins_dir = tmp_path / "plugins" / "alpha"
         plugins_dir.mkdir(parents=True)
         (plugins_dir / "plugin.json").write_text(json.dumps({"slug": "alpha"}))
-        image_name = "ghcr.io/man4ish/omnibioai-plugin-alpha:latest"
-        docker_line = json.dumps({"Repository": "ghcr.io/man4ish/omnibioai-plugin-alpha", "Tag": "latest", "Size": "120MB"})
+        image_name = "ghcr.io/omnibioai/omnibioai-plugin-alpha:latest"
+        docker_line = json.dumps({"Repository": "ghcr.io/omnibioai/omnibioai-plugin-alpha", "Tag": "latest", "Size": "120MB"})
         docker_result = MagicMock(stdout=docker_line, returncode=0)
         with patch("control_center.api.routes_docker.subprocess.run", return_value=docker_result):
             with patch("control_center.api.routes_docker._OMNIBIOAI_BASE", tmp_path):
