@@ -35,12 +35,13 @@ class TestGetContainers:
         assert data["containers"][0]["Names"] == "/web"
 
     def test_running_count_correct(self):
-        cts = [
-            {"Names": "/svc1", "State": "running", "Status": "Up 1h", "Image": "a", "Ports": "", "RunningFor": "1h"},
-            {"Names": "/svc2", "State": "exited", "Status": "Exited (0) 5m", "Image": "b", "Ports": "", "RunningFor": "5m"},
-        ]
-        result = MagicMock(stdout=self._docker_output(cts), returncode=0)
-        with patch("control_center.api.routes_docker.subprocess.run", return_value=result):
+        # `docker ps` (no -a) only ever returns running containers, so the
+        # first call's output has one entry; the second call (stopped count)
+        # returns one exited container id.
+        running_ct = [{"Names": "/svc1", "State": "running", "Status": "Up 1h", "Image": "a", "Ports": "", "RunningFor": "1h"}]
+        running_result = MagicMock(stdout=self._docker_output(running_ct), returncode=0)
+        stopped_result = MagicMock(stdout="svc2exitedid\n", returncode=0)
+        with patch("control_center.api.routes_docker.subprocess.run", side_effect=[running_result, stopped_result]):
             resp = client.get("/docker/containers")
         data = resp.json()
         assert data["running"] == 1
@@ -215,6 +216,11 @@ class TestParseSizeMb:
     def test_invalid_returns_zero(self):
         assert self._parse("bad") == 0.0
 
+    def test_non_numeric_with_valid_suffix_raises_value_error_internally(self):
+        # Ends in a recognized suffix but the numeric part can't be parsed,
+        # exercising the `except ValueError` branch (not just "no suffix matched").
+        assert self._parse("abcB") == 0.0
+
     def test_empty_string_returns_zero(self):
         assert self._parse("0B") == pytest.approx(0.0, abs=1e-6)
 
@@ -320,6 +326,21 @@ class TestGetPluginImages:
             with patch("control_center.api.routes_docker._OMNIBIOAI_BASE", tmp_path):
                 resp = client.get("/docker/plugin-images")
         assert resp.json()["plugins"][0]["local_status"] == "missing"
+
+    def test_blank_line_between_entries_skipped(self, tmp_path):
+        # A blank line sandwiched between two real lines exercises the
+        # `if not line: continue` branch (top-level .strip() alone can't
+        # produce this — it only trims leading/trailing whitespace).
+        plugins_dir = tmp_path / "plugins" / "zeta"
+        plugins_dir.mkdir(parents=True)
+        (plugins_dir / "plugin.json").write_text(json.dumps({"slug": "zeta"}))
+        image_name = "ghcr.io/omnibioai/omnibioai-plugin-zeta"
+        line = json.dumps({"Repository": image_name, "Tag": "latest", "Size": "10MB"})
+        docker_result = MagicMock(stdout=f"{line}\n\n{line}\n", returncode=0)
+        with patch("control_center.api.routes_docker.subprocess.run", return_value=docker_result):
+            with patch("control_center.api.routes_docker._OMNIBIOAI_BASE", tmp_path):
+                resp = client.get("/docker/plugin-images")
+        assert resp.json()["plugins"][0]["local_status"] == "present"
 
     def test_image_without_repo_or_tag_skipped(self, tmp_path):
         plugins_dir = tmp_path / "plugins" / "epsilon"

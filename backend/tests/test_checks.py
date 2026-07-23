@@ -243,6 +243,27 @@ class TestDiskChecks(unittest.TestCase):
             results = run_disk_checks(settings)
         self.assertIn(tmp, results[0]["name"])
 
+    def test_low_disk_space_fires_discord_notify(self) -> None:
+        from collections import namedtuple
+        from control_center.checks import disk as disk_module
+
+        _Usage = namedtuple("_Usage", ["total", "used", "free"])
+        fake_usage = _Usage(total=100 * 1024 ** 3, used=95 * 1024 ** 3, free=5 * 1024 ** 3)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = _make_settings([{"path": tmp, "warn_pct_free_below": 0}])
+            with patch.object(disk_module.shutil, "disk_usage", return_value=fake_usage):
+                with patch.object(disk_module, "_discord_notify") as mock_notify:
+                    with patch.object(disk_module, "_WEBHOOK", "https://discord.example/webhook"):
+                        results = run_disk_checks(settings)
+
+        self.assertEqual(len(results), 1)
+        mock_notify.assert_called_once()
+        args, kwargs = mock_notify.call_args
+        self.assertEqual(args[0], "https://discord.example/webhook")
+        self.assertIn("Low Disk Space", args[1])
+        self.assertIn("5.0GB", args[2])
+
 
 # ==============================================================================
 # API routes — GET /health
@@ -295,7 +316,7 @@ class TestRoutesReport(unittest.TestCase):
 
     def test_report_serves_file_when_exists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            report_dir = Path(tmp) / "out" / "reports"
+            report_dir = Path(tmp) / "work" / "out" / "reports"
             report_dir.mkdir(parents=True)
             report_file = report_dir / "omnibioai_ecosystem_report.html"
             report_file.write_text("<html><body>Test Report</body></html>")
@@ -308,7 +329,7 @@ class TestRoutesReport(unittest.TestCase):
 
     def test_report_file_content_is_preserved(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            report_dir = Path(tmp) / "out" / "reports"
+            report_dir = Path(tmp) / "work" / "out" / "reports"
             report_dir.mkdir(parents=True)
             content = "<html><body><h1>OmniBioAI Report</h1></body></html>"
             (report_dir / "omnibioai_ecosystem_report.html").write_text(content)

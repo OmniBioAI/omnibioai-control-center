@@ -14,6 +14,7 @@ import os
 import tempfile
 import textwrap
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -57,6 +58,14 @@ def _minimal_config() -> str:
 # ==============================================================================
 
 class TestRunAllChecks(unittest.TestCase):
+
+    def setUp(self) -> None:
+        # This host may have a real GPU; run_all_checks always appends
+        # check_gpu_temperature() results, so pin it to [] for deterministic
+        # service-count assertions below.
+        patcher = patch("control_center.core.runner.check_gpu_temperature", return_value=[])
+        self.mock_gpu = patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_empty_services_returns_empty(self) -> None:
         settings = Settings(services={}, system={})

@@ -99,7 +99,7 @@ class TestRootWithReport(unittest.TestCase):
     def setUp(self):
         _reset_job()
         self._tmp = tempfile.mkdtemp()
-        p = Path(self._tmp) / "out" / "reports"
+        p = Path(self._tmp) / "work" / "out" / "reports"
         p.mkdir(parents=True)
         self._report_file = p / "omnibioai_ecosystem_report.html"
         self._report_file.write_text("<html><body><h1>My Report</h1></body></html>")
@@ -166,14 +166,14 @@ class TestReportStatus(unittest.TestCase):
         finally: del os.environ["WORKSPACE_ROOT"]
     def test_report_exists_true(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp)/"out"/"reports"; p.mkdir(parents=True)
+            p = Path(tmp)/"work"/"out"/"reports"; p.mkdir(parents=True)
             (p/"omnibioai_ecosystem_report.html").write_text("<html/>")
             os.environ["WORKSPACE_ROOT"] = tmp
             try: self.assertTrue(client.get("/report/status").json()["report_exists"])
             finally: del os.environ["WORKSPACE_ROOT"]
     def test_generated_at_set(self):
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp)/"out"/"reports"; p.mkdir(parents=True)
+            p = Path(tmp)/"work"/"out"/"reports"; p.mkdir(parents=True)
             (p/"omnibioai_ecosystem_report.html").write_text("<html/>")
             os.environ["WORKSPACE_ROOT"] = tmp
             try: self.assertIsNotNone(client.get("/report/status").json()["report_generated_at"])
@@ -274,6 +274,109 @@ class TestRunReportJob(unittest.TestCase):
             os.environ["WORKSPACE_ROOT"] = tmp
             try: main_module._run_report_job(); self.assertEqual(main_module._job.as_dict()["message"], "Done")
             finally: del os.environ["WORKSPACE_ROOT"]
+
+
+class TestReportData(unittest.TestCase):
+    def test_404_when_no_report_data(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["WORKSPACE_ROOT"] = tmp
+            try:
+                resp = client.get("/report/data")
+            finally:
+                del os.environ["WORKSPACE_ROOT"]
+        self.assertEqual(resp.status_code, 404)
+        self.assertIn("error", resp.json())
+
+    def test_returns_parsed_json_when_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reports_dir = Path(tmp) / "work" / "out" / "reports"
+            reports_dir.mkdir(parents=True)
+            (reports_dir / "report_data.json").write_text('{"projects": 3, "languages": ["python"]}')
+            os.environ["WORKSPACE_ROOT"] = tmp
+            try:
+                resp = client.get("/report/data")
+            finally:
+                del os.environ["WORKSPACE_ROOT"]
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"projects": 3, "languages": ["python"]})
+
+    def test_500_on_malformed_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reports_dir = Path(tmp) / "work" / "out" / "reports"
+            reports_dir.mkdir(parents=True)
+            (reports_dir / "report_data.json").write_text("not-json{")
+            os.environ["WORKSPACE_ROOT"] = tmp
+            try:
+                resp = client.get("/report/data")
+            finally:
+                del os.environ["WORKSPACE_ROOT"]
+        self.assertEqual(resp.status_code, 500)
+        self.assertIn("error", resp.json())
+
+
+class TestSchedulerLoop(unittest.TestCase):
+    def setUp(self):
+        _reset_job()
+
+    def test_triggers_report_job_when_idle(self):
+        # Break out of the infinite loop after the first triggering pass by
+        # raising from the second `sleep` call.
+        sleep_calls = {"n": 0}
+
+        def fake_sleep(_seconds):
+            sleep_calls["n"] += 1
+            if sleep_calls["n"] >= 2:
+                raise SystemExit("stop loop")
+
+        with patch("control_center.main._time_mod.sleep", side_effect=fake_sleep):
+            with patch("control_center.main.threading.Thread") as mock_thread:
+                with self.assertRaises(SystemExit):
+                    main_module._scheduler_loop()
+
+        mock_thread.assert_called_once()
+        self.assertEqual(mock_thread.call_args.kwargs.get("target"), main_module._run_report_job)
+
+    def test_skips_when_job_already_running(self):
+        main_module._job.start()
+        sleep_calls = {"n": 0}
+
+        def fake_sleep(_seconds):
+            sleep_calls["n"] += 1
+            if sleep_calls["n"] >= 2:
+                raise SystemExit("stop loop")
+
+        with patch("control_center.main._time_mod.sleep", side_effect=fake_sleep):
+            with patch("control_center.main.threading.Thread") as mock_thread:
+                with self.assertRaises(SystemExit):
+                    main_module._scheduler_loop()
+
+        mock_thread.assert_not_called()
+
+    def test_exception_in_loop_body_is_caught(self):
+        sleep_calls = {"n": 0}
+
+        def fake_sleep(_seconds):
+            sleep_calls["n"] += 1
+            if sleep_calls["n"] >= 2:
+                raise SystemExit("stop loop")
+
+        with patch("control_center.main._time_mod.sleep", side_effect=fake_sleep):
+            with patch.object(main_module._job, "as_dict", side_effect=RuntimeError("boom")):
+                with self.assertRaises(SystemExit):
+                    main_module._scheduler_loop()
+        # No exception propagated from the RuntimeError itself — only our
+        # SystemExit sentinel used to stop the loop — proving it was caught.
+
+
+class TestOnStartup(unittest.TestCase):
+    def test_starts_scheduler_thread(self):
+        with patch("control_center.main.threading.Thread") as mock_thread:
+            asyncio_run = __import__("asyncio").run
+            asyncio_run(main_module.on_startup())
+        mock_thread.assert_called_once()
+        self.assertEqual(mock_thread.call_args.kwargs.get("target"), main_module._scheduler_loop)
+        mock_thread.return_value.start.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
