@@ -87,6 +87,16 @@ def _parse_nvidia_value(raw: str) -> Optional[float]:
         return None
 
 
+def _is_unsupported_field(raw: str) -> bool:
+    """True when nvidia-smi itself reports a field as not queryable on this
+    GPU (e.g. "[N/A]", "N/A", "[Not Supported]", "Not Supported" -- the
+    literal text nvidia-smi prints for memory.total/memory.used on GB10-class
+    unified-memory hardware), as opposed to the field being missing for some
+    other, genuinely anomalous reason."""
+    normalized = raw.strip().strip("[]").strip().lower()
+    return normalized in ("n/a", "not supported")
+
+
 def get_gpu_status() -> dict[str, Any]:
     """Full GPU status for the /gpu endpoint (richer than check_gpu_temperature,
     which only feeds the summary/services health checks)."""
@@ -109,8 +119,10 @@ def get_gpu_status() -> dict[str, Any]:
     # nvidia-smi CSV memory.total/used are already in MiB (matches memory_*_mb contract)
     fields = [f.strip() for f in out.stdout.strip().splitlines()[0].split(",")]
     name = fields[0] if len(fields) > 0 else "unknown"
-    mem_total = _parse_nvidia_value(fields[1]) if len(fields) > 1 else None
-    mem_used = _parse_nvidia_value(fields[2]) if len(fields) > 2 else None
+    mem_total_raw = fields[1] if len(fields) > 1 else ""
+    mem_used_raw = fields[2] if len(fields) > 2 else ""
+    mem_total = _parse_nvidia_value(mem_total_raw)
+    mem_used = _parse_nvidia_value(mem_used_raw)
     util_pct = _parse_nvidia_value(fields[3]) if len(fields) > 3 else None
     temp_c = _parse_nvidia_value(fields[4]) if len(fields) > 4 else None
     power_w = _parse_nvidia_value(fields[5]) if len(fields) > 5 else None
@@ -119,8 +131,14 @@ def get_gpu_status() -> dict[str, Any]:
     # exact symptom observed during a prior CUDA OOM incident where the driver
     # stopped reporting memory at all. Surface it explicitly rather than as a
     # generic null.
+    #
+    # But GB10-class (DGX Spark) unified-memory hardware legitimately reports
+    # memory.total/memory.used as "[N/A]" on every query -- that's documented
+    # behavior for this architecture, not a fault. Only raise the driver
+    # warning when memory is missing for some other reason.
+    memory_unsupported = mem_used is None and _is_unsupported_field(mem_used_raw)
     error = None
-    if mem_used is None:
+    if mem_used is None and not memory_unsupported:
         error = "nvidia-smi returned N/A for memory -- driver may be in a bad state"
 
     processes: list[dict[str, Any]] = []
@@ -170,5 +188,6 @@ def get_gpu_status() -> dict[str, Any]:
         "power_draw_w": power_w,
         "processes": processes,
         "ollama_loaded_models": ollama_models,
+        "memory_unsupported": memory_unsupported,
         "error": error,
     }

@@ -1676,7 +1676,8 @@ function _hlthRender(data){{
     dg.appendChild(card);
   }});
 }}
-function _gpuMemColor(usedMb, totalMb){{
+function _gpuMemColor(usedMb, totalMb, memoryUnsupported){{
+  if(memoryUnsupported) return 'var(--color-text-muted)';
   if(usedMb===null||usedMb===undefined) return '#A32D2D';
   var pct=usedMb/totalMb*100;
   return pct<70?'#3B6D11':pct<90?'#854F0B':'#A32D2D';
@@ -1689,8 +1690,10 @@ function gpuFetch(){{
       return;
     }}
     var memNull = d.memory_used_mb===null||d.memory_used_mb===undefined;
-    var memColor=_gpuMemColor(d.memory_used_mb,d.memory_total_mb);
-    var memText = memNull
+    var memColor=_gpuMemColor(d.memory_used_mb,d.memory_total_mb,d.memory_unsupported);
+    var memText = d.memory_unsupported
+      ? '<span style="color:var(--color-text-muted)">memory reporting not supported on this GPU</span>'
+      : memNull
       ? '<span style="color:#A32D2D;font-weight:600">N/A — driver may be in a bad state</span>'
       : (d.memory_used_mb/1024).toFixed(1)+' / '+(d.memory_total_mb/1024).toFixed(1)+' GB';
     var procRows = (d.processes||[]).map(function(p){{
