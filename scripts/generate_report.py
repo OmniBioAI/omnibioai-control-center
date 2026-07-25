@@ -2121,7 +2121,7 @@ def knowledge_base_section_html(control_center_url: str) -> str:
     data: dict = {}
     try:
         with urllib.request.urlopen(
-            f"{control_center_url.rstrip('/')}/knowledge-base", timeout=120
+            f"{control_center_url.rstrip('/')}/knowledge-base", timeout=250
         ) as r:
             data = json.loads(r.read())
     except Exception:
