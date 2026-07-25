@@ -3990,12 +3990,26 @@ def _run_vuln_scan(repo_path: Path) -> Optional[int]:
     """Runs whichever of pip-audit / npm audit is available and applicable for
     this repo, capped at 30s. Returns None if neither tool is available, the
     repo has no matching manifest, or the scan times out/errors."""
-    has_py = (repo_path / "requirements.txt").exists() or (repo_path / "pyproject.toml").exists()
+    requirements_txt = repo_path / "requirements.txt"
+    has_requirements = requirements_txt.exists()
+    has_pyproject = (repo_path / "pyproject.toml").exists()
+    has_py = has_requirements or has_pyproject
     has_js = (repo_path / "package.json").exists()
     try:
         if has_py and shutil.which("pip-audit"):
-            proc = subprocess.run(["pip-audit", "--format", "json"], cwd=str(repo_path),
-                                   capture_output=True, text=True, timeout=30)
+            # pip-audit with no explicit target audits the *current* Python
+            # environment (i.e. this report-generation process's own
+            # packages), not the repo at cwd -- cwd alone doesn't scope it.
+            # Point it explicitly at this repo's actual manifest: -r for a
+            # requirements.txt (preferred when present), else the positional
+            # project_path form, which resolves a pyproject.toml project's
+            # declared dependencies directly (distinct from --path, which
+            # restricts to an *installation* directory, not a project source).
+            if has_requirements:
+                cmd = ["pip-audit", "-r", str(requirements_txt), "--format", "json"]
+            else:
+                cmd = ["pip-audit", str(repo_path), "--format", "json"]
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             data = json.loads(proc.stdout or "[]")
             deps = data if isinstance(data, list) else data.get("dependencies", [])
             return sum(len(d.get("vulns", [])) for d in deps if isinstance(d, dict))
