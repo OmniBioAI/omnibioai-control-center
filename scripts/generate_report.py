@@ -1576,6 +1576,68 @@ def _health_activity_section_html() -> str:
 """
 
 
+def _health_audit_trail_section_html() -> str:
+    return """
+<div class="tab-section">
+<div class="section">
+  <div class="sec-title">audit trail</div>
+  <div class="sec-sub">gateway request/access log · not a compliance-grade audit trail</div>
+  <div style="font-size:11px;color:var(--color-text-muted);background:var(--color-bg-surface2);border-radius:8px;padding:10px 12px;margin-bottom:12px">
+    This is a gateway request/access log, not a full audit trail in the compliance sense.
+    Identity (user_id) is present on only ~1.4% of events -- most traffic (health checks,
+    unauthenticated requests) has no associated actor. No application-level audit events
+    (e.g. LIMS record access, model registry changes) are currently captured here -- only
+    HTTP-gateway-level request/auth/policy/HPC decisions.
+  </div>
+</div>
+
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">events (7d window)</div><div class="kpi-val" id="at-k-total">—</div></div>
+  <div class="kpi"><div class="kpi-label">health-check pings</div><div class="kpi-val" id="at-k-health">—</div><div class="kpi-sub" id="at-k-health-pct"></div></div>
+  <div class="kpi"><div class="kpi-label">denied</div><div class="kpi-val" style="color:#A32D2D" id="at-k-deny">—</div></div>
+  <div class="kpi"><div class="kpi-label">distinct actors</div><div class="kpi-val" id="at-k-actors">—</div></div>
+</div>
+
+<div class="section">
+  <div class="filter-row">
+    <label style="font-size:12px;color:var(--color-text-muted);display:flex;align-items:center;gap:5px;cursor:pointer">
+      <input type="checkbox" id="at-hide-health" checked onchange="atApply()"> Hide health-check noise
+    </label>
+    <select class="filter-sel" id="at-f-type" onchange="atApply()"><option value="">all event types</option></select>
+    <select class="filter-sel" id="at-f-decision" onchange="atApply()">
+      <option value="">all decisions</option><option value="allow">allow</option><option value="deny">deny</option>
+    </select>
+    <select class="filter-sel" id="at-f-status" onchange="atApply()"><option value="">all status codes</option></select>
+    <select class="filter-sel" id="at-f-reason" onchange="atApply()"><option value="">all reasons</option></select>
+  </div>
+  <div class="filter-row">
+    <label style="font-size:11px;color:var(--color-text-muted)">from <input type="date" id="at-f-from" onchange="atApply()" style="font-family:inherit;font-size:12px;padding:4px 6px;border:0.5px solid var(--color-border);border-radius:6px;background:var(--color-bg-surface);color:var(--color-text)"></label>
+    <label style="font-size:11px;color:var(--color-text-muted)">to <input type="date" id="at-f-to" onchange="atApply()" style="font-family:inherit;font-size:12px;padding:4px 6px;border:0.5px solid var(--color-border);border-radius:6px;background:var(--color-bg-surface);color:var(--color-text)"></label>
+    <input class="search-inp" type="text" id="at-search" placeholder="search action / endpoint / trace id..." oninput="atApply()">
+    <span class="result-count" id="at-count">— items</span>
+    <div class="per-pg">per page <select class="filter-sel" onchange="atPerPage(this.value)"><option value="15" selected>15</option><option value="30">30</option><option value="50">50</option></select></div>
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr>
+        <th onclick="atSort('timestamp')">time</th>
+        <th onclick="atSort('event_type')">event type</th>
+        <th onclick="atSort('action')">action</th>
+        <th onclick="atSort('decision')">decision</th>
+        <th class="r" onclick="atSort('status_code')">status</th>
+        <th onclick="atSort('reason')">reason</th>
+        <th onclick="atSort('user_id')">actor</th>
+        <th>trace id</th>
+      </tr></thead>
+      <tbody id="at-tbody"></tbody>
+    </table>
+  </div>
+  <div class="pg-wrap" id="at-pg"></div>
+</div>
+</div>
+"""
+
+
 _HEALTH_SCRIPT = f"""
 <script>
 var _hChart=null,_hTimer=null,_hCd=30,_hUrl='';
@@ -1591,7 +1653,7 @@ function _hStartCd(){{
   _hTimer=setInterval(function(){{
     _hCd--;
     document.getElementById('hlth-countdown').textContent='next refresh in '+_hCd+'s';
-    if(_hCd<=0){{clearInterval(_hTimer);hlthFetch();gpuFetch();integrityFetch();activityFetch();}}
+    if(_hCd<=0){{clearInterval(_hTimer);hlthFetch();gpuFetch();integrityFetch();activityFetch();atFetch();}}
   }},1000);
 }}
 function _hlthRender(data){{
@@ -1811,7 +1873,91 @@ function _hlthError(){{
   document.getElementById('hlth-disk-grid').innerHTML='<div style="font-size:12px;color:#6b7280">no data</div>';
   document.getElementById('hlth-lat-bars').innerHTML='<div style="font-size:12px;color:#6b7280">no data</div>';
 }}
-hlthFetch();gpuFetch();integrityFetch();activityFetch();
+var _AT={{pp:15,page:1,sort:'timestamp',dir:-1,search:'',all:[],filtered:[]}};
+var _atFiltersBuilt=false;
+function _atBuildOptions(sel,values){{
+  values.forEach(function(v){{
+    var o=document.createElement('option');o.value=v;o.textContent=v;sel.appendChild(o);
+  }});
+}}
+function _atStatusColor(code){{
+  if(code===null||code===undefined)return 'var(--color-text-muted)';
+  return code<300?'#3B6D11':code<500?'#854F0B':'#A32D2D';
+}}
+function atFilter(v){{_AT.search=v.toLowerCase();_AT.page=1;atApply();}}
+function atPerPage(v){{_AT.pp=parseInt(v);_AT.page=1;atApply();}}
+function atSort(col){{if(_AT.sort===col){{_AT.dir*=-1;}}else{{_AT.sort=col;_AT.dir=col==='timestamp'?-1:1;}} _AT.page=1;atApply();}}
+function atApply(){{
+  var hideHealth=document.getElementById('at-hide-health').checked;
+  var fType=document.getElementById('at-f-type').value;
+  var fDecision=document.getElementById('at-f-decision').value;
+  var fStatus=document.getElementById('at-f-status').value;
+  var fReason=document.getElementById('at-f-reason').value;
+  var fFrom=document.getElementById('at-f-from').value;
+  var fTo=document.getElementById('at-f-to').value;
+  var q=(document.getElementById('at-search').value||'').toLowerCase();
+  var d=_AT.all.filter(function(e){{
+    if(hideHealth&&e.is_health_check)return false;
+    if(fType&&e.event_type!==fType)return false;
+    if(fDecision&&e.decision!==fDecision)return false;
+    if(fStatus&&String(e.status_code)!==fStatus)return false;
+    if(fReason&&e.reason!==fReason)return false;
+    if(fFrom&&e.timestamp.slice(0,10)<fFrom)return false;
+    if(fTo&&e.timestamp.slice(0,10)>fTo)return false;
+    if(q&&!((e.action||'')+' '+(e.endpoint||'')+' '+(e.trace_id||'')).toLowerCase().includes(q))return false;
+    return true;
+  }});
+  var col=_AT.sort;
+  d.sort(function(a,b){{
+    var av=a[col],bv=b[col];
+    if(av===null||av===undefined)av='';
+    if(bv===null||bv===undefined)bv='';
+    return av<bv?_AT.dir:av>bv?-_AT.dir:0;
+  }});
+  _AT.filtered=d;
+  document.getElementById('at-count').textContent=d.length+' events';
+  var start=(_AT.page-1)*_AT.pp,page=d.slice(start,start+_AT.pp);
+  var tb=document.getElementById('at-tbody');tb.innerHTML='';
+  if(page.length===0){{
+    tb.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--color-text-muted);padding:20px">no events match filters</td></tr>';
+  }}
+  page.forEach(function(e){{
+    var tr=document.createElement('tr');
+    var decColor=e.decision==='deny'?'#A32D2D':'#3B6D11';
+    var traceShort=e.trace_id?e.trace_id.slice(0,8):'—';
+    tr.innerHTML='<td style="font-size:11px;color:var(--color-text-muted);white-space:nowrap">'+new Date(e.timestamp).toLocaleString()+'</td>'+
+      '<td style="font-size:12px;font-weight:600">'+e.event_type+'</td>'+
+      '<td class="mono" style="font-size:11px">'+(e.action||'—')+'</td>'+
+      '<td style="color:'+decColor+';font-weight:600;font-size:12px">'+(e.decision||'—')+'</td>'+
+      '<td class="r" style="color:'+_atStatusColor(e.status_code)+';font-weight:600">'+(e.status_code===null||e.status_code===undefined?'—':e.status_code)+'</td>'+
+      '<td style="font-size:11px;color:var(--color-text-muted)">'+(e.reason||'—')+'</td>'+
+      '<td style="font-size:12px">'+(e.user_id||'—')+'</td>'+
+      '<td class="mono" style="font-size:10px;color:var(--color-text-muted)" title="'+(e.trace_id||'')+'">'+traceShort+'</td>';
+    tb.appendChild(tr);
+  }});
+  renderPg('at',_AT,atApply);
+}}
+function atFetch(){{
+  fetch(_hUrl+'/audit-trail').then(function(r){{return r.json();}}).then(function(d){{
+    document.getElementById('at-k-total').textContent=d.total_events;
+    document.getElementById('at-k-health').textContent=d.health_check_pings;
+    var pct=d.total_events?Math.round(100*d.health_check_pings/d.total_events):0;
+    document.getElementById('at-k-health-pct').textContent=pct+'% of window';
+    document.getElementById('at-k-deny').textContent=(d.decision_breakdown||{{}}).deny||0;
+    document.getElementById('at-k-actors').textContent=d.distinct_actors;
+    if(!_atFiltersBuilt){{
+      _atBuildOptions(document.getElementById('at-f-type'),(d.event_type_breakdown||[]).map(function(x){{return x.event_type;}}));
+      _atBuildOptions(document.getElementById('at-f-status'),Object.keys(d.status_code_breakdown||{{}}).sort());
+      _atBuildOptions(document.getElementById('at-f-reason'),(d.reason_breakdown||[]).map(function(x){{return x.reason;}}));
+      _atFiltersBuilt=true;
+    }}
+    _AT.all=d.events||[];
+    atApply();
+  }}).catch(function(){{
+    document.getElementById('at-tbody').innerHTML='<tr><td colspan="8" style="text-align:center;color:#A32D2D;padding:20px">could not reach /audit-trail endpoint</td></tr>';
+  }});
+}}
+hlthFetch();gpuFetch();integrityFetch();activityFetch();atFetch();
 </script>
 """
 
@@ -1824,6 +1970,7 @@ def health_section_html(health: EcosystemHealth, control_center_url: str,
         ("storage",  "Disk & Mounts", _health_storage_section_html()),
         ("gpu",      "GPU",           _health_gpu_section_html()),
         ("activity", "Activity",      _health_activity_section_html()),
+        ("audit",    "Audit Trail",   _health_audit_trail_section_html()),
         ("errors",   "Errors",        error_aggregation_section_html(sentry_org, sentry_project_slugs or [])),
     ]
     return misc_section_html(sub_tabs, group_id="health", render_nav=False) + _HEALTH_SCRIPT
@@ -3562,7 +3709,7 @@ function miscSub(groupId, id){{
 SIDEBAR_NAV_SPEC: List[Tuple[str, str, Optional[List[Tuple[str, str]]]]] = [
     ("arch",         "Architecture",      None),
     ("projects",     "Projects",          [("summary", "Code Summary"), ("languages", "Languages"), ("coverage", "Code Coverage")]),
-    ("health",       "Health Status",     [("overview", "Overview"), ("services", "Services"), ("storage", "Disk & Mounts"), ("gpu", "GPU"), ("activity", "Activity"), ("errors", "Errors")]),
+    ("health",       "Health Status",     [("overview", "Overview"), ("services", "Services"), ("storage", "Disk & Mounts"), ("gpu", "GPU"), ("activity", "Activity"), ("audit", "Audit Trail"), ("errors", "Errors")]),
     ("usage",        "Usage",             [("product", "Product Usage"), ("gateway", "API Gateway")]),
     ("llmscloud",    "LLMs & Cloud",      [("llms", "LLMs"), ("cloud", "Cloud"), ("cost", "Cost Tracking")]),
     ("ref",          "Reference Data",    None),
