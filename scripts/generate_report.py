@@ -3216,7 +3216,7 @@ def usage_section_html(control_center_url: str) -> str:
     data: dict = {}
     try:
         with urllib.request.urlopen(
-            f"{control_center_url.rstrip('/')}/usage", timeout=15
+            f"{control_center_url.rstrip('/')}/usage", timeout=60
         ) as r:
             data = json.loads(r.read())
     except Exception as e:
@@ -3228,14 +3228,7 @@ def usage_section_html(control_center_url: str) -> str:
 <div class="section">
   <div class="sec-title">product usage</div>
   <div style="font-size:12px;color:var(--color-text-muted)">
-    Could not reach /usage -- not implemented yet. Expected JSON shape:
-    <pre style="font-size:11px;color:var(--color-text-muted);margin-top:8px;white-space:pre-wrap">{
-  "active_users_7d": int, "active_users_30d": int, "total_sessions_30d": int,
-  "top_plugins": [{"name": str, "runs_30d": int}, ...],
-  "top_workflows": [{"name": str, "runs_30d": int}, ...],
-  "runs_by_day": [{"date": "YYYY-MM-DD", "count": int}, ...],
-  "workflow_success_rate_pct": float
-}</pre>
+    Could not reach control center for usage stats.
   </div>
 </div>
 </div>"""
