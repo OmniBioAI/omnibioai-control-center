@@ -3339,25 +3339,33 @@ SIDEBAR_NAV_SPEC: List[Tuple[str, str, Optional[List[Tuple[str, str]]]]] = [
 def sidebar_nav_html(spec: List[Tuple[str, str, Optional[List[Tuple[str, str]]]]]) -> str:
     """Renders the left sidebar nav markup from SIDEBAR_NAV_SPEC.
 
-    Structure only at this stage -- click behavior (expand/collapse, active
-    highlighting, hash routing) is wired up separately in JS.
+    Group labels toggle their own child list (sbnavToggleGroup) rather than
+    navigating; leaves (top-level or child) select a panel directly
+    (sbnavSelectTop / sbnavSelectChild). URL-hash read/write is layered on
+    top of these same two functions separately, not handled here.
     """
     items = ""
     for i, (top_id, label, children) in enumerate(spec):
         is_default_active = i == 0
         if children:
             child_buttons = "".join(
-                f'<button class="sbnav-item sbnav-child" data-top="{top_id}" data-child="{cid}">{clabel}</button>'
+                f'<button class="sbnav-item sbnav-child" data-top="{top_id}" data-child="{cid}" '
+                f'onclick="sbnavSelectChild(\'{top_id}\',\'{cid}\')">{clabel}</button>'
                 for cid, clabel in children
             )
             items += f"""
 <div class="sbnav-group" data-top="{top_id}">
-  <button class="sbnav-item sbnav-group-label" data-top="{top_id}"><span class="sbnav-caret">&#9656;</span>{label}</button>
+  <button class="sbnav-item sbnav-group-label" data-top="{top_id}" onclick="sbnavToggleGroup('{top_id}')">
+    <span class="sbnav-caret">&#9656;</span>{label}
+  </button>
   <div class="sbnav-children" id="sbnav-children-{top_id}">{child_buttons}</div>
 </div>"""
         else:
             active_cls = " active" if is_default_active else ""
-            items += f'\n<button class="sbnav-item sbnav-leaf{active_cls}" data-top="{top_id}">{label}</button>'
+            items += (
+                f'\n<button class="sbnav-item sbnav-leaf{active_cls}" data-top="{top_id}" '
+                f'onclick="sbnavSelectTop(\'{top_id}\')">{label}</button>'
+            )
     return items
 
 
@@ -4434,6 +4442,47 @@ def build_report(out_html: Path, title: str, timestamp: str,
 </div>
 
 <script>
+function sbnavClearActive(){{
+  document.querySelectorAll('.sbnav-item.active').forEach(function(b){{b.classList.remove('active');}});
+}}
+function sbnavShowPanel(topId){{
+  document.querySelectorAll('.tab-panel').forEach(function(t){{t.classList.remove('active');}});
+  var panel=document.getElementById('tab-'+topId);
+  if(panel)panel.classList.add('active');
+}}
+function sbnavExpandGroup(topId){{
+  var kids=document.getElementById('sbnav-children-'+topId);
+  if(!kids)return;
+  kids.classList.add('expanded');
+  var grp=document.querySelector('.sbnav-group[data-top="'+topId+'"]');
+  if(grp)grp.classList.add('expanded');
+}}
+function sbnavToggleGroup(topId){{
+  var kids=document.getElementById('sbnav-children-'+topId);
+  if(!kids)return;
+  var grp=document.querySelector('.sbnav-group[data-top="'+topId+'"]');
+  if(kids.classList.contains('expanded')){{
+    kids.classList.remove('expanded');
+    if(grp)grp.classList.remove('expanded');
+  }} else {{
+    sbnavExpandGroup(topId);
+  }}
+}}
+function sbnavSelectTop(topId){{
+  sbnavShowPanel(topId);
+  sbnavClearActive();
+  var btn=document.querySelector('.sbnav-leaf[data-top="'+topId+'"]');
+  if(btn)btn.classList.add('active');
+}}
+function sbnavSelectChild(topId, childId){{
+  sbnavShowPanel(topId);
+  sbnavExpandGroup(topId);
+  sbnavClearActive();
+  var btn=document.querySelector('.sbnav-child[data-top="'+topId+'"][data-child="'+childId+'"]');
+  if(btn)btn.classList.add('active');
+  if(typeof miscSub==='function') miscSub(topId, 'misc-panel-'+topId+'-'+childId);
+}}
+
 (function globalHealthBadge(){{
   fetch('/summary').then(function(r){{return r.json();}}).then(function(d){{
     var ov=(d.overall_status||'UNKNOWN').toUpperCase();
