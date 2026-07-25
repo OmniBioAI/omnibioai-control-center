@@ -95,6 +95,37 @@ def _default_compose_path() -> Path:
 
 DEFAULT_COMPOSE_PATH = _default_compose_path()
 
+
+def _load_env_file(path: Path) -> None:
+    """Best-effort .env loader (KEY=VALUE lines, optional 'export ' prefix,
+    '#' comments and blank lines skipped). Never overrides a variable
+    already present in the process environment, so an explicit shell
+    export still wins over the file. Silently no-ops if the file doesn't
+    exist or can't be read -- mirrors docker-compose's own env_file
+    handling for the same file, without adding a python-dotenv dependency.
+    """
+    if not path.exists():
+        return
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export "):].strip()
+            if "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+    except OSError:
+        pass
+
+
+_load_env_file(DEFAULT_COMPOSE_PATH.parent / ".env")
+
 # shared color palette (matches all 5 tabs)
 COLORS = {
     "teal":   {"fill": "#E1F5EE", "stroke": "#1D9E75", "text": "#0F6E56"},
