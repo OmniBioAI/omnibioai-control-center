@@ -3717,7 +3717,7 @@ SIDEBAR_NAV_SPEC: List[Tuple[str, str, Optional[List[Tuple[str, str]]]]] = [
     ("kb",           "AI Knowledge Base", None),
     ("modelreg",     "Model Registry",    None),
     ("dockerimages", "Docker Images",     [("containers", "Platform Containers"), ("sif", "Tool SIF Images"), ("plugins", "Plugin Docker Images")]),
-    ("misc",         "Miscellaneous",     [("issues", "Known Issues"), ("runs", "Active Runs"), ("storage", "Storage"), ("catalog", "Catalog"), ("database", "Data Layer"), ("queue", "Task Queue"), ("license", "License"), ("secrets", "Secrets Audit"), ("images", "Image Freshness"), ("ports", "Exposed Ports"), ("cicd", "CI/CD Health"), ("backup", "Backup Status")]),
+    ("misc",         "Miscellaneous",     [("issues", "Known Issues"), ("runs", "Active Runs"), ("storage", "Storage"), ("catalog", "Catalog"), ("database", "Data Layer"), ("queue", "Task Queue"), ("license", "License"), ("secrets", "Secrets Audit"), ("images", "Image Freshness"), ("ports", "Exposed Ports"), ("cicd", "CI/CD Health"), ("cvetrend", "CVE Trend"), ("backup", "Backup Status")]),
 ]
 
 
@@ -3987,10 +3987,26 @@ def exposed_ports_section_html(compose_path: Path) -> str:
 """
 
 
-def _run_vuln_scan(repo_path: Path) -> Optional[int]:
+_SEVERITY_LEVELS = ("critical", "high", "moderate", "low", "info")
+
+
+def _run_vuln_scan(
+    repo_path: Path,
+) -> Tuple[Optional[str], Optional[int], Optional[Dict[str, int]]]:
     """Runs whichever of pip-audit / npm audit is available and applicable for
-    this repo, capped at 30s. Returns None if neither tool is available, the
-    repo has no matching manifest, or the scan times out/errors."""
+    this repo, capped at 30s. Returns (scanner, vuln_count, severity):
+
+    - scanner is "pip-audit" | "npm-audit" | None.
+    - scanner/vuln_count/severity are all None together when neither tool is
+      available, the repo has no matching manifest, or the scan times
+      out/errors -- distinct from a real scan that found zero issues, which
+      returns vuln_count=0 (not None).
+    - severity is a per-level count dict, or None. pip-audit's JSON output
+      (2.10.1) carries no severity/CVSS field at all (only
+      id/fix_versions/aliases/description), so severity is always None for
+      pip-audit scans regardless of vuln_count -- only npm audit's JSON
+      reports per-severity counts.
+    """
     requirements_txt = repo_path / "requirements.txt"
     has_requirements = requirements_txt.exists()
     has_pyproject = (repo_path / "pyproject.toml").exists()
@@ -4013,21 +4029,31 @@ def _run_vuln_scan(repo_path: Path) -> Optional[int]:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             data = json.loads(proc.stdout or "[]")
             deps = data if isinstance(data, list) else data.get("dependencies", [])
-            return sum(len(d.get("vulns", [])) for d in deps if isinstance(d, dict))
+            vuln_count = sum(len(d.get("vulns", [])) for d in deps if isinstance(d, dict))
+            return "pip-audit", vuln_count, None
         if has_js and shutil.which("npm"):
             proc = subprocess.run(["npm", "audit", "--json"], cwd=str(repo_path),
                                    capture_output=True, text=True, timeout=30)
             data = json.loads(proc.stdout or "{}")
-            total = ((data.get("metadata") or {}).get("vulnerabilities") or {}).get("total")
+            meta_vulns = (data.get("metadata") or {}).get("vulnerabilities") or {}
+            total = meta_vulns.get("total")
             if total is not None:
-                return int(total)
-            vulns = data.get("vulnerabilities") or {}
-            return sum(int(v) for v in vulns.values() if isinstance(v, (int, float)))
+                vuln_count = int(total)
+                severity_source = meta_vulns
+            else:
+                vulns = data.get("vulnerabilities") or {}
+                vuln_count = sum(int(v) for v in vulns.values() if isinstance(v, (int, float)))
+                severity_source = vulns
+            severity = {
+                lvl: int(severity_source[lvl]) for lvl in _SEVERITY_LEVELS
+                if isinstance(severity_source.get(lvl), (int, float))
+            }
+            return "npm-audit", vuln_count, (severity or None)
     except subprocess.TimeoutExpired:
-        return None
+        return None, None, None
     except Exception:
-        return None
-    return None
+        return None, None, None
+    return None, None, None
 
 
 _CI_STATUS_COLOR = {
@@ -4085,12 +4111,45 @@ def _cicd_row_for_target(
             print(f"[report] cicd_health_section_html CI fetch failed for {name}: {type(e).__name__}: {e}", flush=True)
             ci_status, ci_date = "unknown", ""
 
-    vuln_count = _run_vuln_scan(repo_path)
+    scanner, vuln_count, severity = _run_vuln_scan(repo_path)
     return {"repo": name, "has_ci": has_ci, "ci_status": ci_status,
-            "ci_date": ci_date, "vuln_count": vuln_count}
+            "ci_date": ci_date, "scanner": scanner, "vuln_count": vuln_count,
+            "severity": severity}
 
 
-def cicd_health_section_html(ecosystem_root: Path, targets: List[str]) -> str:
+def record_cve_history(rows: List[Dict[str, Any]], work_dir: Path, generated_at: str) -> None:
+    """Appends one cve_history.json record per repo (as produced by
+    _cicd_row_for_target/_run_vuln_scan) so cve_trend_section_html can chart
+    vuln_count over time. Append-only -- prior runs' entries are preserved,
+    never overwritten or pruned.
+
+    scanner/vuln_count/severity are carried through as-is: all three None
+    together means no scanner applied for that repo; vuln_count=0 with a
+    real scanner name means a real scan found nothing.
+    """
+    history_path = work_dir / "cve_history.json"
+    try:
+        existing = json.loads(history_path.read_text(encoding="utf-8"))
+        if not isinstance(existing, list):
+            existing = []
+    except (FileNotFoundError, json.JSONDecodeError):
+        existing = []
+
+    for r in rows:
+        existing.append({
+            "generated_at": generated_at,
+            "repo": r["repo"],
+            "scanner": r.get("scanner"),
+            "vuln_count": r.get("vuln_count"),
+            "severity": r.get("severity"),
+        })
+
+    work_dir.mkdir(parents=True, exist_ok=True)
+    history_path.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def cicd_health_section_html(ecosystem_root: Path, targets: List[str],
+                              work_dir: Path, generated_at: str) -> str:
     github_token = os.environ.get("GITHUB_TOKEN")
     github_owner = os.environ.get("GITHUB_OWNER", "omnibioai")
 
@@ -4107,6 +4166,8 @@ def cicd_health_section_html(ecosystem_root: Path, targets: List[str]) -> str:
             [(name, ecosystem_root, github_token, github_owner) for name in targets],
         )
     rows: List[Dict[str, Any]] = [r for r in results if r is not None]
+
+    record_cve_history(rows, work_dir, generated_at)
 
     passing = sum(1 for r in rows if r["ci_status"] == "passing")
     failing = sum(1 for r in rows if r["ci_status"] == "failing")
@@ -4152,6 +4213,131 @@ def cicd_health_section_html(ecosystem_root: Path, targets: List[str]) -> str:
   </div>
 </div>
 </div>
+"""
+
+
+_CVE_MIN_TREND_POINTS = 3
+
+
+def _cve_repo_table_html(rows: List[Dict[str, Any]]) -> str:
+    def _row(r):
+        vc = r.get("vuln_count")
+        scanner = r.get("scanner") or "—"
+        vc_html = "—" if vc is None else \
+            (f'<span style="color:#A32D2D;font-weight:600">{vc}</span>' if vc > 0 else "0")
+        severity = r.get("severity") or {}
+        sev_parts = [f"{lvl}: {severity[lvl]}" for lvl in _SEVERITY_LEVELS if severity.get(lvl)]
+        sev_html = ", ".join(sev_parts) if sev_parts else ("—" if not severity else "0")
+        return f"""<tr>
+          <td style="font-weight:600;font-size:12px">{r.get('repo', '')}</td>
+          <td style="font-size:11px;color:var(--color-text-muted)">{scanner}</td>
+          <td class="r">{vc_html}</td>
+          <td style="font-size:11px;color:var(--color-text-muted)">{sev_html}</td>
+        </tr>"""
+
+    table_rows = "".join(_row(r) for r in sorted(rows, key=lambda r: r.get("repo", ""))) or \
+        '<tr><td colspan="4" style="text-align:center;color:var(--color-text-muted);padding:20px">no repos found</td></tr>'
+
+    return f"""<div class="section">
+  <div class="sec-title">latest scan, per repo</div>
+  <div class="sec-sub">severity breakdown is only available for npm-audit scans -- pip-audit's JSON output doesn't classify severity, so pip-audit-scanned repos always show "—" there even with a real vuln count</div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>repo</th><th>scanner</th><th class="r">vulns</th><th>severity</th></tr></thead>
+      <tbody>{table_rows}</tbody>
+    </table>
+  </div>
+</div>"""
+
+
+def cve_trend_section_html(work_dir: Path) -> str:
+    """
+    Reads {work_dir}/cve_history.json -- one record per repo per report
+    generation run, appended by record_cve_history() -- and renders an
+    aggregate known-vulnerabilities trend line across runs, plus a per-repo
+    breakdown table for the latest run.
+
+    Needs at least _CVE_MIN_TREND_POINTS distinct runs before a trend line
+    is meaningful; below that, shows the latest scan's table alone with an
+    explanatory note instead of an empty/misleading chart.
+    """
+    history_path = work_dir / "cve_history.json"
+    try:
+        history = json.loads(history_path.read_text(encoding="utf-8"))
+        if not isinstance(history, list):
+            history = []
+    except (FileNotFoundError, json.JSONDecodeError):
+        history = []
+
+    if not history:
+        return """
+<div class="tab-section">
+<div class="section">
+  <div class="sec-title">CVE trend</div>
+  <div style="font-size:12px;color:var(--color-text-muted)">
+    No CVE history recorded yet -- this fills in automatically each time a
+    report is generated (see the CI/CD Health tab for the current scan).
+  </div>
+</div>
+</div>"""
+
+    # cve_history.json is append-only and each run's per-repo rows are
+    # written together, so grouping by generated_at (dict preserves
+    # insertion order) recovers one ordered point per run without needing
+    # a separate sort key.
+    runs: Dict[str, List[Dict[str, Any]]] = {}
+    for rec in history:
+        runs.setdefault(rec.get("generated_at", ""), []).append(rec)
+    run_timestamps = list(runs.keys())
+    latest_rows = runs[run_timestamps[-1]]
+    repo_table_html = _cve_repo_table_html(latest_rows)
+
+    if len(run_timestamps) < _CVE_MIN_TREND_POINTS:
+        schedule_hours = os.environ.get("REPORT_SCHEDULE_HOURS", "6")
+        return f"""
+<div class="tab-section">
+<div class="section">
+  <div class="sec-title">CVE trend</div>
+  <div style="font-size:12px;color:var(--color-text-muted)">
+    Not enough history yet to chart a trend ({len(run_timestamps)} of
+    {_CVE_MIN_TREND_POINTS} minimum report runs recorded) -- this fills in
+    automatically as scheduled reports run (every {schedule_hours}h).
+    Showing the latest scan below.
+  </div>
+</div>
+{repo_table_html}
+</div>"""
+
+    trend_labels = _jsl(run_timestamps)
+    trend_totals = _jsn([
+        sum(r.get("vuln_count") or 0 for r in runs[ts] if r.get("vuln_count") is not None)
+        for ts in run_timestamps
+    ])
+
+    return f"""
+<div class="tab-section">
+<div class="section">
+  <div class="sec-title">CVE trend</div>
+  <div class="sec-sub">total known vulnerabilities across all scanned repos, per report run</div>
+  <div style="position:relative;height:220px"><canvas id="cve-trend-chart"></canvas></div>
+</div>
+{repo_table_html}
+</div>
+
+<script>
+(function(){{
+  var el=document.getElementById('cve-trend-chart');
+  if(!el)return;
+  new Chart(el,{{
+    type:'line',
+    data:{{labels:{trend_labels},datasets:[{{data:{trend_totals},borderColor:'#A32D2D',backgroundColor:'#A32D2D22',fill:true,tension:0.25,pointRadius:2}}]}},
+    options:{{responsive:true,maintainAspectRatio:false,
+      plugins:{{legend:{{display:false}}}},
+      scales:{{y:{{beginAtZero:true,ticks:{{font:{{size:10}},color:'#9CA3AF'}},grid:{{color:'rgba(0,0,0,0.04)'}},border:{{display:false}}}},
+               x:{{ticks:{{font:{{size:9}},color:'#9CA3AF',maxRotation:45,autoSkip:true}},grid:{{display:false}},border:{{display:false}}}}}}}}
+  }});
+}})();
+</script>
 """
 
 
@@ -4746,6 +4932,13 @@ def build_report(out_html: Path, title: str, timestamp: str,
         ("product", "Product Usage", usage_section_html(control_center_url)),
         ("gateway", "API Gateway",   gateway_traffic_section_html(control_center_url)),
     ], group_id="usage", render_nav=False)
+    # ISO8601 (distinct from the display-formatted `timestamp` string used
+    # elsewhere) so cve_history.json entries sort/parse predictably; must be
+    # computed before cve_trend_section_html runs, since that reads back
+    # the entries cicd_health_section_html's record_cve_history() call just
+    # appended for this run.
+    cve_generated_at = datetime.now(timezone.utc).isoformat()
+    cicd_health_html = cicd_health_section_html(ecosystem_root, DEFAULT_TARGETS, work_dir, cve_generated_at)
     misc_html = misc_section_html([
         ("issues", "Known Issues", known_issues_section_html(ecosystem_root)),
         ("runs", "Active Runs", active_runs_section_html(work_dir)),
@@ -4757,8 +4950,9 @@ def build_report(out_html: Path, title: str, timestamp: str,
         ("secrets",  "Secrets Audit",   secrets_audit_section_html(compose_path)),
         ("images",   "Image Freshness", image_freshness_section_html(control_center_url)),
         ("ports",    "Exposed Ports",   exposed_ports_section_html(compose_path)),
-        ("cicd",   "CI/CD Health",   cicd_health_section_html(ecosystem_root, DEFAULT_TARGETS)),
-        ("backup", "Backup Status",  backup_status_section_html(work_dir)),
+        ("cicd",     "CI/CD Health",    cicd_health_html),
+        ("cvetrend", "CVE Trend",       cve_trend_section_html(work_dir)),
+        ("backup",   "Backup Status",   backup_status_section_html(work_dir)),
     ], group_id="misc", render_nav=False)
     llmscloud_html = misc_section_html([
         ("llms", "LLMs", llms_html),
