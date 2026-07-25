@@ -3327,7 +3327,7 @@ SIDEBAR_NAV_SPEC: List[Tuple[str, str, Optional[List[Tuple[str, str]]]]] = [
     ("projects",     "Projects",          [("summary", "Code Summary"), ("languages", "Languages"), ("coverage", "Code Coverage")]),
     ("health",       "Health Status",     [("overview", "Overview"), ("services", "Services"), ("storage", "Disk & Mounts"), ("gpu", "GPU"), ("activity", "Activity"), ("errors", "Errors")]),
     ("usage",        "Usage",             [("product", "Product Usage"), ("gateway", "API Gateway")]),
-    ("llmscloud",    "LLMs & Cloud",      None),
+    ("llmscloud",    "LLMs & Cloud",      [("llms", "LLMs"), ("cloud", "Cloud")]),
     ("ref",          "Reference Data",    None),
     ("kb",           "AI Knowledge Base", None),
     ("modelreg",     "Model Registry",    None),
@@ -4343,7 +4343,7 @@ def build_report(out_html: Path, title: str, timestamp: str,
     llmscloud_html = misc_section_html([
         ("llms", "LLMs", llms_html),
         ("cloud", "Cloud", cloud_html),
-    ], group_id="llmscloud")
+    ], group_id="llmscloud", render_nav=False)
 
     html = f"""<!doctype html>
 <html lang="en">
