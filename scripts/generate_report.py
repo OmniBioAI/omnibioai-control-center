@@ -2248,7 +2248,7 @@ def storage_section_html(control_center_url: str) -> str:
     data: dict = {}
     try:
         with urllib.request.urlopen(
-            f"{control_center_url.rstrip('/')}/storage", timeout=120
+            f"{control_center_url.rstrip('/')}/storage", timeout=200
         ) as r:
             data = json.loads(r.read())
     except Exception as e:
