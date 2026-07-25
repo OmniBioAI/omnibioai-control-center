@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from control_center.checks.activity import get_activity_status
+from control_center.checks.audit_trail import get_audit_trail
 from control_center.checks.celery_status import get_celery_status
 from control_center.checks.database_status import get_database_status
 from control_center.checks.gateway_traffic import get_gateway_traffic
@@ -52,6 +53,11 @@ def usage_status() -> JSONResponse:
 @router.get("/gateway-traffic")
 def gateway_traffic() -> JSONResponse:
     return JSONResponse(get_gateway_traffic())
+
+
+@router.get("/audit-trail")
+def audit_trail() -> JSONResponse:
+    return JSONResponse(get_audit_trail())
 
 
 @router.get("/activity")
