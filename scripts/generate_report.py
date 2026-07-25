@@ -4318,6 +4318,10 @@ def build_report(out_html: Path, title: str, timestamp: str,
     catalog_html  = catalog_section_html(ecosystem_root)
     model_registry_html = model_registry_section_html(registry_root)
     dockerimages_html = docker_images_placeholder_section_html()
+    sbnav_children_json = json.dumps({
+        tid: [cid for cid, _ in children]
+        for tid, _, children in SIDEBAR_NAV_SPEC if children
+    })
     usage_tab_html = misc_section_html([
         ("product", "Product Usage", usage_section_html(control_center_url)),
         ("gateway", "API Gateway",   gateway_traffic_section_html(control_center_url)),
@@ -4468,20 +4472,47 @@ function sbnavToggleGroup(topId){{
     sbnavExpandGroup(topId);
   }}
 }}
-function sbnavSelectTop(topId){{
+function sbnavSelectTop(topId, skipHash){{
   sbnavShowPanel(topId);
   sbnavClearActive();
   var btn=document.querySelector('.sbnav-leaf[data-top="'+topId+'"]');
   if(btn)btn.classList.add('active');
+  if(!skipHash) location.hash = topId;
 }}
-function sbnavSelectChild(topId, childId){{
+function sbnavSelectChild(topId, childId, skipHash){{
   sbnavShowPanel(topId);
   sbnavExpandGroup(topId);
   sbnavClearActive();
   var btn=document.querySelector('.sbnav-child[data-top="'+topId+'"][data-child="'+childId+'"]');
   if(btn)btn.classList.add('active');
   if(typeof miscSub==='function') miscSub(topId, 'misc-panel-'+topId+'-'+childId);
+  if(!skipHash) location.hash = topId+'/'+childId;
 }}
+var _SBNAV_CHILDREN = {sbnav_children_json};
+function sbnavApplyHash(){{
+  var h=(location.hash||'').replace(/^#/,'');
+  if(!h) return false;
+  var parts=h.split('/');
+  var topId=parts[0], childId=parts[1];
+  if(_SBNAV_CHILDREN.hasOwnProperty(topId)){{
+    var kids=_SBNAV_CHILDREN[topId];
+    if(childId && kids.indexOf(childId)!==-1){{
+      sbnavSelectChild(topId, childId, true);
+    }} else {{
+      sbnavSelectChild(topId, kids[0], true);
+    }}
+    return true;
+  }}
+  if(document.getElementById('tab-'+topId)){{
+    sbnavSelectTop(topId, true);
+    return true;
+  }}
+  return false;
+}}
+if(!sbnavApplyHash()){{
+  sbnavSelectTop('arch', true);
+}}
+window.addEventListener('hashchange', function(){{ sbnavApplyHash(); }});
 
 (function globalHealthBadge(){{
   fetch('/summary').then(function(r){{return r.json();}}).then(function(d){{
