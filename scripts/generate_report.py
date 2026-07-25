@@ -38,6 +38,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -4063,32 +4064,49 @@ def _fetch_ci_status(owner: str, repo: str, token: str) -> Dict[str, Any]:
     return {"status": ci_status, "date": run.get("updated_at", run.get("created_at", ""))}
 
 
+def _cicd_row_for_target(
+    args: Tuple[str, Path, Optional[str], str]
+) -> Optional[Dict[str, Any]]:
+    name, ecosystem_root, github_token, github_owner = args
+    repo_path = ecosystem_root / name
+    if not repo_path.is_dir():
+        return None
+    has_ci = (repo_path / ".github" / "workflows").is_dir()
+
+    if not has_ci:
+        ci_status, ci_date = "no ci", ""
+    elif not github_token:
+        ci_status, ci_date = "unknown", ""
+    else:
+        try:
+            info = _fetch_ci_status(github_owner, name, github_token)
+            ci_status, ci_date = info["status"], info["date"]
+        except Exception as e:
+            print(f"[report] cicd_health_section_html CI fetch failed for {name}: {type(e).__name__}: {e}", flush=True)
+            ci_status, ci_date = "unknown", ""
+
+    vuln_count = _run_vuln_scan(repo_path)
+    return {"repo": name, "has_ci": has_ci, "ci_status": ci_status,
+            "ci_date": ci_date, "vuln_count": vuln_count}
+
+
 def cicd_health_section_html(ecosystem_root: Path, targets: List[str]) -> str:
     github_token = os.environ.get("GITHUB_TOKEN")
     github_owner = os.environ.get("GITHUB_OWNER", "omnibioai")
 
-    rows: List[Dict[str, Any]] = []
-    for name in targets:
-        repo_path = ecosystem_root / name
-        if not repo_path.is_dir():
-            continue
-        has_ci = (repo_path / ".github" / "workflows").is_dir()
-
-        if not has_ci:
-            ci_status, ci_date = "no ci", ""
-        elif not github_token:
-            ci_status, ci_date = "unknown", ""
-        else:
-            try:
-                info = _fetch_ci_status(github_owner, name, github_token)
-                ci_status, ci_date = info["status"], info["date"]
-            except Exception as e:
-                print(f"[report] cicd_health_section_html CI fetch failed for {name}: {type(e).__name__}: {e}", flush=True)
-                ci_status, ci_date = "unknown", ""
-
-        vuln_count = _run_vuln_scan(repo_path)
-        rows.append({"repo": name, "has_ci": has_ci, "ci_status": ci_status,
-                     "ci_date": ci_date, "vuln_count": vuln_count})
+    # Each target's CI fetch + vuln scan is an independent network/subprocess
+    # call (pip-audit/npm audit alone can take up to 30s each) -- run them
+    # concurrently rather than serially, or this section alone can eat
+    # several minutes and blow the 10-minute report-generation budget in
+    # main.py's _run_report_job (measured: ~155s serially across 28 repos).
+    # ThreadPoolExecutor.map preserves input order in its results, so row
+    # order is unaffected.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = pool.map(
+            _cicd_row_for_target,
+            [(name, ecosystem_root, github_token, github_owner) for name in targets],
+        )
+    rows: List[Dict[str, Any]] = [r for r in results if r is not None]
 
     passing = sum(1 for r in rows if r["ci_status"] == "passing")
     failing = sum(1 for r in rows if r["ci_status"] == "failing")
