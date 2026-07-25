@@ -1792,7 +1792,7 @@ def health_section_html(health: EcosystemHealth, control_center_url: str,
         ("activity", "Activity",      _health_activity_section_html()),
         ("errors",   "Errors",        error_aggregation_section_html(sentry_org, sentry_project_slugs or [])),
     ]
-    return misc_section_html(sub_tabs, group_id="health") + _HEALTH_SCRIPT
+    return misc_section_html(sub_tabs, group_id="health", render_nav=False) + _HEALTH_SCRIPT
 
 def llm_section_html(control_center_url: str) -> str:
     """Fetch Ollama models and API key status from control center."""
@@ -2861,6 +2861,33 @@ def _scan_model_registry(registry_root: Path) -> List[Dict[str, Any]]:
     return rows
 
 
+def docker_images_placeholder_section_html() -> str:
+    """Minimal placeholder for the sidebar's Docker Images leaf.
+
+    The OmniBioAI app has its own Docker view (DockerPage.tsx, covering
+    platform containers / tool SIF images / plugin images), but that app
+    has no URL-based routing -- its tab state is in-memory React state, not
+    a path -- so there is no deep link this static report can point at
+    without it just landing on the app's default tab. Deliberately not
+    reusing docker_section_html_UNUSED (kept commented-out elsewhere as a
+    duplicate of that same React page); this is new, separate content.
+    """
+    return """
+<div class="tab-section">
+<div class="section">
+  <div class="sec-title">Docker Images</div>
+  <div class="sec-sub">containers &amp; images</div>
+  <div style="font-size:13px;color:var(--color-text-muted);padding:8px 0;max-width:640px">
+    Docker container and image status (platform containers, tool SIF images, plugin images)
+    is tracked in the OmniBioAI app itself. That view isn't reachable by a direct link from
+    this static report -- its navigation is in-app tab state, not a URL -- so see the
+    Docker Images view in the OmniBioAI app directly.
+  </div>
+</div>
+</div>
+"""
+
+
 def model_registry_section_html(registry_root: Path) -> str:
     rows = _scan_model_registry(registry_root)
 
@@ -3219,7 +3246,8 @@ def gateway_traffic_section_html(control_center_url: str) -> str:
 
 # ── TAB: MISC ────────────────────────────────────────────────────────────────
 
-def misc_section_html(sub_tabs: List[Tuple[str, str, str]], group_id: str = "misc") -> str:
+def misc_section_html(sub_tabs: List[Tuple[str, str, str]], group_id: str = "misc",
+                       render_nav: bool = True) -> str:
     """
     sub_tabs: list of (id, label, html_content) tuples. Renders a sub-nav
     plus one panel per sub-tab; first sub-tab is active by default.
@@ -3231,6 +3259,12 @@ def misc_section_html(sub_tabs: List[Tuple[str, str, str]], group_id: str = "mis
     as "misc-panel-{group_id}-{sid}" and miscSub() only ever queries
     within this instance's own wrapper div (id "misc-wrap-{group_id}"),
     so two instances never hide/show each other's panels.
+
+    render_nav=False skips the inline sub-nav button row (panels + the
+    miscSub() toggle function are unchanged) -- used when an external
+    navigation UI (the sidebar) already lists these sub-tabs and drives
+    miscSub() itself, so the inline row would just be a redundant second
+    nav for the same choice.
     """
     if not sub_tabs:
         return '<div class="tab-section"><div style="font-size:12px;color:var(--color-text-muted)">No misc sections configured yet.</div></div>'
@@ -3243,23 +3277,26 @@ def misc_section_html(sub_tabs: List[Tuple[str, str, str]], group_id: str = "mis
         weight = "600" if active else "400"
         border = "#00e5a0" if active else "transparent"
         panel_id = f"misc-panel-{group_id}-{sid}"
-        nav_buttons += (
-            f'<button class="misc-sub" data-sub="{panel_id}" '
-            f'onclick="miscSub(\'{group_id}\',\'{panel_id}\')" '
-            f'style="padding:10px 16px;font-size:13px;color:{color};font-weight:{weight};'
-            f'background:none;border:none;border-bottom:2px solid {border};cursor:pointer;'
-            f'white-space:nowrap;margin-bottom:-1px;font-family:inherit">{label}</button>'
-        )
+        if render_nav:
+            nav_buttons += (
+                f'<button class="misc-sub" data-sub="{panel_id}" '
+                f'onclick="miscSub(\'{group_id}\',\'{panel_id}\')" '
+                f'style="padding:10px 16px;font-size:13px;color:{color};font-weight:{weight};'
+                f'background:none;border:none;border-bottom:2px solid {border};cursor:pointer;'
+                f'white-space:nowrap;margin-bottom:-1px;font-family:inherit">{label}</button>'
+            )
         display = "" if active else "display:none"
         panels += f'<div id="{panel_id}" style="{display}">{content}</div>'
+
+    nav_row = (
+        f'<div style="display:flex;border-bottom:1px solid #2a2d3e;margin-bottom:16px">\n  {nav_buttons}\n</div>\n'
+        if render_nav else ""
+    )
 
     return f"""
 <div class="tab-section">
 <div id="misc-wrap-{group_id}">
-<div style="display:flex;border-bottom:1px solid #2a2d3e;margin-bottom:16px">
-  {nav_buttons}
-</div>
-{panels}
+{nav_row}{panels}
 </div>
 </div>
 
@@ -3279,6 +3316,49 @@ function miscSub(groupId, id){{
 }}
 </script>
 """
+
+
+# ── SIDEBAR NAV ────────────────────────────────────────────────────────────────
+# (top_id, label, children) -- children is None for a single-view leaf, or a
+# list of (child_id, child_label) tuples for a group whose panel content was
+# built with misc_section_html(..., group_id=top_id, render_nav=False).
+SIDEBAR_NAV_SPEC: List[Tuple[str, str, Optional[List[Tuple[str, str]]]]] = [
+    ("arch",         "Architecture",      None),
+    ("projects",     "Projects",          [("summary", "Code Summary"), ("languages", "Languages"), ("coverage", "Code Coverage")]),
+    ("health",       "Health Status",     [("overview", "Overview"), ("services", "Services"), ("storage", "Disk & Mounts"), ("gpu", "GPU"), ("activity", "Activity"), ("errors", "Errors")]),
+    ("usage",        "Usage",             [("product", "Product Usage"), ("gateway", "API Gateway")]),
+    ("llmscloud",    "LLMs & Cloud",      None),
+    ("ref",          "Reference Data",    None),
+    ("kb",           "AI Knowledge Base", None),
+    ("modelreg",     "Model Registry",    None),
+    ("dockerimages", "Docker Images",     None),
+    ("misc",         "Miscellaneous",     [("issues", "Known Issues"), ("runs", "Active Runs"), ("storage", "Storage"), ("catalog", "Catalog"), ("database", "Data Layer"), ("queue", "Task Queue"), ("license", "License"), ("secrets", "Secrets Audit"), ("images", "Image Freshness"), ("ports", "Exposed Ports"), ("cicd", "CI/CD Health"), ("backup", "Backup Status")]),
+]
+
+
+def sidebar_nav_html(spec: List[Tuple[str, str, Optional[List[Tuple[str, str]]]]]) -> str:
+    """Renders the left sidebar nav markup from SIDEBAR_NAV_SPEC.
+
+    Structure only at this stage -- click behavior (expand/collapse, active
+    highlighting, hash routing) is wired up separately in JS.
+    """
+    items = ""
+    for i, (top_id, label, children) in enumerate(spec):
+        is_default_active = i == 0
+        if children:
+            child_buttons = "".join(
+                f'<button class="sbnav-item sbnav-child" data-top="{top_id}" data-child="{cid}">{clabel}</button>'
+                for cid, clabel in children
+            )
+            items += f"""
+<div class="sbnav-group" data-top="{top_id}">
+  <button class="sbnav-item sbnav-group-label" data-top="{top_id}"><span class="sbnav-caret">&#9656;</span>{label}</button>
+  <div class="sbnav-children" id="sbnav-children-{top_id}">{child_buttons}</div>
+</div>"""
+        else:
+            active_cls = " active" if is_default_active else ""
+            items += f'\n<button class="sbnav-item sbnav-leaf{active_cls}" data-top="{top_id}">{label}</button>'
+    return items
 
 
 KNOWN_ISSUES_PATH_DEFAULT = "omnibioai-work/known_issues.json"
@@ -4220,7 +4300,7 @@ def build_report(out_html: Path, title: str, timestamp: str,
         ("summary",   "Code Summary", projects_section_html(project_totals, grand)),
         ("languages", "Languages",    languages_section_html(language_totals, grand)),
         ("coverage",  "Code Coverage", coverage_section_html(coverage_df, timestamp)),
-    ], group_id="projects")
+    ], group_id="projects", render_nav=False)
     hlth_html     = health_section_html(health, control_center_url, sentry_org, sentry_project_slugs)
     llms_html     = llm_section_html(control_center_url)
     cloud_html    = cloud_section_html(control_center_url)
@@ -4229,10 +4309,11 @@ def build_report(out_html: Path, title: str, timestamp: str,
     storage_html  = storage_section_html(control_center_url)
     catalog_html  = catalog_section_html(ecosystem_root)
     model_registry_html = model_registry_section_html(registry_root)
+    dockerimages_html = docker_images_placeholder_section_html()
     usage_tab_html = misc_section_html([
         ("product", "Product Usage", usage_section_html(control_center_url)),
         ("gateway", "API Gateway",   gateway_traffic_section_html(control_center_url)),
-    ], group_id="usage")
+    ], group_id="usage", render_nav=False)
     misc_html = misc_section_html([
         ("issues", "Known Issues", known_issues_section_html(ecosystem_root)),
         ("runs", "Active Runs", active_runs_section_html(work_dir)),
@@ -4246,7 +4327,7 @@ def build_report(out_html: Path, title: str, timestamp: str,
         ("ports",    "Exposed Ports",   exposed_ports_section_html(compose_path)),
         ("cicd",   "CI/CD Health",   cicd_health_section_html(ecosystem_root, DEFAULT_TARGETS)),
         ("backup", "Backup Status",  backup_status_section_html(work_dir)),
-    ], group_id="misc")
+    ], group_id="misc", render_nav=False)
     llmscloud_html = misc_section_html([
         ("llms", "LLMs", llms_html),
         ("cloud", "Cloud", cloud_html),
@@ -4281,12 +4362,20 @@ def build_report(out_html: Path, title: str, timestamp: str,
     .gk {{background:var(--color-bg-surface);border:0.5px solid var(--color-border);border-radius:10px;padding:12px 18px;flex:1;min-width:100px}}
     .gk-lbl {{font-size:11px;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}}
     .gk-val {{font-size:24px;font-weight:500;color:var(--color-text)}}
-    .tab-nav {{display:flex;gap:0;border-bottom:1px solid var(--color-border);margin-bottom:0;background:var(--color-bg-surface);border-radius:12px 12px 0 0;padding:0 4px}}
-    .tab-btn {{padding:12px 20px;font-size:13px;font-weight:600;color:var(--color-text-muted);background:transparent;border:none;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap;margin-bottom:-1px;font-family:inherit}}
-    .tab-btn:hover {{color:var(--color-text)}}
-    .tab-btn.active {{color:var(--color-text);border-bottom-color:var(--color-accent)}}
-    .tab-panel {{display:none;background:var(--color-bg-surface);border:1px solid var(--color-border);border-top:none;border-radius:0 0 12px 12px;padding:0 20px}}
+    .tab-panel {{display:none}}
     .tab-panel.active {{display:block}}
+    .layout-split {{display:flex;align-items:flex-start;background:var(--color-bg-surface);border:1px solid var(--color-border);border-radius:12px;overflow:hidden}}
+    .sidebar {{flex:0 0 240px;width:240px;box-sizing:border-box;border-right:1px solid var(--color-border);padding:10px 0;position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto}}
+    .sbnav-item {{display:flex;align-items:center;gap:7px;width:100%;text-align:left;padding:9px 20px;font-size:13px;font-weight:600;color:var(--color-text-muted);background:transparent;border:none;border-left:3px solid transparent;cursor:pointer;white-space:nowrap;font-family:inherit;box-sizing:border-box}}
+    .sbnav-item:hover {{color:var(--color-text);background:var(--color-bg-surface2)}}
+    .sbnav-item.active {{color:var(--color-text);background:var(--color-bg-surface2);border-left-color:var(--color-accent)}}
+    .sbnav-child {{padding-left:37px;font-weight:400;font-size:12.5px}}
+    .sbnav-child.active {{padding-left:34px}}
+    .sbnav-children {{display:none;flex-direction:column}}
+    .sbnav-children.expanded {{display:flex}}
+    .sbnav-caret {{display:inline-block;font-size:9px;transition:transform .15s;flex-shrink:0}}
+    .sbnav-group.expanded .sbnav-caret {{transform:rotate(90deg)}}
+    .content-pane {{flex:1;min-width:0;padding:20px}}
     .footer {{margin-top:24px;padding-top:16px;border-top:0.5px solid var(--color-border);font-size:11px;color:var(--color-text-muted);line-height:1.8}}
   </style>
 </head>
@@ -4317,29 +4406,25 @@ def build_report(out_html: Path, title: str, timestamp: str,
     <div class="gk"><div class="gk-lbl">total lines</div><div class="gk-val">{fmt_int(total_all)}</div></div>
   </div>
 
-  <div class="tab-nav">
-    <button class="tab-btn active" onclick="openTab('tab-arch',this)">Architecture</button>
-    <button class="tab-btn" onclick="openTab('tab-proj',this)">Projects</button>
-    <button class="tab-btn" onclick="openTab('tab-health',this)">Health Status</button>
-    <button class="tab-btn" onclick="openTab('tab-usage',this)">Usage</button>
-    <button class="tab-btn" onclick="openTab('tab-llmscloud',this)">LLMs & Cloud</button>
-    <button class="tab-btn" onclick="openTab('tab-ref',this)">Reference Data</button>
-    <button class="tab-btn" onclick="openTab('tab-kb',this)">AI Knowledge Base</button>
-    <button class="tab-btn" onclick="openTab('tab-modelreg',this)">Model Registry</button>
-    <button class="tab-btn" onclick="openTab('tab-misc',this)">Miscellaneous</button>
-  </div>
-
   {PAGINATION_JS}
 
-  <div id="tab-arch"   class="tab-panel active">{arch_html}</div>
-  <div id="tab-proj"   class="tab-panel">{projects_tab_html}</div>
-  <div id="tab-health" class="tab-panel">{hlth_html}</div>
-  <div id="tab-usage"  class="tab-panel">{usage_tab_html}</div>
-  <div id="tab-llmscloud" class="tab-panel">{llmscloud_html}</div>
-  <div id="tab-ref"    class="tab-panel">{ref_html}</div>
-  <div id="tab-kb"      class="tab-panel">{kb_html}</div>
-  <div id="tab-modelreg" class="tab-panel">{model_registry_html}</div>
-  <div id="tab-misc" class="tab-panel">{misc_html}</div>
+  <div class="layout-split">
+    <nav class="sidebar" id="app-sidebar">
+      {sidebar_nav_html(SIDEBAR_NAV_SPEC)}
+    </nav>
+    <div class="content-pane">
+      <div id="tab-arch"   class="tab-panel active">{arch_html}</div>
+      <div id="tab-projects" class="tab-panel">{projects_tab_html}</div>
+      <div id="tab-health" class="tab-panel">{hlth_html}</div>
+      <div id="tab-usage"  class="tab-panel">{usage_tab_html}</div>
+      <div id="tab-llmscloud" class="tab-panel">{llmscloud_html}</div>
+      <div id="tab-ref"    class="tab-panel">{ref_html}</div>
+      <div id="tab-kb"      class="tab-panel">{kb_html}</div>
+      <div id="tab-modelreg" class="tab-panel">{model_registry_html}</div>
+      <div id="tab-dockerimages" class="tab-panel">{dockerimages_html}</div>
+      <div id="tab-misc" class="tab-panel">{misc_html}</div>
+    </div>
+  </div>
 
   <div class="footer">
     cloc counts exclude vendored/runtime directories and selected extensions per cloc policy.<br>
@@ -4349,13 +4434,6 @@ def build_report(out_html: Path, title: str, timestamp: str,
 </div>
 
 <script>
-function openTab(id, btn) {{
-  document.querySelectorAll('.tab-panel').forEach(function(t){{t.classList.remove('active');}});
-  document.querySelectorAll('.tab-btn').forEach(function(b){{b.classList.remove('active');}});
-  document.getElementById(id).classList.add('active');
-  btn.classList.add('active');
-}}
-
 (function globalHealthBadge(){{
   fetch('/summary').then(function(r){{return r.json();}}).then(function(d){{
     var ov=(d.overall_status||'UNKNOWN').toUpperCase();
