@@ -24,6 +24,7 @@ Options
 --out PATH               default ${WORK_DIR}/out/reports/omnibioai_ecosystem_report.html
 --skip-health            skip live health fetch
 --skip-coverage          skip pytest coverage collection
+--compose-path PATH      docker-compose.yml used by the Secrets Audit / Exposed Ports tabs
 """
 
 from __future__ import annotations
@@ -38,11 +39,15 @@ import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pandas as pd
+try:
+    import yaml
+except ImportError:
+    yaml = None  # Catalog tab tools-count degrades gracefully if pyyaml missing
 
 # ── constants ──────────────────────────────────────────────────────────────────
 
@@ -74,6 +79,21 @@ _work_dir = Path(os.environ.get(
 DEFAULT_OUT_PATH = _work_dir / "out" / "reports" / "omnibioai_ecosystem_report.html"
 DEFAULT_TITLE              = "OmniBioAI Ecosystem"
 DEFAULT_CONTROL_CENTER_URL = "http://127.0.0.1:7070"
+def _default_compose_path() -> Path:
+    env_path = os.environ.get("OMNIBIOAI_COMPOSE_PATH")
+    if env_path:
+        return Path(env_path)
+    # Two fallbacks because this script runs in two different contexts:
+    # inside the control-center container, ${MACHINE_DIR} on the host is
+    # mounted to /workspace (see docker-compose.yml), so the compose file
+    # lives under /workspace there; run directly on the host instead, it's
+    # still at its normal Desktop/machine location.
+    container_path = Path("/workspace/omnibioai-studio/docker-compose.yml")
+    if container_path.exists():
+        return container_path
+    return Path("/home/manish/Desktop/machine/omnibioai-studio/docker-compose.yml")
+
+DEFAULT_COMPOSE_PATH = _default_compose_path()
 
 # shared color palette (matches all 5 tabs)
 COLORS = {
@@ -1284,8 +1304,120 @@ function covApply(){{
 
 # ── TAB 5: HEALTH STATUS ───────────────────────────────────────────────────────
 
-def health_section_html(health: EcosystemHealth, control_center_url: str) -> str:
-    cc_url = control_center_url.rstrip("/")
+_SENTRY_LEVEL_COLOR = {
+    "error":   ("#FCEBEB", "#A32D2D"),
+    "fatal":   ("#FCEBEB", "#A32D2D"),
+    "warning": ("#FAEEDA", "#854F0B"),
+    "info":    ("#E6F1FB", "#185FA5"),
+}
+
+
+def error_aggregation_section_html(sentry_org: str, sentry_project_slugs: List[str]) -> str:
+    """One-shot fetch of recent Sentry issues per project -- intentionally NOT
+    live/polling like the rest of the Health Status tab, since Sentry's API has
+    its own rate limits; this runs once at report-generation time."""
+    token = os.environ.get("SENTRY_API_TOKEN")
+    if not token or not sentry_org or not sentry_project_slugs:
+        return """
+<div class="section" style="margin-top:12px">
+  <div class="sec-title">errors (Sentry)</div>
+  <div style="font-size:12px;color:var(--color-text-muted)">SENTRY_API_TOKEN not configured -- skipping error aggregation. Set SENTRY_API_TOKEN, SENTRY_ORG and SENTRY_PROJECT_SLUGS to enable this section.</div>
+</div>"""
+
+    import urllib.request
+
+    per_project: List[Dict[str, Any]] = []
+    for slug in sentry_project_slugs:
+        issues = None
+        try:
+            req = urllib.request.Request(
+                f"https://sentry.io/api/0/projects/{sentry_org}/{slug}/issues/?statsPeriod=24h",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            with urllib.request.urlopen(req, timeout=10) as r:
+                issues = json.loads(r.read())
+        except Exception as e:
+            print(f"[report] error_aggregation_section_html failed for {slug}: {type(e).__name__}: {e}", flush=True)
+
+        if issues is None:
+            per_project.append({"project": slug, "unresolved": None, "events_24h": None, "issues": [], "error": True})
+            continue
+
+        unresolved = [i for i in issues if i.get("status") == "unresolved"]
+        events_24h = sum(int(i.get("count", 0) or 0) for i in issues)
+        top5 = sorted(issues, key=lambda i: int(i.get("count", 0) or 0), reverse=True)[:5]
+        per_project.append({
+            "project": slug, "unresolved": len(unresolved),
+            "events_24h": events_24h, "issues": top5, "error": False,
+        })
+
+    total_unresolved = sum(p["unresolved"] for p in per_project if not p["error"])
+    total_events = sum(p["events_24h"] for p in per_project if not p["error"])
+
+    def _proj_row(p):
+        if p["error"]:
+            return f"""<tr>
+              <td style="font-weight:600;font-size:12px">{p['project']}</td>
+              <td colspan="2" style="color:var(--color-text-muted)">unreachable</td>
+            </tr>"""
+        return f"""<tr>
+          <td style="font-weight:600;font-size:12px">{p['project']}</td>
+          <td class="r">{p['unresolved']}</td>
+          <td class="r">{fmt_int(p['events_24h'])}</td>
+        </tr>"""
+
+    proj_rows = "".join(_proj_row(p) for p in per_project) or \
+        '<tr><td colspan="3" style="text-align:center;color:var(--color-text-muted);padding:20px">no projects configured</td></tr>'
+
+    all_issues = []
+    for p in per_project:
+        for issue in p.get("issues", []):
+            all_issues.append({
+                "project": p["project"], "title": issue.get("title", ""),
+                "level": issue.get("level", ""),
+                "count": int(issue.get("count", 0) or 0),
+                "last_seen": issue.get("lastSeen", ""),
+            })
+    all_issues.sort(key=lambda i: i["count"], reverse=True)
+
+    def _issue_row(i):
+        bg, color = _SENTRY_LEVEL_COLOR.get(i["level"], ("#F1EFE8", "#444441"))
+        return f"""<tr>
+          <td style="font-size:12px">{i['project']}</td>
+          <td style="font-size:12px">{i['title']}</td>
+          <td><span class="badge" style="background:{bg};color:{color}">{i['level']}</span></td>
+          <td class="r">{fmt_int(i['count'])}</td>
+          <td style="font-size:11px;color:var(--color-text-muted)">{i['last_seen']}</td>
+        </tr>"""
+
+    top_issues_rows = "".join(_issue_row(i) for i in all_issues) or \
+        '<tr><td colspan="5" style="text-align:center;color:var(--color-text-muted);padding:20px">no issues found</td></tr>'
+
+    return f"""
+<div class="section" style="margin-top:12px">
+  <div class="sec-title">errors (Sentry)</div>
+  <div class="sec-sub">fetched once at report-generation time, not live · last 24h · org: {sentry_org}</div>
+  <div class="kpi-row">
+    <div class="kpi"><div class="kpi-label">unresolved</div><div class="kpi-val" style="color:{'#A32D2D' if total_unresolved else '#3B6D11'}">{total_unresolved}</div></div>
+    <div class="kpi"><div class="kpi-label">events (24h)</div><div class="kpi-val">{fmt_int(total_events)}</div></div>
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>project</th><th class="r">unresolved</th><th class="r">events (24h)</th></tr></thead>
+      <tbody>{proj_rows}</tbody>
+    </table>
+  </div>
+  <div class="sec-title" style="margin-top:12px">top issues across all services</div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>project</th><th>issue</th><th>level</th><th class="r">events</th><th>last seen</th></tr></thead>
+      <tbody>{top_issues_rows}</tbody>
+    </table>
+  </div>
+</div>"""
+
+
+def _health_overview_section_html() -> str:
     return f"""
 <div class="tab-section">
 <div id="hlth-banner" style="border-radius:12px;padding:12px 16px;display:flex;align-items:center;gap:10px;margin-bottom:16px;border:0.5px solid var(--color-border);background:var(--color-bg-surface)">
@@ -1328,12 +1460,24 @@ def health_section_html(health: EcosystemHealth, control_center_url: str) -> str
     <div id="hlth-lat-bars"><div style="font-size:12px;color:#6b7280">loading...</div></div>
   </div>
 </div>
+</div>
+"""
 
+
+def _health_services_section_html() -> str:
+    return f"""
+<div class="tab-section">
 <div style="font-size:11px;font-weight:600;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">services</div>
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px;margin-bottom:12px" id="hlth-svc-grid">
   <div style="font-size:12px;color:var(--color-text-muted);grid-column:1/-1">loading service cards...</div>
 </div>
+</div>
+"""
 
+
+def _health_storage_section_html() -> str:
+    return f"""
+<div class="tab-section">
 <div class="section">
   <div class="sec-title">disk checks</div>
   <div class="sec-sub">storage paths monitored by control center</div>
@@ -1341,8 +1485,67 @@ def health_section_html(health: EcosystemHealth, control_center_url: str) -> str
     <div style="font-size:12px;color:var(--color-text-muted)">loading...</div>
   </div>
 </div>
-</div>
 
+<div class="section" style="margin-top:12px">
+  <div class="sec-title">symlink &amp; mount integrity</div>
+  <div class="sec-sub">known-important paths, checked live</div>
+  <div id="integrity-panel-body">
+    <div style="font-size:12px;color:var(--color-text-muted)">loading...</div>
+  </div>
+</div>
+</div>
+"""
+
+
+def _health_gpu_section_html() -> str:
+    return f"""
+<div class="tab-section">
+<div class="section" style="margin-top:12px">
+  <div class="sec-title">GPU health</div>
+  <div class="sec-sub">nvidia-smi · live, refreshes with the rest of this tab</div>
+  <div id="gpu-panel-body">
+    <div style="font-size:12px;color:var(--color-text-muted)">loading...</div>
+  </div>
+</div>
+</div>
+"""
+
+
+def _health_activity_section_html() -> str:
+    return f"""
+<div class="tab-section">
+<div class="section" style="margin-top:12px">
+  <div class="sec-title">activity monitor</div>
+  <div class="sec-sub">live CPU / memory / network via Prometheus + cAdvisor, host stats via node_exporter</div>
+  <div id="am-host-summary" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
+    <div style="font-size:12px;color:var(--color-text-muted);grid-column:1/-1">loading host summary...</div>
+  </div>
+  <div class="filter-row">
+    <input class="search-inp" type="text" placeholder="search containers..." oninput="amFilter(this.value)">
+    <span class="result-count" id="am-count">— items</span>
+    <div class="per-pg">per page <select class="filter-sel" onchange="amPerPage(this.value)"><option value="15" selected>15</option><option value="30">30</option><option value="50">50</option></select></div>
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr>
+        <th onclick="amSort('name')">container</th>
+        <th class="r" onclick="amSort('cpu_pct')">% cpu</th>
+        <th class="r" onclick="amSort('memory_used_mb')">memory</th>
+        <th class="r" onclick="amSort('memory_pct')">mem %</th>
+        <th class="r" onclick="amSort('net_rx_mb')">net rx</th>
+        <th class="r" onclick="amSort('net_tx_mb')">net tx</th>
+        <th class="r" onclick="amSort('pids')">pids</th>
+      </tr></thead>
+      <tbody id="am-tbody"></tbody>
+    </table>
+  </div>
+  <div class="pg-wrap" id="am-pg"></div>
+</div>
+</div>
+"""
+
+
+_HEALTH_SCRIPT = f"""
 <script>
 var _hChart=null,_hTimer=null,_hCd=30,_hUrl='';
 var _hIcons={{mysql:'🗄️',redis:'⚡',http:'🌐',tcp:'🔌'}};
@@ -1357,7 +1560,7 @@ function _hStartCd(){{
   _hTimer=setInterval(function(){{
     _hCd--;
     document.getElementById('hlth-countdown').textContent='next refresh in '+_hCd+'s';
-    if(_hCd<=0){{clearInterval(_hTimer);hlthFetch();}}
+    if(_hCd<=0){{clearInterval(_hTimer);hlthFetch();gpuFetch();integrityFetch();activityFetch();}}
   }},1000);
 }}
 function _hlthRender(data){{
@@ -1442,6 +1645,129 @@ function _hlthRender(data){{
     dg.appendChild(card);
   }});
 }}
+function _gpuMemColor(usedMb, totalMb){{
+  if(usedMb===null||usedMb===undefined) return '#A32D2D';
+  var pct=usedMb/totalMb*100;
+  return pct<70?'#3B6D11':pct<90?'#854F0B':'#A32D2D';
+}}
+function gpuFetch(){{
+  fetch(_hUrl+'/gpu').then(function(r){{return r.json();}}).then(function(d){{
+    var el=document.getElementById('gpu-panel-body');
+    if(!d.reachable){{
+      el.innerHTML='<div style="font-size:12px;color:#A32D2D">GPU unreachable: '+(d.error||'unknown error')+'</div>';
+      return;
+    }}
+    var memNull = d.memory_used_mb===null||d.memory_used_mb===undefined;
+    var memColor=_gpuMemColor(d.memory_used_mb,d.memory_total_mb);
+    var memText = memNull
+      ? '<span style="color:#A32D2D;font-weight:600">N/A — driver may be in a bad state</span>'
+      : (d.memory_used_mb/1024).toFixed(1)+' / '+(d.memory_total_mb/1024).toFixed(1)+' GB';
+    var procRows = (d.processes||[]).map(function(p){{
+      return '<div style="font-size:11px;color:var(--color-text-muted)">'+p.name+' (pid '+p.pid+') — '+p.memory_mb+' MB</div>';
+    }}).join('') || '<div style="font-size:11px;color:var(--color-text-muted)">no processes</div>';
+    var modelRows = (d.ollama_loaded_models||[]).map(function(m){{
+      return '<div style="font-size:11px;color:var(--color-text)">'+m.name+' — '+m.size_gb+' GB (until '+(m.until?new Date(m.until).toLocaleTimeString():'?')+')</div>';
+    }}).join('') || '<div style="font-size:11px;color:var(--color-text-muted)">no models currently loaded</div>';
+    el.innerHTML =
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'+
+      '<div><div style="font-size:11px;color:var(--color-text-muted)">GPU</div>'+
+      '<div style="font-size:13px;font-weight:600">'+d.gpu_name+'</div></div>'+
+      '<div><div style="font-size:11px;color:var(--color-text-muted)">memory</div>'+
+      '<div style="font-size:13px;font-weight:600;color:'+memColor+'">'+memText+'</div></div>'+
+      '<div><div style="font-size:11px;color:var(--color-text-muted)">utilization</div>'+
+      '<div style="font-size:13px">'+d.utilization_pct+'%</div></div>'+
+      '<div><div style="font-size:11px;color:var(--color-text-muted)">temp / power</div>'+
+      '<div style="font-size:13px">'+d.temperature_c+'°C · '+d.power_draw_w+'W</div></div>'+
+      '<div style="grid-column:1/-1"><div style="font-size:11px;color:var(--color-text-muted);margin-bottom:4px">GPU processes</div>'+procRows+'</div>'+
+      '<div style="grid-column:1/-1"><div style="font-size:11px;color:var(--color-text-muted);margin-bottom:4px">ollama loaded models</div>'+modelRows+'</div>'+
+      '</div>'+
+      (d.error?'<div style="margin-top:8px;font-size:11px;color:#854F0B">⚠ '+d.error+'</div>':'');
+  }}).catch(function(){{
+    document.getElementById('gpu-panel-body').innerHTML='<div style="font-size:12px;color:#A32D2D">could not reach /gpu endpoint</div>';
+  }});
+}}
+var _AM={{pp:15,page:1,sort:'cpu_pct',dir:-1,search:'',all:[],filtered:[]}};
+function amFilter(v){{_AM.search=v.toLowerCase();_AM.page=1;amApply();}}
+function amPerPage(v){{_AM.pp=parseInt(v);_AM.page=1;amApply();}}
+function amSort(col){{if(_AM.sort===col){{_AM.dir*=-1;}}else{{_AM.sort=col;_AM.dir=col==='name'?1:-1;}} _AM.page=1;amApply();}}
+function _amNum(v,digits){{return (v===null||v===undefined)?'—':v.toFixed(digits);}}
+function amApply(){{
+  var d=_AM.all.filter(function(c){{return !_AM.search||c.name.toLowerCase().includes(_AM.search);}});
+  var col=_AM.sort;
+  d.sort(function(a,b){{
+    var av=a[col],bv=b[col];
+    if(av===null||av===undefined)av=-Infinity;
+    if(bv===null||bv===undefined)bv=-Infinity;
+    if(typeof av==='string')av=av.toLowerCase();
+    if(typeof bv==='string')bv=bv.toLowerCase();
+    return av<bv?_AM.dir:av>bv?-_AM.dir:0;
+  }});
+  _AM.filtered=d;
+  document.getElementById('am-count').textContent=d.length+' containers';
+  var start=(_AM.page-1)*_AM.pp,page=d.slice(start,start+_AM.pp);
+  var tb=document.getElementById('am-tbody');tb.innerHTML='';
+  page.forEach(function(c){{
+    var cpuColor=c.cpu_pct>50?'#A32D2D':c.cpu_pct>15?'#854F0B':'#3B6D11';
+    var memColor=c.memory_pct===null?'inherit':(c.memory_pct>80?'#A32D2D':c.memory_pct>50?'#854F0B':'#3B6D11');
+    var tr=document.createElement('tr');
+    tr.innerHTML='<td style="font-size:12px;font-weight:600">'+c.name+'</td>'+
+      '<td class="r" style="color:'+cpuColor+';font-weight:600">'+_amNum(c.cpu_pct,2)+'%</td>'+
+      '<td class="r">'+_amNum(c.memory_used_mb,1)+' MB</td>'+
+      '<td class="r" style="color:'+memColor+'">'+(c.memory_pct===null?'—':_amNum(c.memory_pct,2)+'%')+'</td>'+
+      '<td class="r">'+_amNum(c.net_rx_mb,1)+' MB</td>'+
+      '<td class="r">'+_amNum(c.net_tx_mb,1)+' MB</td>'+
+      '<td class="r">'+(c.pids===null||c.pids===undefined?'—':c.pids)+'</td>';
+    tb.appendChild(tr);
+  }});
+  renderPg('am',_AM,amApply);
+}}
+function amHostRender(h){{
+  var el=document.getElementById('am-host-summary');
+  if(!h){{el.innerHTML='<div style="font-size:12px;color:#854F0B;grid-column:1/-1">node_exporter not configured — host-level stats unavailable (container-level stats below still work)</div>';return;}}
+  function card(label,val,color){{return '<div class="kpi"><div class="kpi-label">'+label+'</div><div class="kpi-val" style="color:'+(color||'inherit')+'">'+val+'</div></div>';}}
+  var memPct = (h.memory_available_gb!==null&&h.memory_total_gb) ? h.memory_available_gb/h.memory_total_gb : null;
+  el.innerHTML =
+    card('cpu load (1m)', _amNum(h.load_1m,2)) +
+    card('memory available', _amNum(h.memory_available_gb,1)+' / '+(h.memory_total_gb===null?'—':h.memory_total_gb)+' GB',
+         memPct!==null&&memPct<0.15?'#A32D2D':'inherit') +
+    card('swap used', _amNum(h.swap_used_gb,1)+' / '+_amNum(h.swap_total_gb,1)+' GB',
+         h.swap_used_gb>2?'#854F0B':'inherit') +
+    card('processes', h.processes_total===null?'—':h.processes_total) +
+    card('threads', h.threads_total===null?'—':h.threads_total) +
+    card('cpu idle', _amNum(h.cpu_idle_pct,1)+'%');
+}}
+function activityFetch(){{
+  fetch(_hUrl+'/activity').then(function(r){{return r.json();}}).then(function(d){{
+    if(!d.reachable){{document.getElementById('am-host-summary').innerHTML='<div style="font-size:12px;color:#A32D2D;grid-column:1/-1">activity data unreachable: '+(d.error||'unknown')+'</div>';return;}}
+    amHostRender(d.host);
+    _AM.all=d.containers||[];
+    amApply();
+  }}).catch(function(){{
+    document.getElementById('am-host-summary').innerHTML='<div style="font-size:12px;color:#A32D2D;grid-column:1/-1">could not reach /activity endpoint</div>';
+  }});
+}}
+function integrityFetch(){{
+  fetch(_hUrl+'/integrity').then(function(r){{return r.json();}}).then(function(d){{
+    var el=document.getElementById('integrity-panel-body');
+    var checks=d.checks||[];
+    if(checks.length===0){{el.innerHTML='<div style="font-size:12px;color:var(--color-text-muted)">no paths configured for checking</div>';return;}}
+    var statusColor={{ok:'#3B6D11',broken:'#A32D2D',missing:'#A32D2D',empty:'#854F0B'}};
+    var statusBg={{ok:'#EAF3DE',broken:'#FCEBEB',missing:'#FCEBEB',empty:'#FAEEDA'}};
+    el.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px">' +
+      checks.map(function(c){{
+        var c1=statusColor[c.status]||'#444441', bg=statusBg[c.status]||'#F1EFE8';
+        return '<div style="background:var(--color-bg-surface2);border-left:3px solid '+c1+';border-radius:8px;padding:10px 12px">'+
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'+
+          '<span style="font-size:12px;font-weight:600">'+c.name+'</span>'+
+          '<span class="badge" style="background:'+bg+';color:'+c1+'">'+c.status+'</span></div>'+
+          '<div style="font-size:10px;color:var(--color-text-muted);font-family:monospace;word-break:break-all">'+c.path+'</div>'+
+          (c.is_symlink?'<div style="font-size:10px;color:var(--color-text-muted);font-family:monospace;word-break:break-all">→ '+c.resolves_to+'</div>':'')+
+          '</div>';
+      }}).join('') + '</div>';
+  }}).catch(function(){{
+    document.getElementById('integrity-panel-body').innerHTML='<div style="font-size:12px;color:#A32D2D">could not reach /integrity endpoint</div>';
+  }});
+}}
 function _hlthError(){{
   document.getElementById('hlth-dot').className='status-dot dot-down';
   document.getElementById('hlth-title').textContent='Control center unreachable';
@@ -1451,9 +1777,22 @@ function _hlthError(){{
   document.getElementById('hlth-disk-grid').innerHTML='<div style="font-size:12px;color:#6b7280">no data</div>';
   document.getElementById('hlth-lat-bars').innerHTML='<div style="font-size:12px;color:#6b7280">no data</div>';
 }}
-hlthFetch();
+hlthFetch();gpuFetch();integrityFetch();activityFetch();
 </script>
 """
+
+
+def health_section_html(health: EcosystemHealth, control_center_url: str,
+                        sentry_org: str = "", sentry_project_slugs: Optional[List[str]] = None) -> str:
+    sub_tabs = [
+        ("overview", "Overview",      _health_overview_section_html()),
+        ("services", "Services",      _health_services_section_html()),
+        ("storage",  "Disk & Mounts", _health_storage_section_html()),
+        ("gpu",      "GPU",           _health_gpu_section_html()),
+        ("activity", "Activity",      _health_activity_section_html()),
+        ("errors",   "Errors",        error_aggregation_section_html(sentry_org, sentry_project_slugs or [])),
+    ]
+    return misc_section_html(sub_tabs, group_id="health") + _HEALTH_SCRIPT
 
 def llm_section_html(control_center_url: str) -> str:
     """Fetch Ollama models and API key status from control center."""
@@ -2237,6 +2576,1586 @@ function dkPA(){{
 </script>
 """
 
+# ── TAB: CATALOG ───────────────────────────────────────────────────────────────
+
+CATALOG_BACKEND_COLORS = {
+    "slurm": "#3C3489", "http": "#0F6E56", "aws_batch": "#854F0B",
+    "gcp_batch": "#185FA5", "azure_batch": "#A32D2D", "kubernetes": "#7F77DD",
+    "unknown": "#444441",
+}
+
+WORKFLOW_EXTS = {
+    ".nf": "Nextflow", ".wdl": "WDL", ".cwl": "CWL", ".smk": "Snakemake",
+}
+WORKFLOW_SPECIAL_NAMES = {
+    "Snakefile": "Snakemake", "main.nf": "Nextflow",
+}
+
+
+def _count_plugins(ecosystem_root: Path) -> Tuple[int, Dict[str, int]]:
+    """Counts plugin directories under omnibioai/plugins/ that contain a plugin.json."""
+    plugins_dir = ecosystem_root / "omnibioai" / "plugins"
+    if not plugins_dir.is_dir():
+        return 0, {}
+    by_category: Dict[str, int] = {}
+    count = 0
+    for entry in plugins_dir.iterdir():
+        if not entry.is_dir():
+            continue
+        pj = entry / "plugin.json"
+        if not pj.exists():
+            continue
+        count += 1
+        try:
+            meta = json.loads(pj.read_text(encoding="utf-8"))
+            cat = str(meta.get("category", "uncategorized"))
+        except Exception:
+            cat = "uncategorized"
+        by_category[cat] = by_category.get(cat, 0) + 1
+    return count, by_category
+
+
+def _infer_tool_backend(tool: Dict[str, Any]) -> str:
+    for key, backend in (
+        ("slurm", "slurm"), ("http", "http"),
+        ("aws_batch", "aws_batch"), ("aws", "aws_batch"),
+        ("gcp_batch", "gcp_batch"), ("gcp", "gcp_batch"),
+        ("azure_batch", "azure_batch"), ("azure", "azure_batch"),
+        ("kubernetes", "kubernetes"), ("k8s", "kubernetes"),
+    ):
+        if key in tool:
+            return backend
+    return "unknown"
+
+
+def _count_tes_tools(ecosystem_root: Path) -> Tuple[int, Dict[str, int]]:
+    """
+    Counts tools from the live TES API if reachable (ground truth), else falls
+    back to reading omnibioai-tes/configs/tools/*.yaml + x86_64/*.yaml directly
+    (NOT tools.example.yaml, which is generated and can drift).
+
+    Each category YAML file's root is a plain list of tool dicts (verified
+    against configs/tools/01_qc_preprocessing.yaml etc.), not {"tools": [...]}.
+    """
+    try:
+        req = urllib.request.Request(
+            "http://tes:8081/api/tools",
+            headers={"User-Agent": "omnibioai-report/1.0"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            tools = json.loads(resp.read().decode("utf-8"))
+        by_backend: Dict[str, int] = {}
+        for t in tools:
+            tags = set(t.get("tags") or [])
+            backend = next(
+                (b for b in ("slurm", "http", "aws_batch", "gcp_batch",
+                              "azure_batch", "kubernetes", "k8s") if b in tags),
+                "unknown")
+            by_backend[backend] = by_backend.get(backend, 0) + 1
+        return len(tools), by_backend
+    except Exception:
+        pass  # fall through to static file counting
+
+    if yaml is None:
+        return 0, {}
+    tools_dir = ecosystem_root / "omnibioai-tes" / "configs" / "tools"
+    if not tools_dir.is_dir():
+        return 0, {}
+    yaml_files = list(tools_dir.glob("*.yaml")) + list(tools_dir.glob("x86_64/*.yaml"))
+    total = 0
+    by_backend: Dict[str, int] = {}
+    for yf in yaml_files:
+        try:
+            data = yaml.safe_load(yf.read_text(encoding="utf-8")) or []
+        except Exception:
+            continue
+        tools = data.get("tools", []) if isinstance(data, dict) else data
+        for t in (tools or []):
+            total += 1
+            backend = _infer_tool_backend(t)
+            by_backend[backend] = by_backend.get(backend, 0) + 1
+    return total, by_backend
+
+
+def _count_workflow_bundles(ecosystem_root: Path) -> Tuple[int, Dict[str, int]]:
+    """
+    Counts workflow bundles under omnibioai-workflow-bundles/ by locating
+    workflow definition files (Nextflow .nf, WDL .wdl, CWL .cwl, Snakemake
+    Snakefile/.smk) and deduplicating by parent directory -- one bundle
+    directory may contain a main workflow file plus supporting files, so
+    counting files directly would overcount.
+    """
+    bundles_dir = ecosystem_root / "omnibioai-workflow-bundles"
+    if not bundles_dir.is_dir():
+        return 0, {}
+    exclude_names = set(EXCLUDE_DIRS.split(","))
+    bundle_dirs: Dict[Path, str] = {}
+    for ext, label in WORKFLOW_EXTS.items():
+        for f in bundles_dir.rglob(f"*{ext}"):
+            if any(part in exclude_names or part.startswith(".") for part in f.parts):
+                continue
+            bundle_dirs.setdefault(f.parent, label)
+    for name, label in WORKFLOW_SPECIAL_NAMES.items():
+        for f in bundles_dir.rglob(name):
+            if any(part in exclude_names or part.startswith(".") for part in f.parts):
+                continue
+            bundle_dirs.setdefault(f.parent, label)
+    by_type: Dict[str, int] = {}
+    for _, label in bundle_dirs.items():
+        by_type[label] = by_type.get(label, 0) + 1
+    return len(bundle_dirs), by_type
+
+
+def catalog_section_html(ecosystem_root: Path) -> str:
+    plugin_count, plugin_cats = _count_plugins(ecosystem_root)
+    tool_count, tool_backends = _count_tes_tools(ecosystem_root)
+    workflow_count, workflow_types = _count_workflow_bundles(ecosystem_root)
+
+    def _breakdown_rows(d: Dict[str, int], color_map: Optional[Dict[str, str]] = None) -> str:
+        if not d:
+            return '<div style="font-size:12px;color:var(--color-text-muted);padding:8px">no breakdown available</div>'
+        total = sum(d.values()) or 1
+        rows = ""
+        for k, v in sorted(d.items(), key=lambda kv: kv[1], reverse=True):
+            color = (color_map or {}).get(k, "#0094ff")
+            pct = round(100 * v / total, 1)
+            rows += f"""
+            <div class="bar-row">
+              <span class="bar-label" style="width:120px">{k}</span>
+              <div class="bar-track" style="height:14px">
+                <div class="bar-fill" style="width:{pct}%;background:{color}22"></div>
+                <span class="bar-val" style="color:{color}">{fmt_int(v)}</span>
+              </div>
+            </div>"""
+        return rows
+
+    return f"""
+<div class="tab-section">
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">plugins</div><div class="kpi-val">{fmt_int(plugin_count)}</div><div class="kpi-sub">omnibioai/plugins</div></div>
+  <div class="kpi"><div class="kpi-label">tools</div><div class="kpi-val">{fmt_int(tool_count)}</div><div class="kpi-sub">omnibioai-tes</div></div>
+  <div class="kpi"><div class="kpi-label">workflow bundles</div><div class="kpi-val">{fmt_int(workflow_count)}</div><div class="kpi-sub">omnibioai-workflow-bundles</div></div>
+  <div class="kpi"><div class="kpi-label">total catalog</div><div class="kpi-val">{fmt_int(plugin_count + tool_count + workflow_count)}</div><div class="kpi-sub">plugins + tools + workflows</div></div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+  <div class="section">
+    <div class="sec-title">plugins by category</div>
+    <div class="sec-sub">omnibioai/plugins/*/plugin.json</div>
+    {_breakdown_rows(plugin_cats)}
+  </div>
+  <div class="section">
+    <div class="sec-title">tools by backend</div>
+    <div class="sec-sub">live TES API if reachable, else configs/tools/*.yaml</div>
+    {_breakdown_rows(tool_backends, CATALOG_BACKEND_COLORS)}
+  </div>
+  <div class="section">
+    <div class="sec-title">workflow bundles by type</div>
+    <div class="sec-sub">Nextflow / WDL / CWL / Snakemake</div>
+    {_breakdown_rows(workflow_types)}
+  </div>
+</div>
+
+<div style="font-size:11px;color:var(--color-text-muted);margin-top:12px;padding:8px 0;border-top:0.5px solid var(--color-border)">
+  Tool count prefers the live TES API (ground truth) when reachable at http://tes:8081;
+  falls back to static YAML file counting otherwise. Plugin/workflow counts are
+  filesystem-based and reflect what's on disk at report-generation time.
+</div>
+</div>
+"""
+
+
+# ── TAB: MODEL REGISTRY ─────────────────────────────────────────────────────────
+
+def _classify_data_source(version_name: str, meta: Dict[str, Any],
+                          metrics: Dict[str, Any]) -> Tuple[str, str]:
+    """
+    Returns (classification, confidence) where classification is one of
+    "real" / "synthetic" / "unknown", and confidence is "explicit"
+    (meta.json has a real data_source field -- trust this) or "inferred"
+    (guessed from naming patterns -- show as heuristic, not fact).
+    """
+    explicit = meta.get("data_source")
+    if explicit in ("real", "synthetic"):
+        return explicit, "explicit"
+
+    vname = (version_name or "").lower()
+    if "real" in vname:
+        return "real", "inferred"
+    if vname.endswith("_test") or "_test_" in vname or vname == "test":
+        return "synthetic", "inferred"
+
+    if metrics.get("seed") == 42 or metrics.get("random_state") == 42:
+        return "synthetic", "inferred"
+    n_train = metrics.get("n_train") or metrics.get("n_train_cells")
+    if isinstance(n_train, (int, float)) and n_train < 100:
+        return "synthetic", "inferred"
+    if meta.get("git_commit") == "abc123":
+        return "synthetic", "inferred"
+
+    return "unknown", "inferred"
+
+
+def _scan_model_registry(registry_root: Path) -> List[Dict[str, Any]]:
+    """
+    Walks registry_root/tasks/<task>/models/<model_name>/versions/<version>/
+    reading metrics.json and model_meta.json for each.
+
+    Some version directories (verified: real-data training runs under
+    admet_properties/admet_mlp) are written mode 700 owned by the
+    container's training process -- reading them succeeds when this script
+    runs as root inside the control-center container (confirmed: that's
+    the only context it actually runs in, per _run_report_job), but would
+    PermissionError on a bare-host run as an unprivileged user. Each
+    version is scanned independently so one unreadable directory doesn't
+    take down the whole registry scan.
+    """
+    rows: List[Dict[str, Any]] = []
+    tasks_dir = registry_root / "tasks"
+    if not tasks_dir.is_dir():
+        return rows
+    for task_dir in sorted(tasks_dir.iterdir()):
+        if not task_dir.is_dir():
+            continue
+        models_dir = task_dir / "models"
+        if not models_dir.is_dir():
+            continue
+        for model_dir in sorted(models_dir.iterdir()):
+            if not model_dir.is_dir():
+                continue
+            versions_dir = model_dir / "versions"
+            if not versions_dir.is_dir():
+                continue
+            for version_dir in sorted(versions_dir.iterdir()):
+                if not version_dir.is_dir():
+                    continue
+                metrics: Dict[str, Any] = {}
+                meta: Dict[str, Any] = {}
+                mtime = 0.0
+                try:
+                    mtime = version_dir.stat().st_mtime
+                    mf = version_dir / "metrics.json"
+                    mmf = version_dir / "model_meta.json"
+                    if mf.exists():
+                        metrics = json.loads(mf.read_text(encoding="utf-8"))
+                    if mmf.exists():
+                        meta = json.loads(mmf.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    pass
+                cls, confidence = _classify_data_source(version_dir.name, meta, metrics)
+                metric_display = None
+                for k in ("test_accuracy", "val_accuracy", "accuracy",
+                          "test_mae", "val_mae", "val_mae_pki", "mae",
+                          "auroc", "test_auroc"):
+                    if k in metrics:
+                        metric_display = f"{k}={metrics[k]}"
+                        break
+                rows.append({
+                    "task": task_dir.name,
+                    "model": model_dir.name,
+                    "version": version_dir.name,
+                    "data_source": cls,
+                    "confidence": confidence,
+                    "metric": metric_display or "—",
+                    "mtime": mtime,
+                })
+    return rows
+
+
+def model_registry_section_html(registry_root: Path) -> str:
+    rows = _scan_model_registry(registry_root)
+
+    total_versions = len(rows)
+    real_rows = [r for r in rows if r["data_source"] == "real"]
+    synth_rows = [r for r in rows if r["data_source"] == "synthetic"]
+    unknown_rows = [r for r in rows if r["data_source"] == "unknown"]
+
+    tasks_with_real = len(set(r["task"] for r in real_rows))
+    total_tasks = len(set(r["task"] for r in rows))
+
+    inferred_count = sum(1 for r in rows if r["confidence"] == "inferred")
+
+    rows_js = [json.dumps(r) for r in sorted(rows, key=lambda r: r["mtime"], reverse=True)]
+    rows_js_str = "[" + ",".join(rows_js) + "]"
+
+    return f"""
+<div class="tab-section">
+<div style="font-size:12px;color:var(--color-text-muted);margin-bottom:12px">
+  data_source classification: explicit field if present in model_meta.json, otherwise
+  <span style="color:#854F0B;font-weight:600">inferred</span> from naming/metric patterns —
+  {inferred_count}/{total_versions} versions are inferred, not confirmed.
+</div>
+
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">tasks</div><div class="kpi-val">{total_tasks}</div><div class="kpi-sub">{tasks_with_real} with ≥1 real version</div></div>
+  <div class="kpi"><div class="kpi-label">total versions</div><div class="kpi-val">{fmt_int(total_versions)}</div><div class="kpi-sub">all registered</div></div>
+  <div class="kpi"><div class="kpi-label">real</div><div class="kpi-val" style="color:#3B6D11">{fmt_int(len(real_rows))}</div><div class="kpi-sub">confirmed/inferred real data</div></div>
+  <div class="kpi"><div class="kpi-label">synthetic</div><div class="kpi-val" style="color:#A32D2D">{fmt_int(len(synth_rows))}</div><div class="kpi-sub">dummy/placeholder data</div></div>
+  <div class="kpi"><div class="kpi-label">unknown</div><div class="kpi-val" style="color:#854F0B">{fmt_int(len(unknown_rows))}</div><div class="kpi-sub">unclassified</div></div>
+</div>
+
+<div class="section">
+  <div class="sec-title">all model versions</div>
+  <div class="sec-sub">sorted by most recent · click headers to sort</div>
+  <div class="filter-row">
+    <input class="search-inp" type="text" placeholder="search task/model/version..." oninput="mrFilter(this.value)">
+    <select class="filter-sel" onchange="mrSourceFilter(this.value)">
+      <option value="">all data sources</option>
+      <option value="real">real</option>
+      <option value="synthetic">synthetic</option>
+      <option value="unknown">unknown</option>
+    </select>
+    <span class="result-count" id="mr-count">— items</span>
+    <div class="per-pg">per page <select class="filter-sel" onchange="mrPerPage(this.value)"><option value="15" selected>15</option><option value="30">30</option><option value="50">50</option></select></div>
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr>
+        <th onclick="mrSort('task')">task</th>
+        <th onclick="mrSort('model')">model</th>
+        <th onclick="mrSort('version')">version</th>
+        <th onclick="mrSort('data_source')">data source</th>
+        <th onclick="mrSort('metric')">metric</th>
+      </tr></thead>
+      <tbody id="mr-tbody"></tbody>
+    </table>
+  </div>
+  <div class="pg-wrap" id="mr-pg"></div>
+</div>
+</div>
+
+<script>
+var _mrd={rows_js_str},_mrs={{data:[],filtered:[],page:1,pp:15,sort:'mtime',dir:-1,search:'',source:''}};
+var _mrColors={{real:'#3B6D11',synthetic:'#A32D2D',unknown:'#854F0B'}};
+var _mrBg={{real:'#EAF3DE',synthetic:'#FCEBEB',unknown:'#FAEEDA'}};
+(function(){{_mrs.data=_mrd.slice();mrApply();}})();
+function mrFilter(v){{_mrs.search=v.toLowerCase();_mrs.page=1;mrApply();}}
+function mrSourceFilter(v){{_mrs.source=v;_mrs.page=1;mrApply();}}
+function mrPerPage(v){{_mrs.pp=parseInt(v);_mrs.page=1;mrApply();}}
+function mrSort(col){{if(_mrs.sort===col)_mrs.dir*=-1;else{{_mrs.sort=col;_mrs.dir=1;}} _mrs.page=1;mrApply();}}
+function mrApply(){{
+  var d=_mrs.data.slice();
+  if(_mrs.search)d=d.filter(function(r){{return (r.task+r.model+r.version).toLowerCase().includes(_mrs.search);}});
+  if(_mrs.source)d=d.filter(function(r){{return r.data_source===_mrs.source;}});
+  var col=_mrs.sort;
+  d.sort(function(a,b){{var av=(a[col]||'').toString().toLowerCase();var bv=(b[col]||'').toString().toLowerCase();return av<bv?_mrs.dir:av>bv?-_mrs.dir:0;}});
+  _mrs.filtered=d;
+  document.getElementById('mr-count').textContent=d.length+' items';
+  var start=(_mrs.page-1)*_mrs.pp,page=d.slice(start,start+_mrs.pp);
+  var tb=document.getElementById('mr-tbody');tb.innerHTML='';
+  page.forEach(function(r){{
+    var tr=document.createElement('tr');
+    var confBadge=r.confidence==='inferred'?' <span style="font-size:9px;color:#854F0B;opacity:.8">(inferred)</span>':'';
+    tr.innerHTML='<td style="font-size:12px">'+r.task+'</td>'+
+      '<td style="font-size:12px">'+r.model+'</td>'+
+      '<td class="mono">'+r.version+'</td>'+
+      '<td><span class="badge" style="background:'+_mrBg[r.data_source]+';color:'+_mrColors[r.data_source]+'">'+r.data_source+'</span>'+confBadge+'</td>'+
+      '<td style="font-size:12px" class="mono">'+r.metric+'</td>';
+    tb.appendChild(tr);
+  }});
+  renderPg('mr',_mrs,mrApply);
+}}
+</script>
+"""
+
+
+# ── TAB: USAGE ─────────────────────────────────────────────────────────────────
+
+# Expected /usage response shape:
+# {
+#   "active_users_7d": int, "active_users_30d": int,
+#   "total_users": int, "test_user_count": int, "users_caveat": str,
+#   "total_sessions_30d": int, "sessions_caveat": str,
+#   "top_plugins": [{"name": str, "runs_30d": int}, ...],
+#   "top_workflows": [],  # always empty -- see top_workflows_note
+#   "top_workflows_note": str,
+#   "runs_by_day": [{"date": "YYYY-MM-DD", "count": int}, ...],
+#   "workflow_success_rate_pct": float, "success_rate_caveat": str
+# }
+def usage_section_html(control_center_url: str) -> str:
+    import urllib.request, json
+    data: dict = {}
+    try:
+        with urllib.request.urlopen(
+            f"{control_center_url.rstrip('/')}/usage", timeout=15
+        ) as r:
+            data = json.loads(r.read())
+    except Exception as e:
+        print(f"[report] usage_section_html failed: {type(e).__name__}: {e}", flush=True)
+
+    if not data:
+        return """
+<div class="tab-section">
+<div class="section">
+  <div class="sec-title">product usage</div>
+  <div style="font-size:12px;color:var(--color-text-muted)">
+    Could not reach /usage -- not implemented yet. Expected JSON shape:
+    <pre style="font-size:11px;color:var(--color-text-muted);margin-top:8px;white-space:pre-wrap">{
+  "active_users_7d": int, "active_users_30d": int, "total_sessions_30d": int,
+  "top_plugins": [{"name": str, "runs_30d": int}, ...],
+  "top_workflows": [{"name": str, "runs_30d": int}, ...],
+  "runs_by_day": [{"date": "YYYY-MM-DD", "count": int}, ...],
+  "workflow_success_rate_pct": float
+}</pre>
+  </div>
+</div>
+</div>"""
+
+    au7 = data.get("active_users_7d", 0)
+    au30 = data.get("active_users_30d", 0)
+    total_users = data.get("total_users", 0)
+    test_user_count = data.get("test_user_count", 0)
+    users_caveat = data.get("users_caveat", "")
+    sessions30 = data.get("total_sessions_30d", 0)
+    sessions_caveat = data.get("sessions_caveat", "")
+    success_pct = data.get("workflow_success_rate_pct", 0)
+    success_caveat = data.get("success_rate_caveat", "")
+    success_color = "#3B6D11" if success_pct >= 90 else "#854F0B" if success_pct >= 75 else "#A32D2D"
+
+    top_plugins = data.get("top_plugins", [])
+    top_workflows = data.get("top_workflows", [])
+    top_workflows_note = data.get("top_workflows_note", "")
+    runs_by_day = data.get("runs_by_day", [])
+
+    day_labels = _jsl([d.get("date", "") for d in runs_by_day])
+    day_counts = _jsn([d.get("count", 0) for d in runs_by_day])
+
+    plugin_rows = "".join(f"""<tr>
+          <td style="font-size:12px">{it.get('name','')}</td>
+          <td class="r">{it.get('runs_30d',0)}</td>
+        </tr>""" for it in top_plugins) or \
+        '<tr><td colspan="2" style="text-align:center;color:var(--color-text-muted);padding:12px">no plugin data</td></tr>'
+
+    if top_workflows:
+        workflows_panel = f"""<div class="tbl-wrap">
+      <table>
+        <thead><tr><th>workflow</th><th class="r">runs</th></tr></thead>
+        <tbody>{"".join(f'<tr><td style="font-size:12px">{it.get("name","")}</td><td class="r">{it.get("runs_30d",0)}</td></tr>' for it in top_workflows)}</tbody>
+      </table>
+    </div>"""
+    else:
+        workflows_panel = f"""<div style="border:1px dashed var(--color-border);border-radius:8px;
+         display:flex;flex-direction:column;align-items:center;justify-content:center;
+         gap:8px;padding:24px 16px;text-align:center;min-height:140px">
+      <div style="font-size:22px;color:var(--color-text-muted);opacity:.5">—</div>
+      <div style="font-size:11px;color:var(--color-text-muted);font-weight:600">not available yet</div>
+      <div style="font-size:11px;color:var(--color-text-muted);max-width:280px;line-height:1.5">{top_workflows_note}</div>
+    </div>"""
+
+    return f"""
+<div class="tab-section">
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">active users (7d)</div><div class="kpi-val">{au7}</div></div>
+  <div class="kpi">
+    <div class="kpi-label">active users (30d)</div><div class="kpi-val">{au30}</div>
+    <div class="kpi-sub">{test_user_count} of {total_users} accounts are test/throwaway</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">sessions (30d)</div><div class="kpi-val">{sessions30}</div>
+    <div class="kpi-sub">approximate -- see note below</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">workflow success</div><div class="kpi-val" style="color:{success_color}">{success_pct}%</div>
+    <div class="kpi-sub">plugin-run level, not DAG-level</div>
+  </div>
+</div>
+<div style="font-size:11px;color:var(--color-text-muted);line-height:1.6;margin:-6px 0 16px">
+  {users_caveat}<br>{sessions_caveat}<br>{success_caveat}
+</div>
+
+<div class="section">
+  <div class="sec-title">runs by day</div>
+  <div class="sec-sub">last 30 days</div>
+  <div style="position:relative;height:220px"><canvas id="usage-runs-chart"></canvas></div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+  <div class="section">
+    <div class="sec-title">top plugins</div>
+    <div class="sec-sub">by run count · last 30 days</div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>plugin</th><th class="r">runs</th></tr></thead>
+        <tbody>{plugin_rows}</tbody>
+      </table>
+    </div>
+  </div>
+  <div class="section">
+    <div class="sec-title">top workflows</div>
+    <div class="sec-sub">by run count · last 30 days</div>
+    {workflows_panel}
+  </div>
+</div>
+</div>
+
+<script>
+(function(){{
+  var el=document.getElementById('usage-runs-chart');
+  if(!el)return;
+  new Chart(el,{{
+    type:'bar',
+    data:{{labels:{day_labels},datasets:[{{data:{day_counts},backgroundColor:'#00e5a044',borderColor:'#00e5a0',borderWidth:1,borderRadius:4}}]}},
+    options:{{responsive:true,maintainAspectRatio:false,
+      plugins:{{legend:{{display:false}}}},
+      scales:{{y:{{beginAtZero:true,ticks:{{font:{{size:10}},color:'#9CA3AF'}},grid:{{color:'rgba(0,0,0,0.04)'}},border:{{display:false}}}},
+               x:{{ticks:{{font:{{size:9}},color:'#9CA3AF',maxRotation:45,autoSkip:true}},grid:{{display:false}},border:{{display:false}}}}}}}}
+  }});
+}})();
+</script>
+"""
+
+
+# Expected /gateway-traffic response shape:
+# {
+#   "requests_7d": int, "health_check_pings_7d": int,
+#   "p50_latency_ms": int, "p95_latency_ms": int, "p99_latency_ms": int,
+#   "auth_failure_rate_pct": float,
+#   "requests_by_route": [{"route": str, "count": int}, ...],
+#   "status_code_breakdown": {"2xx": int, "4xx": int, "5xx": int}
+# }
+def gateway_traffic_section_html(control_center_url: str) -> str:
+    import urllib.request, json
+    data: dict = {}
+    try:
+        with urllib.request.urlopen(
+            f"{control_center_url.rstrip('/')}/gateway-traffic", timeout=15
+        ) as r:
+            data = json.loads(r.read())
+    except Exception as e:
+        print(f"[report] gateway_traffic_section_html failed: {type(e).__name__}: {e}", flush=True)
+
+    if not data:
+        return """
+<div class="tab-section">
+<div class="section">
+  <div class="sec-title">API gateway traffic</div>
+  <div style="font-size:12px;color:var(--color-text-muted)">
+    Could not reach /gateway-traffic -- not implemented yet. Expected JSON shape:
+    <pre style="font-size:11px;color:var(--color-text-muted);margin-top:8px;white-space:pre-wrap">{
+  "requests_7d": int, "health_check_pings_7d": int,
+  "p50_latency_ms": int, "p95_latency_ms": int, "p99_latency_ms": int,
+  "auth_failure_rate_pct": float,
+  "requests_by_route": [{"route": str, "count": int}, ...],
+  "status_code_breakdown": {"2xx": int, "4xx": int, "5xx": int}
+}</pre>
+  </div>
+</div>
+</div>"""
+
+    requests_7d = data.get("requests_7d", 0)
+    health_pings = data.get("health_check_pings_7d", 0)
+    p50 = data.get("p50_latency_ms", 0)
+    p95 = data.get("p95_latency_ms", 0)
+    p99 = data.get("p99_latency_ms", 0)
+    auth_fail_pct = data.get("auth_failure_rate_pct", 0)
+    auth_fail_color = "#3B6D11" if auth_fail_pct <= 1 else "#854F0B" if auth_fail_pct <= 5 else "#A32D2D"
+
+    breakdown = data.get("status_code_breakdown", {}) or {}
+    c2xx = breakdown.get("2xx", 0)
+    c4xx = breakdown.get("4xx", 0)
+    c5xx = breakdown.get("5xx", 0)
+
+    routes = data.get("requests_by_route", [])
+    route_rows = "".join(f"""<tr>
+          <td class="mono">{r.get('route','')}</td>
+          <td class="r">{r.get('count',0)}</td>
+        </tr>""" for r in routes) or \
+        '<tr><td colspan="2" style="text-align:center;color:var(--color-text-muted);padding:12px">no route data</td></tr>'
+
+    return f"""
+<div class="tab-section">
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">requests (7d, excl. health checks)</div><div class="kpi-val">{fmt_int(requests_7d)}</div></div>
+  <div class="kpi"><div class="kpi-label">health check pings (7d)</div><div class="kpi-val" style="color:var(--color-text-muted)">{fmt_int(health_pings)}</div></div>
+  <div class="kpi"><div class="kpi-label">p50 latency</div><div class="kpi-val">{p50} ms</div></div>
+  <div class="kpi"><div class="kpi-label">p95 latency</div><div class="kpi-val">{p95} ms</div></div>
+  <div class="kpi"><div class="kpi-label">p99 latency</div><div class="kpi-val">{p99} ms</div></div>
+  <div class="kpi"><div class="kpi-label">auth failure rate</div><div class="kpi-val" style="color:{auth_fail_color}">{auth_fail_pct}%</div></div>
+</div>
+
+<div style="display:grid;grid-template-columns:200px 1fr;gap:12px">
+  <div class="section" style="display:flex;flex-direction:column">
+    <div class="sec-title">status codes</div>
+    <div class="sec-sub">last 7d, excl. health checks</div>
+    <div style="position:relative;width:120px;height:120px;margin:0 auto 12px">
+      <canvas id="gw-status-donut" width="120" height="120"></canvas>
+      <div class="donut-center">
+        <div class="donut-center-val">{fmt_int(c2xx+c4xx+c5xx)}</div>
+        <div class="donut-center-lbl">requests</div>
+      </div>
+    </div>
+    <div>
+      {"".join(f'<div class="legend-item"><span class="legend-dot" style="background:{c}"></span><span>{lbl}</span><span class="legend-pct">{cnt}</span></div>' for c,lbl,cnt in [('#3B6D11','2xx',c2xx),('#854F0B','4xx',c4xx),('#A32D2D','5xx',c5xx)])}
+    </div>
+  </div>
+  <div class="section">
+    <div class="sec-title">top routes</div>
+    <div class="sec-sub">by request count · last 7d, excl. health checks</div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>route</th><th class="r">requests</th></tr></thead>
+        <tbody>{route_rows}</tbody>
+      </table>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+(function(){{
+  var el=document.getElementById('gw-status-donut');
+  if(!el)return;
+  new Chart(el,{{
+    type:'doughnut',
+    data:{{labels:['2xx','4xx','5xx'],
+           datasets:[{{data:[{c2xx},{c4xx},{c5xx}],
+                       backgroundColor:['#3B6D11','#854F0B','#A32D2D'],
+                       borderWidth:2,borderColor:'#1a1d2e',hoverOffset:3}}]}},
+    options:{{responsive:false,cutout:'68%',plugins:{{legend:{{display:false}},tooltip:{{callbacks:{{label:function(c){{return c.label+': '+c.raw;}}}}}}}}}}
+  }});
+}})();
+</script>
+"""
+
+
+# ── TAB: MISC ────────────────────────────────────────────────────────────────
+
+def misc_section_html(sub_tabs: List[Tuple[str, str, str]], group_id: str = "misc") -> str:
+    """
+    sub_tabs: list of (id, label, html_content) tuples. Renders a sub-nav
+    plus one panel per sub-tab; first sub-tab is active by default.
+
+    group_id namespaces the DOM ids/JS scope for this instance -- if this
+    function is called more than once on the same page (e.g. one call for
+    Misc, another for a combined LLMs & Cloud tab), each call's panel ids
+    and sub-tab toggling must stay independent. Panel ids are namespaced
+    as "misc-panel-{group_id}-{sid}" and miscSub() only ever queries
+    within this instance's own wrapper div (id "misc-wrap-{group_id}"),
+    so two instances never hide/show each other's panels.
+    """
+    if not sub_tabs:
+        return '<div class="tab-section"><div style="font-size:12px;color:var(--color-text-muted)">No misc sections configured yet.</div></div>'
+
+    nav_buttons = ""
+    panels = ""
+    for i, (sid, label, content) in enumerate(sub_tabs):
+        active = i == 0
+        color = "#00e5a0" if active else "#6b7280"
+        weight = "600" if active else "400"
+        border = "#00e5a0" if active else "transparent"
+        panel_id = f"misc-panel-{group_id}-{sid}"
+        nav_buttons += (
+            f'<button class="misc-sub" data-sub="{panel_id}" '
+            f'onclick="miscSub(\'{group_id}\',\'{panel_id}\')" '
+            f'style="padding:10px 16px;font-size:13px;color:{color};font-weight:{weight};'
+            f'background:none;border:none;border-bottom:2px solid {border};cursor:pointer;'
+            f'white-space:nowrap;margin-bottom:-1px;font-family:inherit">{label}</button>'
+        )
+        display = "" if active else "display:none"
+        panels += f'<div id="{panel_id}" style="{display}">{content}</div>'
+
+    return f"""
+<div class="tab-section">
+<div id="misc-wrap-{group_id}">
+<div style="display:flex;border-bottom:1px solid #2a2d3e;margin-bottom:16px">
+  {nav_buttons}
+</div>
+{panels}
+</div>
+</div>
+
+<script>
+function miscSub(groupId, id){{
+  var wrap=document.getElementById('misc-wrap-'+groupId);
+  if(!wrap) return;
+  wrap.querySelectorAll('[id^="misc-panel-'+groupId+'-"]').forEach(function(p){{p.style.display='none';}});
+  var target=document.getElementById(id);
+  if(target)target.style.display='';
+  wrap.querySelectorAll('.misc-sub').forEach(function(b){{
+    var a=b.dataset.sub===id;
+    b.style.color=a?'#00e5a0':'#6b7280';
+    b.style.fontWeight=a?'600':'400';
+    b.style.borderBottomColor=a?'#00e5a0':'transparent';
+  }});
+}}
+</script>
+"""
+
+
+KNOWN_ISSUES_PATH_DEFAULT = "omnibioai-work/known_issues.json"
+
+_SEVERITY_COLOR = {"high": "#A32D2D", "medium": "#854F0B", "low": "#185FA5"}
+_SEVERITY_BG    = {"high": "#FCEBEB", "medium": "#FAEEDA", "low": "#E6F1FB"}
+_STATUS_COLOR   = {"open": "#A32D2D", "acknowledged": "#854F0B", "resolved": "#3B6D11"}
+_STATUS_BG      = {"open": "#FCEBEB", "acknowledged": "#FAEEDA", "resolved": "#EAF3DE"}
+
+
+def known_issues_section_html(ecosystem_root: Path) -> str:
+    issues_path = ecosystem_root / KNOWN_ISSUES_PATH_DEFAULT
+    issues: List[Dict[str, Any]] = []
+    load_error = None
+    if issues_path.exists():
+        try:
+            issues = json.loads(issues_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            load_error = str(e)
+    else:
+        load_error = f"No file at {issues_path} yet -- create it to start tracking issues"
+
+    open_count = sum(1 for i in issues if i.get("status") == "open")
+    ack_count = sum(1 for i in issues if i.get("status") == "acknowledged")
+    resolved_count = sum(1 for i in issues if i.get("status") == "resolved")
+
+    cards = ""
+    for issue in sorted(issues, key=lambda i: (i.get("status") != "open", i.get("opened_at", "")), reverse=False):
+        sev = issue.get("severity", "medium")
+        st = issue.get("status", "open")
+        cards += f"""
+        <div style="background:var(--color-bg-surface2);border-left:3px solid {_STATUS_COLOR.get(st,'#444441')};border-radius:8px;padding:12px 14px;margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;gap:8px">
+            <span style="font-size:13px;font-weight:600">{issue.get('title','(untitled)')}</span>
+            <div style="display:flex;gap:6px;flex-shrink:0">
+              <span class="badge" style="background:{_SEVERITY_BG.get(sev,'#F1EFE8')};color:{_SEVERITY_COLOR.get(sev,'#444441')}">{sev}</span>
+              <span class="badge" style="background:{_STATUS_BG.get(st,'#F1EFE8')};color:{_STATUS_COLOR.get(st,'#444441')}">{st}</span>
+            </div>
+          </div>
+          <div style="font-size:12px;color:var(--color-text-muted);margin-bottom:4px">{issue.get('description','')}</div>
+          <div style="font-size:10px;color:var(--color-text-muted)">{issue.get('area','')} · opened {issue.get('opened_at','')}</div>
+        </div>"""
+
+    if not cards:
+        cards = f'<div style="font-size:12px;color:var(--color-text-muted)">{"No known issues logged." if not load_error else load_error}</div>'
+
+    return f"""
+<div class="tab-section">
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">open</div><div class="kpi-val" style="color:#A32D2D">{open_count}</div></div>
+  <div class="kpi"><div class="kpi-label">acknowledged</div><div class="kpi-val" style="color:#854F0B">{ack_count}</div></div>
+  <div class="kpi"><div class="kpi-label">resolved</div><div class="kpi-val" style="color:#3B6D11">{resolved_count}</div></div>
+</div>
+<div class="section">
+  <div class="sec-title">known issues</div>
+  <div class="sec-sub">manually maintained · edit {KNOWN_ISSUES_PATH_DEFAULT} directly to update</div>
+  {cards}
+</div>
+</div>
+"""
+
+
+_SECRET_DEFAULT_RE = re.compile(r"\$\{([A-Z0-9_]+):-([^}]*)\}")
+_SECRET_MARKERS = (
+    "change-me", "changeme", "admin-secret", "secret-change-in-production",
+    "omnibioai-secret", "omnibioai-studio-secret", "devtoken", "password", "insecure",
+)
+_SECRET_SAFE_KEYS = {
+    "DEBUG", "DJANGO_DEBUG", "AUTH_ENABLED", "SENTRY_ENVIRONMENT", "REPORT_SCHEDULE_HOURS",
+}
+
+
+def _load_compose(compose_path: Path) -> Optional[Dict[str, Any]]:
+    if yaml is None or not compose_path.exists():
+        return None
+    try:
+        data = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _iter_service_env(env_block: Any):
+    """Yield (key, raw_value) pairs from a compose `environment:` block --
+    handles both dict-style (KEY: value) and list-style (- KEY=value)."""
+    if isinstance(env_block, dict):
+        for k, v in env_block.items():
+            yield str(k), "" if v is None else str(v)
+    elif isinstance(env_block, list):
+        for item in env_block:
+            item = str(item)
+            if "=" in item:
+                k, v = item.split("=", 1)
+                yield k, v
+
+
+def secrets_audit_section_html(compose_path: Path) -> str:
+    compose = _load_compose(compose_path)
+    if compose is None:
+        reason = "PyYAML not installed -- cannot parse compose file" if yaml is None \
+            else f"compose file not found at {compose_path}"
+        return f"""
+<div class="tab-section">
+<div class="section"><div style="font-size:12px;color:var(--color-text-muted)">{reason}</div></div>
+</div>"""
+
+    services = compose.get("services") or {}
+    flagged: List[Dict[str, str]] = []
+    for svc_name, svc in services.items():
+        if not isinstance(svc, dict):
+            continue
+        for key, raw_value in _iter_service_env(svc.get("environment")):
+            if key in _SECRET_SAFE_KEYS:
+                continue
+            m = _SECRET_DEFAULT_RE.search(raw_value)
+            if not m:
+                continue
+            fallback = m.group(2)
+            if fallback and any(marker in fallback.lower() for marker in _SECRET_MARKERS):
+                flagged.append({"service": svc_name, "variable": key, "fallback": fallback})
+
+    affected_services = len({f["service"] for f in flagged})
+    kpi_color = "#A32D2D" if flagged else "#3B6D11"
+
+    rows = "".join(f"""<tr>
+          <td style="font-weight:600;font-size:12px">{f['service']}</td>
+          <td class="mono">{f['variable']}</td>
+          <td class="mono">{f['fallback']}</td>
+          <td><span class="badge" style="background:#FCEBEB;color:#A32D2D">risky default</span></td>
+        </tr>""" for f in flagged) or \
+        '<tr><td colspan="4" style="text-align:center;color:var(--color-text-muted);padding:20px">no risky default fallback values found</td></tr>'
+
+    return f"""
+<div class="tab-section">
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">flagged defaults</div><div class="kpi-val" style="color:{kpi_color}">{len(flagged)}</div></div>
+  <div class="kpi"><div class="kpi-label">services affected</div><div class="kpi-val">{affected_services}</div></div>
+</div>
+<div class="section">
+  <div class="sec-title">secrets audit</div>
+  <div class="sec-sub">scans {compose_path.name} for ${{VAR:-default}} env fallbacks that look like placeholder secrets -- heuristic on the fallback text only, not proof the placeholder is actually deployed</div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>service</th><th>variable</th><th>fallback value</th><th>flag</th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+  </div>
+</div>
+</div>
+"""
+
+
+def _parse_port_mapping(mapping: str) -> Dict[str, Any]:
+    s = str(mapping).strip()
+    m = _SECRET_DEFAULT_RE.match(s)
+    if m and s.startswith(m.group(0)):
+        bind = m.group(2) or "0.0.0.0"
+        rest = s[len(m.group(0)):]
+        if rest.startswith(":"):
+            rest = rest[1:]
+        parts = rest.split(":")
+    else:
+        parts = s.split(":")
+        if len(parts) >= 3:
+            bind = parts[0]
+            parts = parts[1:]
+        else:
+            bind = "0.0.0.0"
+    host_port = parts[0] if parts else ""
+    container_port = parts[1] if len(parts) > 1 else host_port
+    external = bind not in ("127.0.0.1", "localhost")
+    return {"raw": s, "bind": bind, "host_port": host_port,
+            "container_port": container_port, "external": external}
+
+
+def exposed_ports_section_html(compose_path: Path) -> str:
+    compose = _load_compose(compose_path)
+    if compose is None:
+        reason = "PyYAML not installed -- cannot parse compose file" if yaml is None \
+            else f"compose file not found at {compose_path}"
+        return f"""
+<div class="tab-section">
+<div class="section"><div style="font-size:12px;color:var(--color-text-muted)">{reason}</div></div>
+</div>"""
+
+    services = compose.get("services") or {}
+    mappings: List[Dict[str, Any]] = []
+    for svc_name, svc in services.items():
+        if not isinstance(svc, dict):
+            continue
+        for p in (svc.get("ports") or []):
+            parsed = _parse_port_mapping(p)
+            parsed["service"] = svc_name
+            mappings.append(parsed)
+
+    mappings.sort(key=lambda m: (not m["external"], m["service"]))
+    external_count = sum(1 for m in mappings if m["external"])
+    localhost_count = len(mappings) - external_count
+
+    def _row(m: Dict[str, Any]) -> str:
+        if m["external"]:
+            badge = '<span class="badge" style="background:#FCEBEB;color:#A32D2D">external</span>'
+        else:
+            badge = '<span class="badge" style="background:#EAF3DE;color:#3B6D11">localhost-only</span>'
+        return f"""<tr>
+          <td style="font-weight:600;font-size:12px">{m['service']}</td>
+          <td class="mono">{m['raw']}</td>
+          <td class="mono">{m['bind']}:{m['host_port']} -> {m['container_port']}</td>
+          <td>{badge}</td>
+        </tr>"""
+
+    rows = "".join(_row(m) for m in mappings) or \
+        '<tr><td colspan="4" style="text-align:center;color:var(--color-text-muted);padding:20px">no port mappings found</td></tr>'
+
+    return f"""
+<div class="tab-section">
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">total mappings</div><div class="kpi-val">{len(mappings)}</div></div>
+  <div class="kpi"><div class="kpi-label">external</div><div class="kpi-val" style="color:#A32D2D">{external_count}</div></div>
+  <div class="kpi"><div class="kpi-label">localhost-only</div><div class="kpi-val" style="color:#3B6D11">{localhost_count}</div></div>
+</div>
+<div class="section">
+  <div class="sec-title">exposed ports</div>
+  <div class="sec-sub">port mappings parsed from {compose_path.name} · sorted external-first</div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>service</th><th>raw mapping</th><th>bind:host -> container</th><th>exposure</th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+  </div>
+</div>
+</div>
+"""
+
+
+def _run_vuln_scan(repo_path: Path) -> Optional[int]:
+    """Runs whichever of pip-audit / npm audit is available and applicable for
+    this repo, capped at 30s. Returns None if neither tool is available, the
+    repo has no matching manifest, or the scan times out/errors."""
+    has_py = (repo_path / "requirements.txt").exists() or (repo_path / "pyproject.toml").exists()
+    has_js = (repo_path / "package.json").exists()
+    try:
+        if has_py and shutil.which("pip-audit"):
+            proc = subprocess.run(["pip-audit", "--format", "json"], cwd=str(repo_path),
+                                   capture_output=True, text=True, timeout=30)
+            data = json.loads(proc.stdout or "[]")
+            deps = data if isinstance(data, list) else data.get("dependencies", [])
+            return sum(len(d.get("vulns", [])) for d in deps if isinstance(d, dict))
+        if has_js and shutil.which("npm"):
+            proc = subprocess.run(["npm", "audit", "--json"], cwd=str(repo_path),
+                                   capture_output=True, text=True, timeout=30)
+            data = json.loads(proc.stdout or "{}")
+            total = ((data.get("metadata") or {}).get("vulnerabilities") or {}).get("total")
+            if total is not None:
+                return int(total)
+            vulns = data.get("vulnerabilities") or {}
+            return sum(int(v) for v in vulns.values() if isinstance(v, (int, float)))
+    except subprocess.TimeoutExpired:
+        return None
+    except Exception:
+        return None
+    return None
+
+
+_CI_STATUS_COLOR = {
+    "passing": ("#EAF3DE", "#3B6D11"),
+    "failing": ("#FCEBEB", "#A32D2D"),
+    "running": ("#FAEEDA", "#854F0B"),
+    "unknown": ("#F1EFE8", "#444441"),
+    "no ci":   ("#F1EFE8", "#444441"),
+}
+
+
+def _fetch_ci_status(owner: str, repo: str, token: str) -> Dict[str, Any]:
+    import urllib.request
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{owner}/{repo}/actions/runs?per_page=1",
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+    )
+    with urllib.request.urlopen(req, timeout=10) as r:
+        data = json.loads(r.read())
+    runs = data.get("workflow_runs", [])
+    if not runs:
+        return {"status": "unknown", "date": ""}
+    run = runs[0]
+    conclusion = run.get("conclusion")
+    status = run.get("status")
+    if status in ("in_progress", "queued"):
+        ci_status = "running"
+    elif conclusion == "success":
+        ci_status = "passing"
+    elif conclusion in ("failure", "timed_out", "cancelled", "action_required"):
+        ci_status = "failing"
+    else:
+        ci_status = "unknown"
+    return {"status": ci_status, "date": run.get("updated_at", run.get("created_at", ""))}
+
+
+def cicd_health_section_html(ecosystem_root: Path, targets: List[str]) -> str:
+    github_token = os.environ.get("GITHUB_TOKEN")
+    github_owner = os.environ.get("GITHUB_OWNER", "omnibioai")
+
+    rows: List[Dict[str, Any]] = []
+    for name in targets:
+        repo_path = ecosystem_root / name
+        if not repo_path.is_dir():
+            continue
+        has_ci = (repo_path / ".github" / "workflows").is_dir()
+
+        if not has_ci:
+            ci_status, ci_date = "no ci", ""
+        elif not github_token:
+            ci_status, ci_date = "unknown", ""
+        else:
+            try:
+                info = _fetch_ci_status(github_owner, name, github_token)
+                ci_status, ci_date = info["status"], info["date"]
+            except Exception as e:
+                print(f"[report] cicd_health_section_html CI fetch failed for {name}: {type(e).__name__}: {e}", flush=True)
+                ci_status, ci_date = "unknown", ""
+
+        vuln_count = _run_vuln_scan(repo_path)
+        rows.append({"repo": name, "has_ci": has_ci, "ci_status": ci_status,
+                     "ci_date": ci_date, "vuln_count": vuln_count})
+
+    passing = sum(1 for r in rows if r["ci_status"] == "passing")
+    failing = sum(1 for r in rows if r["ci_status"] == "failing")
+    no_ci   = sum(1 for r in rows if r["ci_status"] == "no ci")
+    total_vulns = sum(r["vuln_count"] for r in rows if r["vuln_count"] is not None)
+
+    token_note = "" if github_token else \
+        '<div style="font-size:11px;color:var(--color-text-muted);margin-bottom:8px">GITHUB_TOKEN not set -- CI status unknown for repos with workflows configured (skipping unauthenticated calls)</div>'
+    vuln_note = "" if (shutil.which("pip-audit") or shutil.which("npm")) else \
+        '<div style="font-size:11px;color:var(--color-text-muted);margin-bottom:8px">neither pip-audit nor npm found on PATH -- vulnerability counts unavailable</div>'
+
+    def _row(r):
+        bg, color = _CI_STATUS_COLOR.get(r["ci_status"], ("#F1EFE8", "#444441"))
+        vc = r["vuln_count"]
+        vc_html = "—" if vc is None else (f'<span style="color:#A32D2D;font-weight:600">{vc}</span>' if vc > 0 else "0")
+        return f"""<tr>
+          <td style="font-weight:600;font-size:12px">{r['repo']}</td>
+          <td><span class="badge" style="background:{bg};color:{color}">{r['ci_status']}</span></td>
+          <td style="font-size:11px;color:var(--color-text-muted)">{r['ci_date']}</td>
+          <td class="r">{vc_html}</td>
+        </tr>"""
+
+    table_rows = "".join(_row(r) for r in rows) or \
+        '<tr><td colspan="4" style="text-align:center;color:var(--color-text-muted);padding:20px">no repos found</td></tr>'
+
+    return f"""
+<div class="tab-section">
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">CI passing</div><div class="kpi-val" style="color:#3B6D11">{passing}</div></div>
+  <div class="kpi"><div class="kpi-label">CI failing</div><div class="kpi-val" style="color:#A32D2D">{failing}</div></div>
+  <div class="kpi"><div class="kpi-label">no CI configured</div><div class="kpi-val">{no_ci}</div></div>
+  <div class="kpi"><div class="kpi-label">known vulnerabilities</div><div class="kpi-val" style="color:{'#A32D2D' if total_vulns else '#3B6D11'}">{total_vulns}</div></div>
+</div>
+<div class="section">
+  <div class="sec-title">CI/CD health</div>
+  <div class="sec-sub">GitHub Actions status (latest run) + local dependency vulnerability scan, per repo</div>
+  {token_note}{vuln_note}
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>repo</th><th>CI status</th><th>last run</th><th class="r">vulns</th></tr></thead>
+      <tbody>{table_rows}</tbody>
+    </table>
+  </div>
+</div>
+</div>
+"""
+
+
+BACKUP_STATUS_PATH_DEFAULT = "backup_status.json"
+
+_BACKUP_STATUS_COLOR = {
+    "success": ("#EAF3DE", "#3B6D11"),
+    "failed":  ("#FCEBEB", "#A32D2D"),
+    "partial": ("#FAEEDA", "#854F0B"),
+}
+
+
+# Expected {work_dir}/backup_status.json shape:
+# [
+#   {"target": str, "last_backup_at": "ISO8601", "status": "success"|"failed"|"partial",
+#    "size_mb": float, "destination": str}, ...
+# ]
+def backup_status_section_html(work_dir: Path) -> str:
+    status_path = work_dir / BACKUP_STATUS_PATH_DEFAULT
+    if not status_path.exists():
+        return f"""
+<div class="tab-section">
+<div class="section">
+  <div class="sec-title">backup status</div>
+  <div style="font-size:12px;color:var(--color-text-muted)">no backup status file found -- create {status_path} to start tracking</div>
+</div>
+</div>"""
+
+    try:
+        backups = json.loads(status_path.read_text(encoding="utf-8"))
+        if not isinstance(backups, list):
+            backups = []
+    except Exception as e:
+        return f"""
+<div class="tab-section">
+<div class="section">
+  <div class="sec-title">backup status</div>
+  <div style="font-size:12px;color:var(--color-text-muted)">could not parse {status_path}: {type(e).__name__}: {e}</div>
+</div>
+</div>"""
+
+    now = datetime.now(timezone.utc)
+
+    def _age_hours(ts: str) -> Optional[float]:
+        try:
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            return (now - dt).total_seconds() / 3600
+        except Exception:
+            return None
+
+    for b in backups:
+        b["_age_h"] = _age_hours(b.get("last_backup_at", ""))
+
+    tracked = len(backups)
+    recent_48h = sum(1 for b in backups if b["_age_h"] is not None and b["_age_h"] <= 48)
+    ages = [b["_age_h"] for b in backups if b["_age_h"] is not None]
+    oldest_age = max(ages) if ages else None
+
+    def _fmt_age(h: Optional[float]) -> str:
+        if h is None:
+            return "—"
+        if h < 48:
+            return f"{h:.1f}h"
+        return f"{h/24:.1f}d"
+
+    def _row(b):
+        bg, color = _BACKUP_STATUS_COLOR.get(b.get("status", ""), ("#F1EFE8", "#444441"))
+        age = b["_age_h"]
+        age_color = "#A32D2D" if (age is not None and age > 48) else "var(--color-text)"
+        return f"""<tr>
+          <td style="font-weight:600;font-size:12px">{b.get('target','')}</td>
+          <td style="font-size:11px;color:var(--color-text-muted)">{b.get('last_backup_at','')}</td>
+          <td style="color:{age_color};font-weight:600">{_fmt_age(age)}</td>
+          <td><span class="badge" style="background:{bg};color:{color}">{b.get('status','')}</span></td>
+          <td class="r">{b.get('size_mb',0):.1f} MB</td>
+          <td class="mono">{b.get('destination','')}</td>
+        </tr>"""
+
+    rows = "".join(_row(b) for b in backups) or \
+        '<tr><td colspan="6" style="text-align:center;color:var(--color-text-muted);padding:20px">no backup targets tracked</td></tr>'
+
+    oldest_color = "#A32D2D" if (oldest_age is not None and oldest_age > 48) else "#3B6D11"
+
+    return f"""
+<div class="tab-section">
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">targets tracked</div><div class="kpi-val">{tracked}</div></div>
+  <div class="kpi"><div class="kpi-label">backed up in last 48h</div><div class="kpi-val" style="color:{'#3B6D11' if recent_48h else '#A32D2D'}">{recent_48h}</div></div>
+  <div class="kpi"><div class="kpi-label">oldest backup</div><div class="kpi-val" style="color:{oldest_color}">{_fmt_age(oldest_age)}</div></div>
+</div>
+<div class="section">
+  <div class="sec-title">backup status</div>
+  <div class="sec-sub">from {status_path.name}</div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>target</th><th>last backup</th><th>age</th><th>status</th><th class="r">size</th><th>destination</th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+  </div>
+</div>
+</div>
+"""
+
+
+def _scan_active_runs(work_dir: Path, active_only: bool = True) -> List[Dict[str, Any]]:
+    runs: List[Dict[str, Any]] = []
+    runs_root = work_dir / "runs"
+    if not runs_root.is_dir():
+        return runs
+    for plugin_dir in sorted(runs_root.iterdir()):
+        if not plugin_dir.is_dir():
+            continue
+        for run_dir in sorted(plugin_dir.iterdir()):
+            if not run_dir.is_dir():
+                continue
+            status_file = run_dir / "status.json"
+            if not status_file.exists():
+                continue
+            try:
+                status = json.loads(status_file.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            state = status.get("state", "UNKNOWN")
+            if active_only and state not in ("CREATED", "QUEUED", "RUNNING"):
+                continue
+            runs.append({
+                "plugin": plugin_dir.name,
+                "run_id": run_dir.name,
+                "state": state,
+                "created_at": status.get("created_at", ""),
+                "updated_at": status.get("updated_at", ""),
+                "detail": status.get("detail", ""),
+                "n_steps": len(status.get("steps", [])),
+            })
+    return sorted(runs, key=lambda r: r.get("updated_at", ""), reverse=True)
+
+
+_RUN_STATE_COLOR = {
+    "RUNNING": "#3B6D11", "QUEUED": "#854F0B", "CREATED": "#185FA5",
+    "COMPLETED": "#444441", "FAILED": "#A32D2D", "UNKNOWN": "#444441",
+}
+_RUN_STATE_BG = {
+    "RUNNING": "#EAF3DE", "QUEUED": "#FAEEDA", "CREATED": "#E6F1FB",
+    "COMPLETED": "#F1EFE8", "FAILED": "#FCEBEB", "UNKNOWN": "#F1EFE8",
+}
+
+
+def active_runs_section_html(work_dir: Path) -> str:
+    active_runs = _scan_active_runs(work_dir, active_only=True)
+    recent_runs = _scan_active_runs(work_dir, active_only=False)[:20]
+
+    def _run_row(r: Dict[str, Any]) -> str:
+        color = _RUN_STATE_COLOR.get(r["state"], "#444441")
+        bg = _RUN_STATE_BG.get(r["state"], "#F1EFE8")
+        return f"""<tr>
+          <td style="font-size:12px;font-weight:600">{r['plugin']}</td>
+          <td class="mono">{r['run_id']}</td>
+          <td><span class="badge" style="background:{bg};color:{color}">{r['state']}</span></td>
+          <td style="font-size:11px;color:var(--color-text-muted)">{r['updated_at']}</td>
+          <td class="r">{r['n_steps']}</td>
+        </tr>"""
+
+    active_rows = "".join(_run_row(r) for r in active_runs) or \
+        '<tr><td colspan="5" style="text-align:center;color:var(--color-text-muted);padding:20px">no active runs right now</td></tr>'
+    recent_rows = "".join(_run_row(r) for r in recent_runs) or \
+        '<tr><td colspan="5" style="text-align:center;color:var(--color-text-muted);padding:20px">no run history found</td></tr>'
+
+    return f"""
+<div class="tab-section">
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">active now</div><div class="kpi-val" style="color:#3B6D11">{len(active_runs)}</div><div class="kpi-sub">running/queued/created</div></div>
+  <div class="kpi"><div class="kpi-label">recent (shown)</div><div class="kpi-val">{len(recent_runs)}</div><div class="kpi-sub">last 20, any state</div></div>
+</div>
+
+<div class="section">
+  <div class="sec-title">active runs</div>
+  <div class="sec-sub">RunStore status — refreshes on page reload · note: CREATED/RUNNING entries may include stale/orphaned status files that were never finalized, not necessarily live activity</div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>plugin</th><th>run id</th><th>state</th><th>updated</th><th class="r">steps</th></tr></thead>
+      <tbody>{active_rows}</tbody>
+    </table>
+  </div>
+</div>
+
+<div class="section">
+  <div class="sec-title">recent run history</div>
+  <div class="sec-sub">last 20 runs, any state</div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>plugin</th><th>run id</th><th>state</th><th>updated</th><th class="r">steps</th></tr></thead>
+      <tbody>{recent_rows}</tbody>
+    </table>
+  </div>
+</div>
+</div>
+"""
+
+
+# Expected /database response shape:
+# {
+#   "mysql": {"connections": int, "max_connections": int, "slow_queries": int,
+#             "databases": [{"name": str, "size_mb": float}, ...]},
+#   "redis": {"used_memory_human": str, "hit_rate_pct": float, "connected_clients": int},
+#   "neo4j": {"node_count": int, "relationship_count": int}
+# }
+def database_section_html(control_center_url: str) -> str:
+    import urllib.request, json
+    data: dict = {}
+    try:
+        with urllib.request.urlopen(
+            f"{control_center_url.rstrip('/')}/database", timeout=10
+        ) as r:
+            data = json.loads(r.read())
+    except Exception as e:
+        print(f"[report] database_section_html failed: {type(e).__name__}: {e}", flush=True)
+
+    mysql = data.get("mysql") if data else None
+    redis = data.get("redis") if data else None
+    neo4j = data.get("neo4j") if data else None
+
+    if not (mysql or redis or neo4j):
+        return """
+<div class="tab-section">
+<div class="section">
+  <div class="sec-title">data layer</div>
+  <div style="font-size:12px;color:var(--color-text-muted)">
+    /database endpoint not implemented yet. Expected JSON shape:
+    <pre style="font-size:11px;color:var(--color-text-muted);margin-top:8px;white-space:pre-wrap">{
+  "mysql": {"connections": int, "max_connections": int, "slow_queries": int,
+            "databases": [{"name": str, "size_mb": float}, ...]},
+  "redis": {"used_memory_human": str, "hit_rate_pct": float, "connected_clients": int},
+  "neo4j": {"node_count": int, "relationship_count": int}
+}</pre>
+  </div>
+</div>
+</div>"""
+
+    mysql_dbs = (mysql or {}).get("databases", [])
+    mysql_rows = "".join(f"""<tr>
+          <td style="font-size:12px">{d.get('name','')}</td>
+          <td class="r">{d.get('size_mb',0):.1f} MB</td>
+        </tr>""" for d in mysql_dbs) or \
+        '<tr><td colspan="2" style="text-align:center;color:var(--color-text-muted);padding:12px">no databases reported</td></tr>'
+
+    conns = (mysql or {}).get("connections", "—")
+    max_conns = (mysql or {}).get("max_connections", "—")
+    slow_q = (mysql or {}).get("slow_queries", "—")
+
+    return f"""
+<div class="tab-section">
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+  <div class="section">
+    <div class="sec-title">MySQL</div>
+    <div class="kpi-row" style="grid-template-columns:1fr 1fr">
+      <div class="kpi"><div class="kpi-label">connections</div><div class="kpi-val">{conns}/{max_conns}</div></div>
+      <div class="kpi"><div class="kpi-label">slow queries</div><div class="kpi-val">{slow_q}</div></div>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>database</th><th class="r">size</th></tr></thead>
+        <tbody>{mysql_rows}</tbody>
+      </table>
+    </div>
+  </div>
+  <div class="section">
+    <div class="sec-title">Redis</div>
+    <div class="kpi-row" style="grid-template-columns:1fr 1fr">
+      <div class="kpi"><div class="kpi-label">memory used</div><div class="kpi-val">{(redis or {}).get('used_memory_human','—')}</div></div>
+      <div class="kpi"><div class="kpi-label">hit rate</div><div class="kpi-val">{(redis or {}).get('hit_rate_pct','—')}%</div></div>
+    </div>
+    <div class="kpi"><div class="kpi-label">connected clients</div><div class="kpi-val">{(redis or {}).get('connected_clients','—')}</div></div>
+  </div>
+  <div class="section">
+    <div class="sec-title">Neo4j</div>
+    <div class="kpi-row" style="grid-template-columns:1fr 1fr">
+      <div class="kpi"><div class="kpi-label">nodes</div><div class="kpi-val">{fmt_int((neo4j or {}).get('node_count',0))}</div></div>
+      <div class="kpi"><div class="kpi-label">relationships</div><div class="kpi-val">{fmt_int((neo4j or {}).get('relationship_count',0))}</div></div>
+    </div>
+  </div>
+</div>
+</div>
+"""
+
+
+# Expected /celery response shape:
+# {
+#   "workers": [{"name": str, "status": "online"|"offline", "active_tasks": int}, ...],
+#   "recent_tasks": [{"name": str, "state": str, "runtime_s": float}, ...]
+# }
+def task_queue_section_html(control_center_url: str) -> str:
+    import urllib.request, json
+    data: dict = {}
+    try:
+        with urllib.request.urlopen(
+            f"{control_center_url.rstrip('/')}/celery", timeout=10
+        ) as r:
+            data = json.loads(r.read())
+    except Exception as e:
+        print(f"[report] task_queue_section_html failed: {type(e).__name__}: {e}", flush=True)
+
+    workers = data.get("workers", []) if data else []
+    recent_tasks = data.get("recent_tasks", []) if data else []
+
+    if not workers and not recent_tasks:
+        return """
+<div class="tab-section">
+<div class="section">
+  <div class="sec-title">task queue</div>
+  <div style="font-size:12px;color:var(--color-text-muted)">
+    /celery endpoint not implemented yet. Expected JSON shape:
+    <pre style="font-size:11px;color:var(--color-text-muted);margin-top:8px;white-space:pre-wrap">{
+  "workers": [{"name": str, "status": "online"|"offline", "active_tasks": int}, ...],
+  "recent_tasks": [{"name": str, "state": str, "runtime_s": float}, ...]
+}</pre>
+  </div>
+</div>
+</div>"""
+
+    _TASK_STATE_COLOR = {
+        "SUCCESS": ("#EAF3DE", "#3B6D11"), "FAILURE": ("#FCEBEB", "#A32D2D"),
+        "STARTED": ("#E6F1FB", "#185FA5"), "PENDING": ("#FAEEDA", "#854F0B"),
+        "RETRY":   ("#FAEEDA", "#854F0B"),
+    }
+
+    def _worker_row(w):
+        online = w.get("status") == "online"
+        bg, color = ("#EAF3DE", "#3B6D11") if online else ("#FCEBEB", "#A32D2D")
+        return f"""<tr>
+          <td style="font-weight:600;font-size:12px">{w.get('name','')}</td>
+          <td><span class="badge" style="background:{bg};color:{color}">{w.get('status','unknown')}</span></td>
+          <td class="r">{w.get('active_tasks',0)}</td>
+        </tr>"""
+
+    def _task_row(t):
+        bg, color = _TASK_STATE_COLOR.get(t.get("state", ""), ("#F1EFE8", "#444441"))
+        return f"""<tr>
+          <td style="font-size:12px">{t.get('name','')}</td>
+          <td><span class="badge" style="background:{bg};color:{color}">{t.get('state','')}</span></td>
+          <td class="r">{t.get('runtime_s','—')}s</td>
+        </tr>"""
+
+    worker_rows = "".join(_worker_row(w) for w in workers) or \
+        '<tr><td colspan="3" style="text-align:center;color:var(--color-text-muted);padding:20px">no workers reported</td></tr>'
+    task_rows = "".join(_task_row(t) for t in recent_tasks) or \
+        '<tr><td colspan="3" style="text-align:center;color:var(--color-text-muted);padding:20px">no recent tasks</td></tr>'
+
+    return f"""
+<div class="tab-section">
+<div class="section">
+  <div class="sec-title">workers</div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>name</th><th>status</th><th class="r">active tasks</th></tr></thead>
+      <tbody>{worker_rows}</tbody>
+    </table>
+  </div>
+</div>
+<div class="section">
+  <div class="sec-title">recent tasks</div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>task</th><th>state</th><th class="r">runtime</th></tr></thead>
+      <tbody>{task_rows}</tbody>
+    </table>
+  </div>
+</div>
+</div>
+"""
+
+
+# Expected /license response shape:
+# {
+#   "seats_used": int, "seats_total": int,
+#   "licenses": [{"org": str, "expires_at": str, "status": str}, ...]
+# }
+def license_section_html(control_center_url: str) -> str:
+    import urllib.request, json
+    data: dict = {}
+    try:
+        with urllib.request.urlopen(
+            f"{control_center_url.rstrip('/')}/license", timeout=10
+        ) as r:
+            data = json.loads(r.read())
+    except Exception as e:
+        print(f"[report] license_section_html failed: {type(e).__name__}: {e}", flush=True)
+
+    if not data:
+        return """
+<div class="tab-section">
+<div class="section">
+  <div class="sec-title">license</div>
+  <div style="font-size:12px;color:var(--color-text-muted)">
+    /license endpoint not implemented yet. Expected JSON shape:
+    <pre style="font-size:11px;color:var(--color-text-muted);margin-top:8px;white-space:pre-wrap">{
+  "seats_used": int, "seats_total": int,
+  "licenses": [{"org": str, "expires_at": str, "status": str}, ...]
+}</pre>
+  </div>
+</div>
+</div>"""
+
+    seats_used = data.get("seats_used", 0)
+    seats_total = data.get("seats_total", 0)
+    util_pct = round(100 * seats_used / seats_total, 1) if seats_total else 0
+    licenses = data.get("licenses", [])
+
+    _LICENSE_STATUS_COLOR = {
+        "active":   ("#EAF3DE", "#3B6D11"),
+        "expired":  ("#FCEBEB", "#A32D2D"),
+        "expiring": ("#FAEEDA", "#854F0B"),
+    }
+
+    def _lic_row(l):
+        bg, color = _LICENSE_STATUS_COLOR.get(l.get("status", ""), ("#F1EFE8", "#444441"))
+        return f"""<tr>
+          <td style="font-weight:600;font-size:12px">{l.get('org','')}</td>
+          <td class="mono">{l.get('expires_at','')}</td>
+          <td><span class="badge" style="background:{bg};color:{color}">{l.get('status','')}</span></td>
+        </tr>"""
+
+    rows = "".join(_lic_row(l) for l in licenses) or \
+        '<tr><td colspan="3" style="text-align:center;color:var(--color-text-muted);padding:20px">no license records</td></tr>'
+
+    return f"""
+<div class="tab-section">
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">seats used</div><div class="kpi-val">{seats_used}/{seats_total}</div><div class="kpi-sub">{util_pct}% utilization</div></div>
+</div>
+<div class="section">
+  <div class="sec-title">licenses</div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>org</th><th>expires</th><th>status</th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+  </div>
+</div>
+</div>
+"""
+
+
+# Expected /image-freshness response shape:
+# {
+#   "images": [{"service": str, "image": str, "stale": bool, "last_pushed": str}, ...]
+# }
+def image_freshness_section_html(control_center_url: str) -> str:
+    import urllib.request, json
+    data: dict = {}
+    try:
+        with urllib.request.urlopen(
+            f"{control_center_url.rstrip('/')}/image-freshness", timeout=10
+        ) as r:
+            data = json.loads(r.read())
+    except Exception as e:
+        print(f"[report] image_freshness_section_html failed: {type(e).__name__}: {e}", flush=True)
+
+    images = data.get("images", []) if data else []
+
+    if not images:
+        return """
+<div class="tab-section">
+<div class="section">
+  <div class="sec-title">image freshness</div>
+  <div style="font-size:12px;color:var(--color-text-muted)">
+    /image-freshness endpoint not implemented yet (only applies to <code>:latest</code>-tagged images). Expected JSON shape:
+    <pre style="font-size:11px;color:var(--color-text-muted);margin-top:8px;white-space:pre-wrap">{
+  "images": [{"service": str, "image": str, "stale": bool, "last_pushed": str}, ...]
+}</pre>
+  </div>
+</div>
+</div>"""
+
+    stale_count = sum(1 for i in images if i.get("stale"))
+
+    def _img_row(i):
+        stale = i.get("stale")
+        bg, color = ("#FCEBEB", "#A32D2D") if stale else ("#EAF3DE", "#3B6D11")
+        label = "stale" if stale else "current"
+        return f"""<tr>
+          <td style="font-weight:600;font-size:12px">{i.get('service','')}</td>
+          <td class="mono">{i.get('image','')}</td>
+          <td><span class="badge" style="background:{bg};color:{color}">{label}</span></td>
+          <td style="font-size:11px;color:var(--color-text-muted)">{i.get('last_pushed','')}</td>
+        </tr>"""
+
+    rows = "".join(_img_row(i) for i in images)
+
+    return f"""
+<div class="tab-section">
+<div class="kpi-row">
+  <div class="kpi"><div class="kpi-label">images checked</div><div class="kpi-val">{len(images)}</div></div>
+  <div class="kpi"><div class="kpi-label">stale</div><div class="kpi-val" style="color:{'#A32D2D' if stale_count else '#3B6D11'}">{stale_count}</div></div>
+</div>
+<div class="section">
+  <div class="sec-title">image freshness</div>
+  <div class="sec-sub">applies only to :latest-tagged images</div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>service</th><th>image</th><th>status</th><th>last pushed</th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+  </div>
+</div>
+</div>
+"""
+
+
 # ── SHARED PAGINATION JS ───────────────────────────────────────────────────────
 
 PAGINATION_JS = """
@@ -2287,22 +4206,51 @@ def build_report(out_html: Path, title: str, timestamp: str,
                  grand: Totals, project_totals: Dict[str, Totals],
                  language_totals: Dict[str, Totals],
                  coverage_df: pd.DataFrame, health: EcosystemHealth,
-                 control_center_url: str) -> None:
+                 control_center_url: str, ecosystem_root: Path,
+                 registry_root: Path, work_dir: Path,
+                 compose_path: Path = DEFAULT_COMPOSE_PATH,
+                 sentry_org: str = "", sentry_project_slugs: Optional[List[str]] = None) -> None:
     out_html.parent.mkdir(parents=True, exist_ok=True)
     cc_url = control_center_url.rstrip("/")
     total_all = grand.blank + grand.comment + grand.code
     doc_lines = language_totals.get("Markdown", Totals()).code
 
     arch_html     = architecture_section_html(project_totals, grand, control_center_url)
-    proj_html     = projects_section_html(project_totals, grand)
-    lang_html     = languages_section_html(language_totals, grand)
-    cov_html      = coverage_section_html(coverage_df, timestamp)
-    hlth_html     = health_section_html(health, control_center_url)
+    projects_tab_html = misc_section_html([
+        ("summary",   "Code Summary", projects_section_html(project_totals, grand)),
+        ("languages", "Languages",    languages_section_html(language_totals, grand)),
+        ("coverage",  "Code Coverage", coverage_section_html(coverage_df, timestamp)),
+    ], group_id="projects")
+    hlth_html     = health_section_html(health, control_center_url, sentry_org, sentry_project_slugs)
     llms_html     = llm_section_html(control_center_url)
     cloud_html    = cloud_section_html(control_center_url)
     ref_html      = reference_section_html(control_center_url)
     kb_html       = knowledge_base_section_html(control_center_url)
     storage_html  = storage_section_html(control_center_url)
+    catalog_html  = catalog_section_html(ecosystem_root)
+    model_registry_html = model_registry_section_html(registry_root)
+    usage_tab_html = misc_section_html([
+        ("product", "Product Usage", usage_section_html(control_center_url)),
+        ("gateway", "API Gateway",   gateway_traffic_section_html(control_center_url)),
+    ], group_id="usage")
+    misc_html = misc_section_html([
+        ("issues", "Known Issues", known_issues_section_html(ecosystem_root)),
+        ("runs", "Active Runs", active_runs_section_html(work_dir)),
+        ("storage", "Storage", storage_html),
+        ("catalog", "Catalog", catalog_html),
+        ("database", "Data Layer",      database_section_html(control_center_url)),
+        ("queue",    "Task Queue",      task_queue_section_html(control_center_url)),
+        ("license",  "License",         license_section_html(control_center_url)),
+        ("secrets",  "Secrets Audit",   secrets_audit_section_html(compose_path)),
+        ("images",   "Image Freshness", image_freshness_section_html(control_center_url)),
+        ("ports",    "Exposed Ports",   exposed_ports_section_html(compose_path)),
+        ("cicd",   "CI/CD Health",   cicd_health_section_html(ecosystem_root, DEFAULT_TARGETS)),
+        ("backup", "Backup Status",  backup_status_section_html(work_dir)),
+    ], group_id="misc")
+    llmscloud_html = misc_section_html([
+        ("llms", "LLMs", llms_html),
+        ("cloud", "Cloud", cloud_html),
+    ], group_id="llmscloud")
 
     html = f"""<!doctype html>
 <html lang="en">
@@ -2372,28 +4320,26 @@ def build_report(out_html: Path, title: str, timestamp: str,
   <div class="tab-nav">
     <button class="tab-btn active" onclick="openTab('tab-arch',this)">Architecture</button>
     <button class="tab-btn" onclick="openTab('tab-proj',this)">Projects</button>
-    <button class="tab-btn" onclick="openTab('tab-lang',this)">Languages</button>
-    <button class="tab-btn" onclick="openTab('tab-cov',this)">Code Coverage</button>
     <button class="tab-btn" onclick="openTab('tab-health',this)">Health Status</button>
-    <button class="tab-btn" onclick="openTab('tab-llms',this)">LLMs</button>
-    <button class="tab-btn" onclick="openTab('tab-cloud',this)">Cloud</button>
+    <button class="tab-btn" onclick="openTab('tab-usage',this)">Usage</button>
+    <button class="tab-btn" onclick="openTab('tab-llmscloud',this)">LLMs & Cloud</button>
     <button class="tab-btn" onclick="openTab('tab-ref',this)">Reference Data</button>
     <button class="tab-btn" onclick="openTab('tab-kb',this)">AI Knowledge Base</button>
-    <button class="tab-btn" onclick="openTab('tab-storage',this)">Storage</button>
+    <button class="tab-btn" onclick="openTab('tab-modelreg',this)">Model Registry</button>
+    <button class="tab-btn" onclick="openTab('tab-misc',this)">Miscellaneous</button>
   </div>
 
   {PAGINATION_JS}
 
   <div id="tab-arch"   class="tab-panel active">{arch_html}</div>
-  <div id="tab-proj"   class="tab-panel">{proj_html}</div>
-  <div id="tab-lang"   class="tab-panel">{lang_html}</div>
-  <div id="tab-cov"    class="tab-panel">{cov_html}</div>
+  <div id="tab-proj"   class="tab-panel">{projects_tab_html}</div>
   <div id="tab-health" class="tab-panel">{hlth_html}</div>
-  <div id="tab-llms"   class="tab-panel">{llms_html}</div>
-  <div id="tab-cloud"  class="tab-panel">{cloud_html}</div>
+  <div id="tab-usage"  class="tab-panel">{usage_tab_html}</div>
+  <div id="tab-llmscloud" class="tab-panel">{llmscloud_html}</div>
   <div id="tab-ref"    class="tab-panel">{ref_html}</div>
   <div id="tab-kb"      class="tab-panel">{kb_html}</div>
-  <div id="tab-storage" class="tab-panel">{storage_html}</div>
+  <div id="tab-modelreg" class="tab-panel">{model_registry_html}</div>
+  <div id="tab-misc" class="tab-panel">{misc_html}</div>
 
   <div class="footer">
     cloc counts exclude vendored/runtime directories and selected extensions per cloc policy.<br>
@@ -2503,6 +4449,7 @@ def parse_args() -> argparse.Namespace:
                    dest="control_center_url")
     p.add_argument("--skip-health",    action="store_true")
     p.add_argument("--skip-coverage",  action="store_true")
+    p.add_argument("--compose-path", default=str(DEFAULT_COMPOSE_PATH))
     return p.parse_args()
 
 def generate_report(ecosystem_root: Path,
@@ -2511,7 +4458,8 @@ def generate_report(ecosystem_root: Path,
                     title: str = DEFAULT_TITLE,
                     control_center_url: str = DEFAULT_CONTROL_CENTER_URL,
                     skip_health: bool = False,
-                    skip_coverage: bool = False) -> Path:
+                    skip_coverage: bool = False,
+                    compose_path: str = str(DEFAULT_COMPOSE_PATH)) -> Path:
     ensure_cloc()
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if not targets:
@@ -2532,6 +4480,8 @@ def generate_report(ecosystem_root: Path,
         for lang, tot in per_lang.items():
             language_totals.setdefault(lang, Totals()).add(tot)
 
+    work_dir = Path(os.environ.get("WORK_DIR", str(ecosystem_root / "omnibioai-work")))
+
     if skip_coverage:
         print("→ Skipping coverage (--skip-coverage)")
         coverage_df = pd.DataFrame(columns=[
@@ -2539,7 +4489,6 @@ def generate_report(ecosystem_root: Path,
             "branches","partial_branches","coverage_pct","coverage_band",
             "fail_under","total_line","stderr_tail"])
     else:
-        work_dir = Path(os.environ.get("WORK_DIR", str(ecosystem_root / "omnibioai-work")))
         precomputed_dir = work_dir / "out" / "coverage"
         if precomputed_dir.is_dir():
             print(f"→ Loading pre-computed coverage from {precomputed_dir}…")
@@ -2557,12 +4506,19 @@ def generate_report(ecosystem_root: Path,
         health = fetch_health(control_center_url)
         print(f"  {'✓' if health.overall_status=='UP' else '⚠'} Overall: {health.overall_status}")
 
+    sentry_org = os.environ.get("SENTRY_ORG", "")
+    sentry_project_slugs = [s.strip() for s in os.environ.get("SENTRY_PROJECT_SLUGS", "").split(",") if s.strip()]
+
     out_html = ecosystem_root / out_relpath
     print("→ Building report…")
     build_report(out_html=out_html, title=title, timestamp=ts,
                  grand=grand, project_totals=project_totals,
                  language_totals=language_totals, coverage_df=coverage_df,
-                 health=health, control_center_url=control_center_url)
+                 health=health, control_center_url=control_center_url,
+                 ecosystem_root=ecosystem_root,
+                 registry_root=ecosystem_root / "data" / "local_registry" / "model_registry",
+                 work_dir=work_dir, compose_path=Path(compose_path),
+                 sentry_org=sentry_org, sentry_project_slugs=sentry_project_slugs)
     return out_html
 
 def main() -> int:
@@ -2585,7 +4541,8 @@ def main() -> int:
             title=args.title,
             control_center_url=args.control_center_url,
             skip_health=args.skip_health,
-            skip_coverage=args.skip_coverage)
+            skip_coverage=args.skip_coverage,
+            compose_path=args.compose_path)
         print(f"\n✓ Report written: {out}")
         return 0
     except Exception as e:

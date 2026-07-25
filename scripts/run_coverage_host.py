@@ -75,7 +75,7 @@ REPO_TIMEOUTS: Dict[str, int] = {
     "omnibioai-tool-images": 300,
 }
 
-DEFAULT_TIMEOUT = 300
+DEFAULT_TIMEOUT = 3600
 
 
 # --------------------------------------------------------------------------- #

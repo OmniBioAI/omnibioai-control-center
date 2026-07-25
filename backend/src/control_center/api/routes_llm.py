@@ -53,28 +53,36 @@ async def get_llms() -> JSONResponse:
 
 
 def _count_json_files(abstracts_dir: Path) -> tuple[int, list[str]]:
-    """Count .json files across domain subdirs using scandir (runs in thread pool)."""
-    total = 0
+    """
+    Count unique abstracts (by PMID filename) across domain subdirs.
+
+    A paper is filed under every matching topic domain (e.g. CRISPR_Editing
+    is a full subset of CRISPR_GenomeEditing; Alzheimer_Disease and
+    Alzheimer_CaseStudy overlap), so the same <pmid>.json exists in multiple
+    domain directories. Summing per-domain counts double-counts those papers
+    instead of reporting distinct abstracts.
+    """
+    seen: set[str] = set()
     domains: list[str] = []
     try:
         with os.scandir(abstracts_dir) as top:
             for domain_entry in top:
                 if not domain_entry.is_dir():
                     continue
-                count = 0
+                had_files = False
                 try:
                     with os.scandir(domain_entry.path) as inner:
                         for e in inner:
                             if e.is_file() and e.name.endswith(".json"):
-                                count += 1
+                                seen.add(e.name)
+                                had_files = True
                 except OSError:
                     pass
-                if count > 0:
-                    total += count
+                if had_files:
                     domains.append(domain_entry.name)
     except OSError:
         pass
-    return total, domains
+    return len(seen), domains
 
 
 def _list_index_domains(index_root: Path) -> list[str]:
@@ -94,18 +102,38 @@ def _list_index_domains(index_root: Path) -> list[str]:
     return domains
 
 
-async def _du_bytes(path: Path, timeout: float = 20.0) -> int:
-    """Return total bytes under path using du -sb."""
+INDEX_SCRATCH_PREFIXES = ("embedding_checkpoint",)
+
+
+def _index_size_bytes(index_root: Path) -> int:
+    """
+    Sum bytes of served index artifacts (pubmed_index.faiss, pmid_map.json, ...)
+    under index_root, excluding embedding_checkpoint*.json scratch files.
+
+    Those checkpoints are resumable-embedding progress dumps left behind by the
+    indexing run, not part of the queryable index -- and can dwarf it (observed:
+    ~322GB of checkpoint JSON vs ~67GB of actual .faiss files across the corpus).
+    """
+    total = 0
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "du", "-sb", str(path),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        return int(stdout.decode().split()[0])
-    except Exception:
-        return 0
+        with os.scandir(index_root) as top:
+            for domain_entry in top:
+                if not domain_entry.is_dir():
+                    continue
+                try:
+                    with os.scandir(domain_entry.path) as inner:
+                        for e in inner:
+                            if not e.is_file() or e.name.startswith(INDEX_SCRATCH_PREFIXES):
+                                continue
+                            try:
+                                total += e.stat().st_size
+                            except OSError:
+                                pass
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return total
 
 
 @router.get("/knowledge-base")
@@ -150,7 +178,7 @@ async def get_knowledge_base() -> JSONResponse:
 
     async def get_index_size() -> int:
         if index_root and index_root.exists():
-            return await _du_bytes(index_root)
+            return await loop.run_in_executor(None, _index_size_bytes, index_root)
         return 0
 
     async def check_rag() -> str:

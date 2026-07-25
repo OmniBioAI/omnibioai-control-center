@@ -37,3 +37,8 @@ system:
       warn_pct_free_below: 10
     - path: /workspace/local_registry
       warn_pct_free_below: 10
+  integrity_checks:
+    - name: omnibioai-data
+      path: /workspace/omnibioai-data
+    - name: omnibioai-work
+      path: /workspace/omnibioai-work

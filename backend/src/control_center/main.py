@@ -36,6 +36,7 @@ from control_center.api.routes_cloud import router as cloud_router
 from control_center.api.routes_config import router as config_router
 from control_center.api.routes_docker import router as docker_router
 from control_center.api.routes_health import router as health_router
+from control_center.api.routes_infra import router as infra_router
 from control_center.api.routes_llm import router as llm_router
 from control_center.api.routes_reference import router as reference_router
 from control_center.api.routes_report import router as report_router
@@ -91,6 +92,7 @@ app.include_router(report_router)
 app.include_router(config_router)
 app.include_router(docker_router)
 app.include_router(llm_router)
+app.include_router(infra_router)
 app.include_router(cloud_router)
 app.include_router(reference_router)
 app.include_router(router_storage)
@@ -263,11 +265,15 @@ _DOCKER_INJECT_JS = r"""<style>
       openTab('tab-docker', btn);
       if (!_dLoaded) { _dLoaded = true; omniLoadCt(); omniLoadSif(); omniLoadPl(); }
     });
-    tabNav.appendChild(btn);
+    // Insert before whatever is currently the last tab (Miscellaneous) so
+    // Docker Images lands second-to-last, not after it.
+    var lastBtn = tabNav.lastElementChild;
+    if (lastBtn) { tabNav.insertBefore(btn, lastBtn); } else { tabNav.appendChild(btn); }
     var panel = buildDockerPanel();
     var existingPanels = document.querySelectorAll('.tab-panel');
     if (existingPanels.length > 0) {
-      existingPanels[existingPanels.length - 1].parentNode.appendChild(panel);
+      var lastPanel = existingPanels[existingPanels.length - 1];
+      lastPanel.parentNode.insertBefore(panel, lastPanel);
     } else {
       tabNav.parentNode.appendChild(panel);
     }
