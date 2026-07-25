@@ -1995,6 +1995,30 @@ def cloud_section_html(control_center_url: str) -> str:
 </div>"""
 
 
+def cost_tracking_placeholder_section_html() -> str:
+    """"Coming soon" placeholder for the sidebar's Cost Tracking leaf.
+
+    Cost tracking needs real AWS/GCP/Azure billing-API credentials tied to
+    an active paying account -- separate IAM permissions from whatever's
+    already used for compute/storage -- and this deployment doesn't have
+    those yet (it runs primarily on local/Slurm backends today). Not wired
+    to any endpoint; no JSON contract to document since none is planned
+    until real billing access exists.
+    """
+    return """
+<div class="tab-section">
+<div class="section">
+  <div class="sec-title">cost tracking</div>
+  <div style="font-size:12px;color:var(--color-text-muted)">
+    Coming soon. Cost tracking requires real AWS/GCP/Azure billing API credentials tied to an
+    active paying account, which aren't in place for this deployment yet -- it currently runs
+    primarily on local/Slurm backends. This view will be built once real cloud billing access
+    is available.
+  </div>
+</div>
+</div>"""
+
+
 def reference_section_html(control_center_url: str) -> str:
     """Fetch reference genome data status from control center."""
     import urllib.request, json
@@ -3537,7 +3561,7 @@ SIDEBAR_NAV_SPEC: List[Tuple[str, str, Optional[List[Tuple[str, str]]]]] = [
     ("projects",     "Projects",          [("summary", "Code Summary"), ("languages", "Languages"), ("coverage", "Code Coverage")]),
     ("health",       "Health Status",     [("overview", "Overview"), ("services", "Services"), ("storage", "Disk & Mounts"), ("gpu", "GPU"), ("activity", "Activity"), ("errors", "Errors")]),
     ("usage",        "Usage",             [("product", "Product Usage"), ("gateway", "API Gateway")]),
-    ("llmscloud",    "LLMs & Cloud",      [("llms", "LLMs"), ("cloud", "Cloud")]),
+    ("llmscloud",    "LLMs & Cloud",      [("llms", "LLMs"), ("cloud", "Cloud"), ("cost", "Cost Tracking")]),
     ("ref",          "Reference Data",    None),
     ("kb",           "AI Knowledge Base", None),
     ("modelreg",     "Model Registry",    None),
@@ -4557,6 +4581,7 @@ def build_report(out_html: Path, title: str, timestamp: str,
     llmscloud_html = misc_section_html([
         ("llms", "LLMs", llms_html),
         ("cloud", "Cloud", cloud_html),
+        ("cost", "Cost Tracking", cost_tracking_placeholder_section_html()),
     ], group_id="llmscloud", render_nav=False)
 
     html = f"""<!doctype html>
