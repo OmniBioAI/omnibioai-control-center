@@ -17,8 +17,8 @@ The Control Center is a FastAPI service that aggregates health status across all
 - **Docker inventory** — platform containers, tool SIF images, and plugin Docker images via `/docker/*` endpoints
 - **Structured JSON logging** — all key events logged as JSON to stdout for log aggregation
 - **LLM monitoring** — local Ollama models and API key status via `/llms`
-- **Reference genome registry** — 14 organisms, indexes, variants via `/reference`
-- **AI Knowledge Base** — 35M PubMed abstracts, FAISS indexes via `/knowledge-base`
+- **Reference genome registry** — 12 organisms, indexes, variants via `/reference`
+- **AI Knowledge Base** — 28M+ PubMed abstracts, FAISS indexes via `/knowledge-base`
 - **Storage monitoring** — disk usage, per-organism reference indexes via `/storage`
 - **Cloud backends** — execution backend status via `/cloud`
 
@@ -80,18 +80,31 @@ omnibioai-control-center/
 | `/health`              | GET    | Control Center self-check |
 | `/services`            | GET    | Per-service health status (JSON) |
 | `/summary`             | GET    | Full ecosystem summary — services + disk (JSON) |
+| `/report`              | GET    | Redirects to `/` (serves report with live header) |
 | `/report/generate`     | POST   | Trigger background report generation |
 | `/report/status`       | GET    | Poll report job state (running/done/error/idle) |
 | `/report/data`         | GET    | Structured report data as JSON |
+| `/config`              | GET    | Raw `control_center.yaml` contents (plain text) |
+| `/config/service`      | POST   | Append a new monitored service to the config |
 | `/docker/containers`   | GET    | Platform container list with status |
 | `/docker/sif-images`   | GET    | Tool SIF image inventory and sizes |
 | `/docker/plugin-images`| GET    | Plugin Docker image inventory |
 | `/metrics`             | GET    | Prometheus metrics endpoint |
 | `/llms`                | GET    | Local LLM models + API key status |
 | `/cloud`               | GET    | Cloud/HPC execution backend status |
-| `/reference`           | GET    | Reference genome registry (14 organisms) |
+| `/reference`           | GET    | Reference genome registry (12 organisms) |
 | `/knowledge-base`      | GET    | AI knowledge base stats (PubMed + FAISS) |
 | `/storage`             | GET    | Disk usage + per-organism index sizes |
+| `/gpu`                 | GET    | GPU temperature/utilization via `nvidia-smi` |
+| `/celery`              | GET    | Celery worker + recent task-queue status |
+| `/database`            | GET    | MySQL/Redis/Neo4j data-layer connectivity |
+| `/license`             | GET    | Seat usage and license expiry status |
+| `/usage`               | GET    | Product usage — active users, run counts |
+| `/gateway-traffic`     | GET    | API Gateway request/route traffic (7-day window) |
+| `/audit-trail`         | GET    | Auth/policy/HPC audit log stream (7-day window) |
+| `/activity`            | GET    | Live CPU/memory/network via Prometheus + cAdvisor |
+| `/image-freshness`     | GET    | Deployed image digests vs. latest on GHCR |
+| `/integrity`           | GET    | Configured symlink/mount integrity checks |
 
 ### `/health`
 
@@ -262,21 +275,45 @@ uvicorn control_center.main:app --host 0.0.0.0 --port 7070 --reload
 
 ## Ecosystem Report
 
-The report is a single interactive HTML file with eleven tabs:
+The report is a single interactive HTML file with a left sidebar-nav layout (not flat tabs) — top-level groups, some of which expand into sub-tabs:
 
-| Tab               | Contents                                           |
-|-------------------|----------------------------------------------------|
-| Architecture      | SVG lane diagram of all services                   |
-| Projects          | Code line distribution across repositories         |
-| Languages         | Language breakdown across the ecosystem            |
-| Code Coverage     | Per-repo pytest coverage with progress bars        |
-| Health Status     | Live service and disk health snapshot              |
-| LLMs              | Local Ollama models + API key configuration        |
-| Cloud             | Cloud/HPC execution backend status                 |
-| Reference Data    | 14 organism genomes, indexes, variant databases    |
-| AI Knowledge Base | 35M PubMed abstracts, 108 FAISS indexes            |
-| Storage           | Disk usage bar, data categories, organism indexes  |
-| Docker Images     | Platform container and tool image inventory        |
+| Group | Sub-tab | Contents |
+|-------|---------|----------|
+| Architecture | — | SVG lane diagram of all services |
+| Projects | Code Summary | Code line distribution across repositories |
+| | Languages | Language breakdown across the ecosystem |
+| | Code Coverage | Per-repo pytest coverage with progress bars |
+| Health Status | Overview | KPI summary + status donut + per-service latency bars |
+| | Services | Live per-service health cards |
+| | Disk & Mounts | Disk usage checks + symlink/mount integrity |
+| | GPU | `nvidia-smi` temperature/utilization panel |
+| | Activity | Live CPU/memory/network via Prometheus + cAdvisor |
+| | Audit Trail | Auth/policy/HPC audit log stream |
+| | Errors | Aggregated Sentry error counts |
+| Usage | Product Usage | Active users, run counts (30-day window) |
+| | API Gateway | Gateway request/route traffic (7-day window) |
+| LLMs & Cloud | LLMs | Local Ollama models + API key configuration |
+| | Cloud | Cloud/HPC execution backend status |
+| | Cost Tracking | Placeholder — not yet implemented |
+| Reference Data | — | 12 organism genomes, indexes, variant databases |
+| AI Knowledge Base | — | 28M+ PubMed abstracts, FAISS index stats |
+| Model Registry | — | Registered model versions, real vs. synthetic data classification |
+| Docker Images | Platform Containers | Running/stopped platform container inventory |
+| | Tool SIF Images | Singularity image build status and sizes |
+| | Plugin Docker Images | Plugin image inventory vs. local Docker images |
+| Miscellaneous | Known Issues | Tracked open/acknowledged/resolved issues |
+| | Active Runs | Currently running/queued workflow runs |
+| | Storage | Disk usage bar, data categories, organism indexes |
+| | Catalog | Plugin/tool/workflow-bundle counts and breakdowns |
+| | Data Layer | MySQL/Redis/Neo4j connectivity status |
+| | Task Queue | Celery worker + recent task status |
+| | License | Seat usage and license expiry |
+| | Secrets Audit | Compose file scan for exposed secrets |
+| | Image Freshness | Deployed image digests vs. latest on GHCR |
+| | Exposed Ports | Compose file scan for host-exposed ports |
+| | CI/CD Health | GitHub Actions status + dependency vulnerability scan per repo |
+| | CVE Trend | Vulnerability count history over time, charted |
+| | Backup Status | Backup job recency and status |
 
 ### Generate
 
@@ -355,7 +392,7 @@ Tests use in-process HTTP servers — no external dependencies or running servic
 - **Zero mandatory cloud** — runs fully offline and air-gapped
 - **Minimal dependencies** — FastAPI, uvicorn, PyYAML, pydantic only
 - **stdlib HTTP in report** — `urllib` used for health fetching in report generator, no extra deps
-- **Design-token driven** — CSS uses `@man4ish/design-tokens` vocabulary; zero hardcoded hex values in the report or dashboard
+- **Design-token driven** — CSS uses `@omnibioai/design-tokens` vocabulary; zero hardcoded hex values in the report or dashboard
 - **Structured logging** — all key events (startup, report triggered/finished/failed, scheduler) emitted as JSON to stdout
 
 ---
@@ -364,7 +401,6 @@ Tests use in-process HTTP servers — no external dependencies or running servic
 
 - Historical uptime tracking
 - Alert hooks (Slack, email)
-- Trend view — coverage and health over time
 
 ---
 
@@ -393,17 +429,20 @@ Tests use in-process HTTP servers — no external dependencies or running servic
 | Design token CSS alignment | ✓ Stable |
 | LLM monitoring (/llms) | ✓ Stable |
 | Cloud backend status (/cloud) | ✓ Stable |
-| Reference genome registry | ✓ Stable — 14 organisms |
-| AI Knowledge Base (/knowledge-base) | ✓ Stable — 35M abstracts |
+| Reference genome registry | ✓ Stable — 12 organisms |
+| AI Knowledge Base (/knowledge-base) | ✓ Stable — 28M+ abstracts |
 | Storage monitoring (/storage) | ✓ Stable |
 | Report — LLMs tab | ✓ Stable |
 | Report — Cloud tab | ✓ Stable |
 | Report — Reference Data tab | ✓ Stable |
 | Report — AI Knowledge Base tab | ✓ Stable |
 | Report — Storage tab | ✓ Stable |
+| Sidebar navigation (report UI) | ✓ Stable |
+| GPU health detection (/gpu) | ✓ Stable |
+| Audit Trail (/audit-trail) | ✓ Stable |
+| CVE Trend | ✓ Stable |
 | Historical tracking | Planned |
 | Alert hooks (Slack, email) | Planned |
-| Trend view | Planned |
 
 ---
 
