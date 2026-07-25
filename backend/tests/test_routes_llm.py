@@ -182,25 +182,34 @@ class TestListIndexDomains(unittest.TestCase):
 
 
 # ==============================================================================
-# Helper: _du_bytes
+# Helper: _index_size_bytes
 # ==============================================================================
 
 class TestDuBytes(unittest.TestCase):
 
     def test_returns_parsed_bytes(self) -> None:
-        async def fake_create_subprocess_exec(*args, **kwargs):
-            proc = AsyncMock()
-            proc.communicate.return_value = (b"12345\t/some/path\n", b"")
-            return proc
+        with tempfile.TemporaryDirectory() as tmp:
+            domain_dir = Path(tmp) / "CRISPR"
+            domain_dir.mkdir()
+            (domain_dir / "pubmed_index.faiss").write_bytes(b"x" * 100)
+            (domain_dir / "pmid_map.json").write_bytes(b"y" * 23)
 
-        with patch.object(routes_llm.asyncio, "create_subprocess_exec", side_effect=fake_create_subprocess_exec):
-            result = asyncio.run(routes_llm._du_bytes(Path("/some/path")))
-        self.assertEqual(result, 12345)
+            result = routes_llm._index_size_bytes(Path(tmp))
+        self.assertEqual(result, 123)
 
     def test_exception_returns_zero(self) -> None:
-        with patch.object(routes_llm.asyncio, "create_subprocess_exec", side_effect=RuntimeError("boom")):
-            result = asyncio.run(routes_llm._du_bytes(Path("/some/path")))
+        result = routes_llm._index_size_bytes(Path("/nonexistent/path/does/not/exist"))
         self.assertEqual(result, 0)
+
+    def test_excludes_embedding_checkpoint_scratch_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            domain_dir = Path(tmp) / "CRISPR"
+            domain_dir.mkdir()
+            (domain_dir / "pubmed_index.faiss").write_bytes(b"x" * 100)
+            (domain_dir / "embedding_checkpoint_1.json").write_bytes(b"z" * 999)
+
+            result = routes_llm._index_size_bytes(Path(tmp))
+        self.assertEqual(result, 100)
 
 
 # ==============================================================================
