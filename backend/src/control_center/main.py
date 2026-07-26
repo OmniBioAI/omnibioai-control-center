@@ -39,6 +39,7 @@ from control_center.api.routes_cron import router as cron_router
 from control_center.api.routes_docker import router as docker_router
 from control_center.api.routes_health import router as health_router
 from control_center.api.routes_infra import router as infra_router
+from control_center.api.routes_known_issues import router as known_issues_router
 from control_center.api.routes_llm import router as llm_router
 from control_center.api.routes_reference import router as reference_router
 from control_center.api.routes_report import router as report_router
@@ -94,6 +95,7 @@ app.include_router(report_router)
 app.include_router(config_router)
 app.include_router(cron_router)
 app.include_router(docker_router)
+app.include_router(known_issues_router)
 app.include_router(llm_router)
 app.include_router(infra_router)
 app.include_router(cloud_router)
