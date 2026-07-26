@@ -64,7 +64,7 @@ def architecture_section_html(project_totals: Dict[str, Totals],
   <div style="border-radius:12px;border:0.5px solid var(--c-teal-bd);background:var(--c-teal-bg);padding:10px 8px 12px">
     <div style="font-size:11px;font-weight:600;text-align:center;color:var(--c-teal);margin-bottom:8px">workbench</div>
     {"".join(_arch_node(n,d,p,u,'teal') for n,d,p,u in [
-      ('workbench','Django · 80+ plugins','8000','https://app.omnibioai.org'),
+      ('workbench','Django · 80+ plugins','8000','https://webstudio.omnibioai.org'),
       ('lims','lab data','7000','https://lims.omnibioai.org'),
       ('rag','PubMed · DeepSeek','8090','https://rag.omnibioai.org'),
       ('workflow-bundles','WDL/Nextflow/CWL','8098','https://bundles.omnibioai.org'),
@@ -88,7 +88,7 @@ def architecture_section_html(project_totals: Dict[str, Totals],
   <div style="border-radius:12px;border:0.5px solid var(--c-purple-bd);background:var(--c-purple-bg);padding:10px 8px 12px">
     <div style="font-size:11px;font-weight:600;text-align:center;color:var(--c-purple);margin-bottom:8px">execution</div>
     {"".join(_arch_node(n,d,p,u,'purple') for n,d,p,u in [
-      ('tes','Slurm/AWS/Azure/GCP','8081','https://app.omnibioai.org/_svc/tes'),
+      ('tes','Slurm/AWS/Azure/GCP','8081','https://webstudio.omnibioai.org/_svc/tes'),
       ('tool-runtime','Docker/Singularity',None,None),
       ('tool-images','80+ bio tools','8097',None),
       ('dev-docker','DGX · GPU env','8082','https://dev.omnibioai.org'),

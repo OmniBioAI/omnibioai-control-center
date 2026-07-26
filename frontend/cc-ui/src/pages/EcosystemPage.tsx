@@ -70,7 +70,7 @@ const LANES: Lane[] = [
     id: 'workbench', label: 'workbench', color: C.teal,
     bg: 'rgba(0,229,160,0.07)', border: 'rgba(0,229,160,0.3)',
     nodes: [
-      { key: 'workbench',         name: 'workbench',         desc: 'Django · 80+ plugins', port: '8000', ui: 'https://app.omnibioai.org' },
+      { key: 'workbench',         name: 'workbench',         desc: 'Django · 80+ plugins', port: '8000', ui: 'https://webstudio.omnibioai.org' },
       { key: 'lims',              name: 'lims',              desc: 'lab data',             port: '7000', ui: 'https://lims.omnibioai.org' },
       { key: 'rag',               name: 'rag',               desc: 'PubMed · DeepSeek',    port: '8090', ui: null },
       { key: 'workflow-bundles',  name: 'workflow-bundles',  desc: 'WDL/Nextflow/CWL',     port: '8098', ui: null },
