@@ -290,7 +290,13 @@ def docker_plugins_section_html() -> str:
 
 _DOCKER_IMAGES_SCRIPT = """
 <script>
-var _DKU='';
+// Absolute-path fetches (leading '/') resolve against the origin root, not
+// the current page path -- when this report is loaded through nginx at
+// /_svc/control/ (vs. directly on control-center's own port), a bare
+// fetch('/docker/containers') misses nginx's /_svc/control/* location
+// entirely and falls through to its catch-all (the web-ui SPA). Preserve
+// whatever prefix the page was actually loaded under.
+var _DKU=(window.location.pathname.indexOf('/_svc/control')===0)?'/_svc/control':'';
 var _DC={pp:15,page:1,all:[],filtered:[],q:''};
 var _DS={pp:15,page:1,all:[],filtered:[],q:'',cat:null};
 var _DP={pp:15,page:1,all:[],filtered:[],q:'',cat:null,miss:false};
