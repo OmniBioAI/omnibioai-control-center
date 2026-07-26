@@ -93,6 +93,177 @@ class TestGetCronJobs(unittest.TestCase):
         self.assertEqual(backup_job["last_status"], "ok")
         self.assertIsNotNone(backup_job["last_run_at"])
 
+    def test_paused_none_when_no_spool_path_given(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            jobs = cron_jobs.get_cron_jobs(Path(tmp))
+        self.assertTrue(all(j["paused"] is None for j in jobs))
+
+    def test_paused_none_when_spool_unreadable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            jobs = cron_jobs.get_cron_jobs(Path(tmp), Path("/nonexistent/crontab"))
+        self.assertTrue(all(j["paused"] is None for j in jobs))
+
+    def test_reflects_live_paused_and_schedule(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spool = Path(tmp) / "crontab"
+            spool.write_text(
+                "0 4 * * * /path/to/omnibioai-studio/scripts/backup-mysql.sh >> log 2>&1\n"
+                "# 0 2 * * * python3 /path/to/omnibioai-control-center/scripts/run_coverage_host.py >> log 2>&1\n"
+            )
+            jobs = cron_jobs.get_cron_jobs(Path(tmp), spool)
+        backup = next(j for j in jobs if j["id"] == "mysql-backup")
+        coverage = next(j for j in jobs if j["id"] == "coverage-nightly")
+        self.assertFalse(backup["paused"])
+        self.assertEqual(backup["schedule"], "0 4 * * *")
+        self.assertTrue(coverage["paused"])
+
+    def test_job_missing_from_live_crontab_reports_paused_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spool = Path(tmp) / "crontab"
+            spool.write_text("0 4 * * * /path/to/omnibioai-studio/scripts/backup-mysql.sh\n")
+            jobs = cron_jobs.get_cron_jobs(Path(tmp), spool)
+        coverage = next(j for j in jobs if j["id"] == "coverage-nightly")
+        self.assertIsNone(coverage["paused"])
+
+
+class TestCronMutations(unittest.TestCase):
+
+    def _spool(self, tmp: str, content: str) -> Path:
+        spool = Path(tmp) / "crontab"
+        spool.write_text(content)
+        return spool
+
+    def test_get_job_unknown_id_raises_404(self) -> None:
+        with self.assertRaises(cron_jobs.CronMutationError) as ctx:
+            cron_jobs._get_job("not-a-real-job")
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    def test_read_crontab_missing_file_raises_500(self) -> None:
+        with self.assertRaises(cron_jobs.CronMutationError) as ctx:
+            cron_jobs._read_crontab_lines(Path("/nonexistent/crontab"))
+        self.assertEqual(ctx.exception.status_code, 500)
+
+    def test_match_line_index_not_found_raises_404(self) -> None:
+        with self.assertRaises(cron_jobs.CronMutationError) as ctx:
+            cron_jobs._match_line_index(["0 4 * * * echo hi\n"], cron_jobs._get_job("mysql-backup"))
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    def test_validate_schedule_wrong_field_count(self) -> None:
+        with self.assertRaises(cron_jobs.CronMutationError):
+            cron_jobs._validate_schedule("0 4 * *")
+
+    def test_validate_schedule_invalid_characters(self) -> None:
+        with self.assertRaises(cron_jobs.CronMutationError):
+            cron_jobs._validate_schedule("i0 4 * * *")
+
+    def test_validate_schedule_accepts_valid(self) -> None:
+        cron_jobs._validate_schedule("*/5 1-6 * * 1,3,5")  # should not raise
+
+    def test_pause_comments_out_line(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spool = self._spool(tmp, "0 4 * * * /a/omnibioai-studio/scripts/backup-mysql.sh\n")
+            result = cron_jobs.pause_job(spool, "mysql-backup")
+            content = spool.read_text()
+        self.assertEqual(result, {"id": "mysql-backup", "paused": True})
+        self.assertTrue(content.startswith("# 0 4 * * *"))
+
+    def test_pause_already_paused_is_noop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spool = self._spool(tmp, "# 0 4 * * * /a/omnibioai-studio/scripts/backup-mysql.sh\n")
+            original = spool.read_text()
+            cron_jobs.pause_job(spool, "mysql-backup")
+            self.assertEqual(spool.read_text(), original)
+
+    def test_resume_uncomments_line(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spool = self._spool(tmp, "# 0 4 * * * /a/omnibioai-studio/scripts/backup-mysql.sh\n")
+            result = cron_jobs.resume_job(spool, "mysql-backup")
+            content = spool.read_text()
+        self.assertEqual(result, {"id": "mysql-backup", "paused": False})
+        self.assertTrue(content.startswith("0 4 * * *"))
+        self.assertNotIn("#", content)
+
+    def test_resume_already_active_is_noop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spool = self._spool(tmp, "0 4 * * * /a/omnibioai-studio/scripts/backup-mysql.sh\n")
+            original = spool.read_text()
+            cron_jobs.resume_job(spool, "mysql-backup")
+            self.assertEqual(spool.read_text(), original)
+
+    def test_other_lines_untouched_by_pause(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spool = self._spool(
+                tmp,
+                "0 3 * * * /a/omnibioai-utils/sync_pubmed_updates.py\n"
+                "0 4 * * * /a/omnibioai-studio/scripts/backup-mysql.sh\n",
+            )
+            cron_jobs.pause_job(spool, "mysql-backup")
+            lines = spool.read_text().splitlines()
+        self.assertEqual(lines[0], "0 3 * * * /a/omnibioai-utils/sync_pubmed_updates.py")
+        self.assertTrue(lines[1].startswith("#"))
+
+    def test_update_schedule_replaces_time_fields_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spool = self._spool(
+                tmp, "0 4 * * * /a/omnibioai-studio/scripts/backup-mysql.sh >> log.txt 2>&1\n",
+            )
+            result = cron_jobs.update_schedule(spool, "mysql-backup", "30 5 * * *")
+            content = spool.read_text()
+        self.assertEqual(result, {"id": "mysql-backup", "schedule": "30 5 * * *"})
+        self.assertEqual(
+            content.strip(),
+            "30 5 * * * /a/omnibioai-studio/scripts/backup-mysql.sh >> log.txt 2>&1",
+        )
+
+    def test_update_schedule_preserves_paused_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spool = self._spool(tmp, "# 0 4 * * * /a/omnibioai-studio/scripts/backup-mysql.sh\n")
+            cron_jobs.update_schedule(spool, "mysql-backup", "30 5 * * *")
+            content = spool.read_text()
+        self.assertTrue(content.startswith("# 30 5 * * *"))
+
+    def test_update_schedule_rejects_invalid_schedule(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spool = self._spool(tmp, "0 4 * * * /a/omnibioai-studio/scripts/backup-mysql.sh\n")
+            with self.assertRaises(cron_jobs.CronMutationError):
+                cron_jobs.update_schedule(spool, "mysql-backup", "not a schedule")
+
+    def test_update_schedule_unknown_job_raises_404(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spool = self._spool(tmp, "0 4 * * * echo hi\n")
+            with self.assertRaises(cron_jobs.CronMutationError) as ctx:
+                cron_jobs.update_schedule(spool, "not-a-job", "0 4 * * *")
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    def test_spool_path_helper_uses_default(self) -> None:
+        self.assertEqual(cron_jobs._spool_path(None), Path("/var/spool/cron/crontabs/manish"))
+
+    def test_spool_path_helper_uses_env_value(self) -> None:
+        self.assertEqual(cron_jobs._spool_path("/custom/path"), Path("/custom/path"))
+
+    def test_read_crontab_oserror_on_read_wraps_as_500(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spool = self._spool(tmp, "0 4 * * * echo hi\n")
+            with patch.object(cron_jobs.Path, "read_text", side_effect=OSError("denied")):
+                with self.assertRaises(cron_jobs.CronMutationError) as ctx:
+                    cron_jobs._read_crontab_lines(spool)
+        self.assertEqual(ctx.exception.status_code, 500)
+
+    def test_write_crontab_oserror_wraps_as_500(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spool = self._spool(tmp, "0 4 * * * echo hi\n")
+            with patch.object(cron_jobs.Path, "write_text", side_effect=OSError("denied")):
+                with self.assertRaises(cron_jobs.CronMutationError) as ctx:
+                    cron_jobs._write_crontab_lines(spool, ["0 4 * * * echo hi"])
+        self.assertEqual(ctx.exception.status_code, 500)
+
+    def test_update_schedule_unparseable_line_raises_500(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spool = self._spool(tmp, "backup-mysql.sh\n")
+            with self.assertRaises(cron_jobs.CronMutationError) as ctx:
+                cron_jobs.update_schedule(spool, "mysql-backup", "0 4 * * *")
+        self.assertEqual(ctx.exception.status_code, 500)
+
 
 if __name__ == "__main__":
     unittest.main()

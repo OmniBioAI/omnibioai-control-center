@@ -2,7 +2,7 @@
 tests/test_routes_cron.py
 
 Unit tests for:
-  - control_center.api.routes_cron  (GET /cron/jobs)
+  - control_center.api.routes_cron  (GET /cron/jobs, pause/resume/schedule)
 """
 
 from __future__ import annotations
@@ -10,12 +10,25 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from pathlib import Path
 
+import jwt
 from fastapi.testclient import TestClient
 
+from control_center.core.auth import JWT_SECRET
 from control_center.main import app
 
 client = TestClient(app)
+
+
+def _admin_headers() -> dict:
+    token = jwt.encode({"sub": "1", "roles": ["admin"]}, JWT_SECRET, algorithm="HS256")
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _user_headers() -> dict:
+    token = jwt.encode({"sub": "2", "roles": ["user"]}, JWT_SECRET, algorithm="HS256")
+    return {"Authorization": f"Bearer {token}"}
 
 
 class TestCronJobsRoute(unittest.TestCase):
@@ -40,6 +53,93 @@ class TestCronJobsRoute(unittest.TestCase):
                 del os.environ["WORKSPACE_ROOT"]
         pubmed_job = next(j for j in data["jobs"] if j["id"] == "pubmed-sync")
         self.assertEqual(pubmed_job["last_status"], "ok")
+
+
+class TestCronMutationRoutes(unittest.TestCase):
+
+    def _set_spool(self, content: str) -> str:
+        tmp = tempfile.mkdtemp()
+        spool = Path(tmp) / "crontab"
+        spool.write_text(content)
+        os.environ["CRONTAB_SPOOL_PATH"] = str(spool)
+        return str(spool)
+
+    def tearDown(self) -> None:
+        os.environ.pop("CRONTAB_SPOOL_PATH", None)
+
+    def test_pause_requires_admin_401(self) -> None:
+        self._set_spool("0 4 * * * /a/omnibioai-studio/scripts/backup-mysql.sh\n")
+        resp = client.post("/cron/jobs/mysql-backup/pause")
+        self.assertEqual(resp.status_code, 401)
+
+    def test_pause_requires_admin_403_for_non_admin(self) -> None:
+        self._set_spool("0 4 * * * /a/omnibioai-studio/scripts/backup-mysql.sh\n")
+        resp = client.post("/cron/jobs/mysql-backup/pause", headers=_user_headers())
+        self.assertEqual(resp.status_code, 403)
+
+    def test_pause_success_as_admin(self) -> None:
+        spool = self._set_spool("0 4 * * * /a/omnibioai-studio/scripts/backup-mysql.sh\n")
+        resp = client.post("/cron/jobs/mysql-backup/pause", headers=_admin_headers())
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"id": "mysql-backup", "paused": True})
+        self.assertTrue(Path(spool).read_text().startswith("#"))
+
+    def test_resume_success_as_admin(self) -> None:
+        spool = self._set_spool("# 0 4 * * * /a/omnibioai-studio/scripts/backup-mysql.sh\n")
+        resp = client.post("/cron/jobs/mysql-backup/resume", headers=_admin_headers())
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"id": "mysql-backup", "paused": False})
+        self.assertFalse(Path(spool).read_text().startswith("#"))
+
+    def test_schedule_success_as_admin(self) -> None:
+        spool = self._set_spool("0 4 * * * /a/omnibioai-studio/scripts/backup-mysql.sh\n")
+        resp = client.put(
+            "/cron/jobs/mysql-backup/schedule",
+            json={"schedule": "30 5 * * *"},
+            headers=_admin_headers(),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"id": "mysql-backup", "schedule": "30 5 * * *"})
+        self.assertTrue(Path(spool).read_text().startswith("30 5 * * *"))
+
+    def test_schedule_requires_admin_401(self) -> None:
+        self._set_spool("0 4 * * * /a/omnibioai-studio/scripts/backup-mysql.sh\n")
+        resp = client.put("/cron/jobs/mysql-backup/schedule", json={"schedule": "30 5 * * *"})
+        self.assertEqual(resp.status_code, 401)
+
+    def test_schedule_invalid_returns_400(self) -> None:
+        self._set_spool("0 4 * * * /a/omnibioai-studio/scripts/backup-mysql.sh\n")
+        resp = client.put(
+            "/cron/jobs/mysql-backup/schedule",
+            json={"schedule": "garbage"},
+            headers=_admin_headers(),
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_unknown_job_id_returns_404(self) -> None:
+        self._set_spool("0 4 * * * echo hi\n")
+        resp = client.post("/cron/jobs/not-a-real-job/pause", headers=_admin_headers())
+        self.assertEqual(resp.status_code, 404)
+
+    def test_resume_unknown_job_id_returns_404(self) -> None:
+        self._set_spool("0 4 * * * echo hi\n")
+        resp = client.post("/cron/jobs/not-a-real-job/resume", headers=_admin_headers())
+        self.assertEqual(resp.status_code, 404)
+
+    def test_missing_spool_file_returns_500(self) -> None:
+        os.environ["CRONTAB_SPOOL_PATH"] = "/nonexistent/crontab/path"
+        resp = client.post("/cron/jobs/mysql-backup/pause", headers=_admin_headers())
+        self.assertEqual(resp.status_code, 500)
+
+    def test_whitelist_only_arbitrary_job_id_rejected(self) -> None:
+        # Never accepts an arbitrary new job -- only the 4 predefined ids.
+        self._set_spool("0 4 * * * echo hi\n")
+        resp = client.put(
+            "/cron/jobs/my-custom-job/schedule",
+            json={"schedule": "0 0 * * *"},
+            headers=_admin_headers(),
+        )
+        self.assertEqual(resp.status_code, 404)
 
 
 if __name__ == "__main__":
