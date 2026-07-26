@@ -28,11 +28,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from control_center.api.routes_cloud import router as cloud_router
+from control_center.core.auth import require_admin
 from control_center.api.routes_config import router as config_router
 from control_center.api.routes_docker import router as docker_router
 from control_center.api.routes_health import router as health_router
@@ -534,8 +535,13 @@ def _run_report_job() -> None:
 
 
 @app.post("/report/generate")
-def report_generate() -> JSONResponse:
-    """Trigger background report generation. Returns 409 if already running."""
+def report_generate(_admin: dict = Depends(require_admin)) -> JSONResponse:
+    """Trigger background report generation. Returns 409 if already running.
+
+    Admin-gated at the application level -- nginx's auth_request already
+    requires a valid JWT for this path, but only checks authentication, not
+    role. This is the independent, defense-in-depth check that still holds
+    even if nginx is misconfigured or bypassed."""
     log.info("report_generate_requested")
     if _job.as_dict()["status"] == "running":
         return JSONResponse({"error": "Report generation already in progress"}, status_code=409)

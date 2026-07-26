@@ -3,11 +3,19 @@ from __future__ import annotations
 import os, subprocess, tempfile, threading, time, unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import jwt
 from fastapi.testclient import TestClient
 import control_center.main as main_module
+from control_center.core.auth import JWT_SECRET
 from control_center.main import _JobState, _workspace_root, app
 
 client = TestClient(app)
+
+
+def _admin_headers():
+    token = jwt.encode({"sub": "1", "roles": ["admin"]}, JWT_SECRET, algorithm="HS256")
+    return {"Authorization": f"Bearer {token}"}
 
 def _reset_job():
     j = main_module._job
@@ -128,15 +136,15 @@ class TestReportGenerate(unittest.TestCase):
     def _post(self):
         with patch("control_center.main.threading.Thread") as m:
             m.return_value = MagicMock()
-            return client.post("/report/generate"), m
+            return client.post("/report/generate", headers=_admin_headers()), m
     def test_200_when_idle(self): self.assertEqual(self._post()[0].status_code, 200)
     def test_started_status(self): self.assertEqual(self._post()[0].json()["status"], "started")
     def test_409_when_running(self):
         main_module._job.start()
-        self.assertEqual(client.post("/report/generate").status_code, 409)
+        self.assertEqual(client.post("/report/generate", headers=_admin_headers()).status_code, 409)
     def test_409_has_error_key(self):
         main_module._job.start()
-        self.assertIn("error", client.post("/report/generate").json())
+        self.assertIn("error", client.post("/report/generate", headers=_admin_headers()).json())
     def test_job_set_running(self):
         self._post()
         self.assertEqual(main_module._job.as_dict()["status"], "running")
@@ -146,8 +154,14 @@ class TestReportGenerate(unittest.TestCase):
     def test_thread_is_daemon(self):
         with patch("control_center.main.threading.Thread") as m:
             m.return_value = MagicMock()
-            client.post("/report/generate")
+            client.post("/report/generate", headers=_admin_headers())
         self.assertTrue(m.call_args[1].get("daemon", False))
+    def test_401_when_no_token(self):
+        self.assertEqual(client.post("/report/generate").status_code, 401)
+    def test_403_when_not_admin(self):
+        token = jwt.encode({"sub": "2", "roles": ["user"]}, JWT_SECRET, algorithm="HS256")
+        resp = client.post("/report/generate", headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(resp.status_code, 403)
 
 class TestReportStatus(unittest.TestCase):
     def setUp(self): _reset_job()
