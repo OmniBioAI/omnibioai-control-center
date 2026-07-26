@@ -93,14 +93,23 @@ class TestDashboard(unittest.TestCase):
     def setUp(self): _reset_job()
     def test_200(self): self.assertEqual(client.get("/").status_code, 200)
     def test_html(self): self.assertIn("text/html", client.get("/").headers["content-type"])
-    def test_title(self): self.assertIn("OmniBioAI Control Center", client.get("/dashboard").text)
     def test_generate_button(self): self.assertIn("Generate Report", client.get("/").text)
-    def test_summary_fetch(self): self.assertIn("/summary", client.get("/dashboard").text)
     def test_status_poll(self): self.assertIn("/report/status", client.get("/").text)
-    def test_auto_refresh(self): self.assertIn("setInterval", client.get("/dashboard").text)
-    def test_cards_container(self): self.assertIn('id="svc-tbody"', client.get("/dashboard").text)
-    def test_banner_container(self): self.assertIn('id="header-status"', client.get("/dashboard").text)
-    def test_report_link(self): self.assertIn('href="/"', client.get("/dashboard").text)
+    def test_login_form_present_when_no_report(self):
+        resp = client.get("/")
+        self.assertIn("login-email", resp.text)
+        self.assertIn("login-password", resp.text)
+    def test_no_dashboard_link_when_no_report(self):
+        # The old "View Dashboard" link is gone now that /dashboard just
+        # redirects back to / -- nothing should link to it anymore.
+        self.assertNotIn("View Dashboard", client.get("/").text)
+
+
+class TestDashboardRedirect(unittest.TestCase):
+    def test_redirects_to_root(self):
+        resp = client.get("/dashboard", follow_redirects=False)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.headers["location"], "/")
 
 
 class TestRootWithReport(unittest.TestCase):
