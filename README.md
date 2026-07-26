@@ -376,11 +376,30 @@ pytest tests/ -v
 
 | File | What it tests |
 |------|--------------|
-| `test_checks.py` | TCP, HTTP, and disk check modules |
-| `test_runner.py` | Service type routing, settings loading |
-| `test_summary_client.py` | Health data parsing, `/summary` fetch |
+| `test_checks.py` | TCP, HTTP, and disk check modules; `/health` and `/report` routes |
+| `test_discord.py` | Discord webhook notification helper |
+| `test_gpu.py` | GPU checks — `nvidia-smi` temperature polling and full `/gpu` status (memory, utilization, processes, Ollama models) |
+| `test_main.py` | FastAPI app lifecycle — job state machine, dashboard/report rendering, background report job runner, scheduler loop, startup hook |
+| `test_routes_cloud.py` | `/cloud` — execution backend status |
+| `test_routes_config.py` | Config-loading routes backing the dashboard/report UI |
+| `test_routes_docker.py` | `/docker/*` — container inventory and tool SIF image status |
+| `test_routes_llm.py` | `/llms` and `/knowledge-base` — Ollama/API key status, PubMed abstract and index-size scanning |
+| `test_routes_reference.py` | `/reference` — reference genome registry |
+| `test_routes_storage.py` | `/storage` — disk usage and per-organism index sizes |
+| `test_runner.py` | Check-runner service-type dispatch, settings loading, `/services` and `/summary` routes |
+| `test_summary_client.py` | `/summary` fetch/parse helpers, report-generator health-parsing helpers |
+| `test_check_activity.py` | `/activity` — Prometheus-backed container/host resource metrics |
+| `test_check_audit_trail.py` | `/audit-trail` — Redis audit-stream aggregation (event/decision/reason breakdowns) |
+| `test_check_celery_status.py` | `/celery` — worker online/offline detection, recent-task parsing from the Redis result backend |
+| `test_check_database_status.py` | `/database` — MySQL, Redis, and Neo4j live status |
+| `test_check_gateway_traffic.py` | `/gateway-traffic` — API gateway request/latency/status-code aggregation from the audit stream |
+| `test_check_image_freshness.py` | `/image-freshness` — local vs. registry `:latest` image digest comparison |
+| `test_check_integrity.py` | `/integrity` — configured symlink/mount health checks |
+| `test_check_license_status.py` | `/license` — license-seat/expiry status derivation |
+| `test_check_usage_status.py` | `/usage` — user activity, session counts, plugin-run success-rate stats |
+| `test_routes_infra.py` | Wiring for all `/gpu`, `/celery`, `/database`, `/image-freshness`, `/license`, `/usage`, `/gateway-traffic`, `/audit-trail`, `/activity`, `/integrity` routes |
 
-Tests use in-process HTTP servers — no external dependencies or running services required.
+Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem fixtures, no real external services). The `checks/*.py` and `routes_docker.py`/`routes_llm.py` suites additionally mock `subprocess` (docker/nvidia-smi CLI calls) and network clients (`httpx`, `redis`, `pymysql`, `neo4j`, `celery`) at the call site — no real database, broker, GPU, or Docker daemon is required at test time.
 
 ---
 
@@ -418,7 +437,7 @@ Tests use in-process HTTP servers — no external dependencies or running servic
 | Ecosystem report — Languages | ✓ Stable |
 | Ecosystem report — Coverage | ✓ Stable |
 | Ecosystem report — Health tab | ✓ Stable |
-| Unit tests | ✓ Stable |
+| Unit tests | ✓ Stable — 413 tests, 99.81% coverage (98% gate met) |
 | Docker Compose deployment | ✓ Stable |
 | Prometheus metrics (/metrics) | ✓ Stable |
 | Scheduled report generation | ✓ Stable |
