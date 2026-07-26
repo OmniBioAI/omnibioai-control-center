@@ -205,6 +205,117 @@ class TestReportStatus(unittest.TestCase):
         main_module._job.start(); main_module._job.fail("Script not found")
         self.assertIn("Script not found", client.get("/report/status").json()["message"])
 
+
+def _reset_coverage_job():
+    j = main_module._coverage_job
+    with j._lock:
+        j.status = "idle"
+        j.started_at = None
+        j.finished_at = None
+        j.message = ""
+
+
+class TestCoverageGenerate(unittest.TestCase):
+    def setUp(self): _reset_coverage_job()
+    def _post(self):
+        with patch("control_center.main.threading.Thread") as m:
+            m.return_value = MagicMock()
+            return client.post("/coverage/generate", headers=_admin_headers()), m
+    def test_200_when_idle(self): self.assertEqual(self._post()[0].status_code, 200)
+    def test_started_status(self): self.assertEqual(self._post()[0].json()["status"], "started")
+    def test_409_when_running(self):
+        main_module._coverage_job.start()
+        self.assertEqual(client.post("/coverage/generate", headers=_admin_headers()).status_code, 409)
+    def test_409_has_error_key(self):
+        main_module._coverage_job.start()
+        self.assertIn("error", client.post("/coverage/generate", headers=_admin_headers()).json())
+    def test_job_set_running(self):
+        self._post()
+        self.assertEqual(main_module._coverage_job.as_dict()["status"], "running")
+    def test_thread_started(self):
+        _, m = self._post()
+        m.return_value.start.assert_called_once()
+    def test_thread_is_daemon(self):
+        with patch("control_center.main.threading.Thread") as m:
+            m.return_value = MagicMock()
+            client.post("/coverage/generate", headers=_admin_headers())
+        self.assertTrue(m.call_args[1].get("daemon", False))
+    def test_401_when_no_token(self):
+        self.assertEqual(client.post("/coverage/generate").status_code, 401)
+    def test_403_when_not_admin(self):
+        token = jwt.encode({"sub": "2", "roles": ["user"]}, JWT_SECRET, algorithm="HS256")
+        resp = client.post("/coverage/generate", headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(resp.status_code, 403)
+
+
+class TestCoverageStatus(unittest.TestCase):
+    def setUp(self): _reset_coverage_job()
+    def test_200(self): self.assertEqual(client.get("/coverage/status").status_code, 200)
+    def test_has_status(self): self.assertIn("status", client.get("/coverage/status").json())
+    def test_has_result_exists(self): self.assertIn("result_exists", client.get("/coverage/status").json())
+    def test_has_generated_at(self): self.assertIn("result_generated_at", client.get("/coverage/status").json())
+    def test_idle_by_default(self): self.assertEqual(client.get("/coverage/status").json()["status"], "idle")
+    def test_open_no_auth_required(self):
+        # GET /coverage/status is a read endpoint -- no admin gate.
+        self.assertEqual(client.get("/coverage/status").status_code, 200)
+    def test_result_exists_true_and_generated_at_set(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "omnibioai-work" / "out" / "coverage"
+            p.mkdir(parents=True)
+            (p / f"{main_module._COVERAGE_REPO}.json").write_text("{}")
+            with patch("control_center.main._workspace_root", return_value=Path(tmp)):
+                data = client.get("/coverage/status").json()
+        self.assertTrue(data["result_exists"])
+        self.assertIsNotNone(data["result_generated_at"])
+
+
+class TestRunCoverageJob(unittest.TestCase):
+    def setUp(self):
+        _reset_coverage_job()
+        self._tmp = tempfile.mkdtemp()
+        script_dir = Path(self._tmp) / "omnibioai-control-center" / "scripts"
+        script_dir.mkdir(parents=True)
+        (script_dir / "run_coverage_host.py").write_text("# fake\n")
+        self._workspace_patch = patch("control_center.main._workspace_root", return_value=Path(self._tmp))
+        self._workspace_patch.start()
+
+    def tearDown(self):
+        self._workspace_patch.stop()
+        import shutil
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def test_missing_script_fails_job(self):
+        with patch("control_center.main._workspace_root", return_value=Path("/nonexistent")):
+            main_module._run_coverage_job()
+        self.assertEqual(main_module._coverage_job.as_dict()["status"], "error")
+        self.assertIn("not found", main_module._coverage_job.as_dict()["message"])
+
+    def test_success_sets_done(self):
+        result = MagicMock(returncode=0, stdout="Done — 1 ok, 0 with issues, 0 skipped\n", stderr="")
+        with patch("control_center.main.subprocess.run", return_value=result):
+            main_module._run_coverage_job()
+        self.assertEqual(main_module._coverage_job.as_dict()["status"], "done")
+
+    def test_nonzero_returncode_fails_job(self):
+        result = MagicMock(returncode=1, stdout="", stderr="boom")
+        with patch("control_center.main.subprocess.run", return_value=result):
+            main_module._run_coverage_job()
+        state = main_module._coverage_job.as_dict()
+        self.assertEqual(state["status"], "error")
+        self.assertIn("boom", state["message"])
+
+    def test_timeout_fails_job(self):
+        with patch("control_center.main.subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 600)):
+            main_module._run_coverage_job()
+        self.assertEqual(main_module._coverage_job.as_dict()["status"], "error")
+
+    def test_unexpected_exception_fails_job(self):
+        with patch("control_center.main.subprocess.run", side_effect=RuntimeError("boom")):
+            main_module._run_coverage_job()
+        state = main_module._coverage_job.as_dict()
+        self.assertEqual(state["status"], "error")
+        self.assertIn("RuntimeError", state["message"])
+
 class TestResetJobToIdle(unittest.TestCase):
     def setUp(self): _reset_job()
 

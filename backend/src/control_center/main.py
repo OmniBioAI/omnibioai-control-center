@@ -479,13 +479,14 @@ def _workspace_root() -> Path:
     return Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
 
 
-def _reset_job_to_idle(delay_s: int = 5) -> None:
+def _reset_job_to_idle(job: "_JobState" = None, delay_s: int = 5) -> None:
     """Reset job status to idle after a short delay so reloaded pages see 'idle'."""
+    job = job if job is not None else _job
     import time as _time
     _time.sleep(delay_s)
-    with _job._lock:
-        if _job.status in ("done", "error"):
-            _job.status = "idle"
+    with job._lock:
+        if job.status in ("done", "error"):
+            job.status = "idle"
 
 
 def _run_report_job() -> None:
@@ -551,19 +552,6 @@ def report_generate(_admin: dict = Depends(require_admin)) -> JSONResponse:
     return JSONResponse({"status": "started"})
 
 
-@app.get("/report/data")
-def report_data() -> JSONResponse:
-    """Return structured JSON data for the React frontend (projects, languages, coverage)."""
-    data_path = _workspace_root() / "work" / "out" / "reports" / "report_data.json"
-    if not data_path.exists():
-        return JSONResponse({"error": "No report data yet. Generate the report first."}, status_code=404)
-    try:
-        import json as _json
-        return JSONResponse(_json.loads(data_path.read_text(encoding="utf-8")))
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
 @app.get("/report/status")
 def report_status() -> JSONResponse:
     """Poll job state. Frontend polls this every 2s while running."""
@@ -576,6 +564,110 @@ def report_status() -> JSONResponse:
     else:
         state["report_generated_at"] = None
     return JSONResponse(state)
+
+
+# ==============================================================================
+# Coverage collection — background job state (mirrors the report job above)
+# ==============================================================================
+#
+# Scoped to omnibioai-control-center only. run_coverage_host.py's own
+# docstring says it must run "on the developer machine... so each repo's
+# dependencies are already installed" -- confirmed live: none of the other
+# ~17 repos' service containers have pytest installed (they're production
+# runtime images), and the script invokes `sys.executable -m pytest`, i.e.
+# whatever interpreter runs it, not a per-repo venv. control-center's own
+# container does have pytest/pytest-cov (installed via this service's own
+# startup command) and can self-test, so that's the one repo this endpoint
+# can honestly run on demand. The other ~17 repos still get fresh coverage
+# from the existing nightly host cron job (see /cron/jobs).
+
+_coverage_job = _JobState()
+_COVERAGE_REPO = "omnibioai-control-center"
+
+
+def _run_coverage_job() -> None:
+    workspace = _workspace_root()
+    log.info("coverage_job_started", extra={"extra_fields": {"repo": _COVERAGE_REPO}})
+    script = workspace / "omnibioai-control-center" / "scripts" / "run_coverage_host.py"
+
+    if not script.exists():
+        msg = f"Coverage script not found: {script}"
+        _coverage_job.fail(msg)
+        log.error("coverage_job_failed", extra={"extra_fields": {"error": msg}})
+        threading.Thread(target=_reset_job_to_idle, args=(_coverage_job,), daemon=True).start()
+        return
+
+    cmd = [
+        "python3", str(script),
+        "--root", str(workspace),
+        "--repos", _COVERAGE_REPO,
+    ]
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        if proc.returncode == 0:
+            last_line = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else "Done"
+            _coverage_job.finish(last_line)
+            log.info("coverage_job_finished", extra={"extra_fields": {"output": last_line}})
+        else:
+            msg = proc.stderr.strip() or proc.stdout.strip() or "Unknown error"
+            _coverage_job.fail(msg)
+            log.error("coverage_job_failed", extra={"extra_fields": {"error": msg}})
+    except subprocess.TimeoutExpired:
+        _coverage_job.fail("Coverage collection timed out after 10 minutes")
+        log.error("coverage_job_timeout")
+    except Exception as e:
+        msg = f"{type(e).__name__}: {e}"
+        _coverage_job.fail(msg)
+        log.error("coverage_job_failed", extra={"extra_fields": {"error": msg}})
+
+    threading.Thread(target=_reset_job_to_idle, args=(_coverage_job,), daemon=True).start()
+
+
+@app.post("/coverage/generate")
+def coverage_generate(_admin: dict = Depends(require_admin)) -> JSONResponse:
+    """Trigger background coverage collection for omnibioai-control-center
+    only (see module comment above for why the other repos aren't included).
+    Returns 409 if already running. Admin-gated, same as /report/generate."""
+    log.info("coverage_generate_requested")
+    if _coverage_job.as_dict()["status"] == "running":
+        return JSONResponse({"error": "Coverage collection already in progress"}, status_code=409)
+    _coverage_job.start()
+    thread = threading.Thread(target=_run_coverage_job, daemon=True)
+    thread.start()
+    return JSONResponse({"status": "started"})
+
+
+@app.get("/coverage/status")
+def coverage_status() -> JSONResponse:
+    """Poll coverage job state. Same shape as /report/status."""
+    state = _coverage_job.as_dict()
+    result_path = _workspace_root() / "omnibioai-work" / "out" / "coverage" / f"{_COVERAGE_REPO}.json"
+    state["result_exists"] = result_path.exists()
+    if result_path.exists():
+        mtime = datetime.fromtimestamp(result_path.stat().st_mtime, tz=timezone.utc)
+        state["result_generated_at"] = mtime.isoformat()
+    else:
+        state["result_generated_at"] = None
+    return JSONResponse(state)
+
+
+@app.get("/report/data")
+def report_data() -> JSONResponse:
+    """Return structured JSON data for the React frontend (projects, languages, coverage)."""
+    data_path = _workspace_root() / "work" / "out" / "reports" / "report_data.json"
+    if not data_path.exists():
+        return JSONResponse({"error": "No report data yet. Generate the report first."}, status_code=404)
+    try:
+        import json as _json
+        return JSONResponse(_json.loads(data_path.read_text(encoding="utf-8")))
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 # ==============================================================================
