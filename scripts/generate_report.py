@@ -60,7 +60,10 @@ from sections.docker_images import (
     docker_sif_section_html, docker_plugins_section_html, _DOCKER_IMAGES_SCRIPT,
 )
 
-from sections.misc.known_issues import known_issues_section_html
+from sections.misc.admin import (
+    admin_auth_header_html, admin_actions_section_html,
+    admin_jobs_section_html, admin_issues_section_html, _ADMIN_SCRIPT,
+)
 from sections.misc.active_runs import active_runs_section_html
 from sections.misc.storage import storage_section_html
 from sections.misc.catalog import catalog_section_html
@@ -157,7 +160,8 @@ SIDEBAR_NAV_SPEC: List[Tuple[str, str, Optional[List[Tuple[str, str]]]]] = [
     ("kb",           "AI Knowledge Base", None),
     ("modelreg",     "Model Registry",    None),
     ("dockerimages", "Docker Images",     [("containers", "Platform Containers"), ("sif", "Tool SIF Images"), ("plugins", "Plugin Docker Images")]),
-    ("misc",         "Miscellaneous",     [("issues", "Known Issues"), ("runs", "Active Runs"), ("storage", "Storage"), ("catalog", "Catalog"), ("database", "Data Layer"), ("queue", "Task Queue"), ("license", "License"), ("secrets", "Secrets Audit"), ("images", "Image Freshness"), ("ports", "Exposed Ports"), ("cicd", "CI/CD Health"), ("cvetrend", "CVE Trend"), ("backup", "Backup Status")]),
+    ("misc",         "Miscellaneous",     [("runs", "Active Runs"), ("storage", "Storage"), ("catalog", "Catalog"), ("database", "Data Layer"), ("queue", "Task Queue"), ("license", "License"), ("secrets", "Secrets Audit"), ("images", "Image Freshness"), ("ports", "Exposed Ports"), ("cicd", "CI/CD Health"), ("cvetrend", "CVE Trend"), ("backup", "Backup Status")]),
+    ("admin",        "Admin",             [("actions", "Actions"), ("jobs", "Scheduled Jobs"), ("issues", "Known Issues")]),
 ]
 
 
@@ -209,7 +213,6 @@ def build_report(out_html: Path, title: str, timestamp: str,
     cve_generated_at = datetime.now(timezone.utc).isoformat()
     cicd_health_html = cicd_health_section_html(ecosystem_root, DEFAULT_TARGETS, work_dir, cve_generated_at)
     misc_html = misc_section_html([
-        ("issues", "Known Issues", known_issues_section_html(ecosystem_root)),
         ("runs", "Active Runs", active_runs_section_html(work_dir)),
         ("storage", "Storage", storage_html),
         ("catalog", "Catalog", catalog_html),
@@ -228,6 +231,11 @@ def build_report(out_html: Path, title: str, timestamp: str,
         ("cloud", "Cloud", cloud_html),
         ("cost", "Cost Tracking", cost_tracking_placeholder_section_html()),
     ], group_id="llmscloud", render_nav=False)
+    admin_html = misc_section_html([
+        ("actions", "Actions", admin_actions_section_html()),
+        ("jobs", "Scheduled Jobs", admin_jobs_section_html()),
+        ("issues", "Known Issues", admin_issues_section_html()),
+    ], group_id="admin", render_nav=False, header_html=admin_auth_header_html()) + _ADMIN_SCRIPT
 
     html = f"""<!doctype html>
 <html lang="en">
@@ -319,6 +327,7 @@ def build_report(out_html: Path, title: str, timestamp: str,
       <div id="tab-modelreg" class="tab-panel">{model_registry_html}</div>
       <div id="tab-dockerimages" class="tab-panel">{dockerimages_html}</div>
       <div id="tab-misc" class="tab-panel">{misc_html}</div>
+      <div id="tab-admin" class="tab-panel">{admin_html}</div>
     </div>
   </div>
 
