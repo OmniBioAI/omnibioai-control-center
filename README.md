@@ -9,10 +9,10 @@ The Control Center is a FastAPI service that aggregates health status across all
 ## What It Does
 
 - **Health monitoring** — TCP, HTTP, and disk checks across all ecosystem services
-- **Live dashboard** — auto-refreshing browser UI at `/dashboard` with per-service status cards
-- **Ecosystem report** — interactive HTML report (architecture · projects · languages · coverage · health) served at `/`
+- **Ecosystem report** — interactive HTML report (architecture · projects · languages · coverage · health) served at `/`; `/dashboard` redirects here (its live per-service cards and generate button were folded into the report's header status chip and Admin tab)
 - **JSON API** — machine-readable health summary at `/summary` for CI/CD and external monitoring
 - **Scheduled report generation** — auto-regenerates the ecosystem report every N hours (configurable via REPORT_SCHEDULE_HOURS)
+- **Admin controls** — an Admin tab in the report for triggering report/coverage regeneration, pausing/rescheduling the 7 host cron jobs, and tracking known issues; every write action is JWT-role-gated (`admin` role required), enforced both by nginx and independently by the app itself
 - **Prometheus metrics** — `/metrics` endpoint scraped by Prometheus for Grafana dashboards
 - **Docker inventory** — platform containers, tool SIF images, and plugin Docker images via `/docker/*` endpoints
 - **Structured JSON logging** — all key events logged as JSON to stdout for log aggregation
@@ -76,16 +76,26 @@ omnibioai-control-center/
 | Endpoint               | Method | Description |
 |------------------------|--------|-------------|
 | `/`                    | GET    | Ecosystem report (auto-refreshes) |
-| `/dashboard`           | GET    | Live health dashboard UI |
+| `/dashboard`           | GET    | Redirects to `/` (retired — see Admin tab) |
 | `/health`              | GET    | Control Center self-check |
 | `/services`            | GET    | Per-service health status (JSON) |
 | `/summary`             | GET    | Full ecosystem summary — services + disk (JSON) |
 | `/report`              | GET    | Redirects to `/` (serves report with live header) |
-| `/report/generate`     | POST   | Trigger background report generation |
+| `/report/generate`     | POST   | **Admin-gated.** Trigger background report generation |
 | `/report/status`       | GET    | Poll report job state (running/done/error/idle) |
 | `/report/data`         | GET    | Structured report data as JSON |
+| `/coverage/generate`   | POST   | **Admin-gated.** Trigger coverage collection, scoped to control-center itself (see Design Principles) |
+| `/coverage/status`     | GET    | Poll coverage job state |
 | `/config`              | GET    | Raw `control_center.yaml` contents (plain text) |
 | `/config/service`      | POST   | Append a new monitored service to the config |
+| `/cron/jobs`           | GET    | Status of the 7 known host-crontab jobs |
+| `/cron/jobs/{id}/pause`    | POST | **Admin-gated.** Pause one of the 7 known jobs (whitelist-only) |
+| `/cron/jobs/{id}/resume`   | POST | **Admin-gated.** Resume a paused job |
+| `/cron/jobs/{id}/schedule` | PUT  | **Admin-gated.** Reschedule a job in the real crontab |
+| `/known-issues`        | GET    | List tracked known issues |
+| `/known-issues`        | POST   | **Admin-gated.** Create a known issue |
+| `/known-issues/{id}`   | PUT    | **Admin-gated.** Update a known issue |
+| `/known-issues/{id}`   | DELETE | **Admin-gated.** Delete a known issue |
 | `/docker/containers`   | GET    | Platform container list with status |
 | `/docker/sif-images`   | GET    | Tool SIF image inventory and sizes |
 | `/docker/plugin-images`| GET    | Plugin Docker image inventory |
@@ -105,6 +115,8 @@ omnibioai-control-center/
 | `/activity`            | GET    | Live CPU/memory/network via Prometheus + cAdvisor |
 | `/image-freshness`     | GET    | Deployed image digests vs. latest on GHCR |
 | `/integrity`           | GET    | Configured symlink/mount integrity checks |
+
+"Admin-gated" endpoints require a valid JWT carrying the `admin` role, checked twice independently: once by nginx's `auth_request` (any valid JWT) and once inside the app itself via `require_admin` (the specific role) — so an nginx misconfiguration alone can't expose a write endpoint. All other endpoints above are fully open, no auth required.
 
 ### `/health`
 
@@ -242,7 +254,7 @@ docker compose \
   up -d
 ```
 
-Access at: `http://localhost/_svc/control` (JWT required)
+Access at: `http://localhost/_svc/control` — read-only endpoints (`/health`, `/summary`, `/services`, `/report`, `/report/data`) are public; everything else requires a valid JWT via the nginx reverse proxy, and admin-gated write endpoints additionally require the `admin` role (see API Endpoints above).
 
 For local scripts and Prometheus scraping (localhost only):
 `http://127.0.0.1:7070`
@@ -266,10 +278,12 @@ uvicorn control_center.main:app --host 0.0.0.0 --port 7070 --reload
 | Variable                | Default                       | Description |
 |-------------------------|-------------------------------|-------------|
 | `CONTROL_CENTER_CONFIG` | `/config/control_center.yaml` | Path to YAML config |
-| `WORKSPACE_ROOT`        | `/workspace`                  | Ecosystem root |
+| `WORKSPACE_ROOT`        | `/workspace`                  | Ecosystem root **as seen inside the container** — this is the mount point, not a host path. The compose file maps it via `${MACHINE_DIR}:/workspace`, so on the host this is wherever `MACHINE_DIR` points (e.g. `~/Desktop/machine`) |
 | `CONTROL_CENTER_PORT`   | `7070`                        | Service port |
 | `REPORT_SCHEDULE_HOURS` | `6`                           | Auto-regenerate report every N hours |
-| `WORK_DIR`              | `/workspace/omnibioai-work`   | Path to work/output directory |
+| `WORK_DIR`              | `/workspace/omnibioai-work`   | Path to work/output directory, **container-internal** (same `/workspace` mount as `WORKSPACE_ROOT` above) — on the host this resolves to `${MACHINE_DIR}/omnibioai-work` |
+| `JWT_SECRET`            | `change-me`                   | Shared HS256 secret for validating admin JWTs locally (`require_admin`) — same value as `AUTH_SECRET_KEY` used by omnibioai-auth/workbench/api-gateway/model-registry |
+| `CRONTAB_SPOOL_PATH`    | `/var/spool/cron/crontabs/manish` | Host crontab spool file, bind-mounted in so `/cron/jobs/{id}/pause\|resume\|schedule` can read/write it directly |
 
 ---
 
@@ -301,8 +315,7 @@ The report is a single interactive HTML file with a left sidebar-nav layout (not
 | Docker Images | Platform Containers | Running/stopped platform container inventory |
 | | Tool SIF Images | Singularity image build status and sizes |
 | | Plugin Docker Images | Plugin image inventory vs. local Docker images |
-| Miscellaneous | Known Issues | Tracked open/acknowledged/resolved issues |
-| | Active Runs | Currently running/queued workflow runs |
+| Miscellaneous | Active Runs | Currently running/queued workflow runs |
 | | Storage | Disk usage bar, data categories, organism indexes |
 | | Catalog | Plugin/tool/workflow-bundle counts and breakdowns |
 | | Data Layer | MySQL/Redis/Neo4j connectivity status |
@@ -311,9 +324,16 @@ The report is a single interactive HTML file with a left sidebar-nav layout (not
 | | Secrets Audit | Compose file scan for exposed secrets |
 | | Image Freshness | Deployed image digests vs. latest on GHCR |
 | | Exposed Ports | Compose file scan for host-exposed ports |
-| | CI/CD Health | GitHub Actions status + dependency vulnerability scan per repo |
+| | CI/CD Health | GitHub Actions status + dependency vulnerability scan per repo (npm audit requires Node in the runtime image — see Requirements) |
 | | CVE Trend | Vulnerability count history over time, charted |
 | | Backup Status | Backup job recency and status |
+| Admin | Actions | Regenerate report / refresh coverage — admin-gated, hidden behind a login form for everyone else |
+| | Scheduled Jobs | Status of the 7 host cron jobs; pause/resume/reschedule for admins, read-only otherwise |
+| | Known Issues | Tracked open/acknowledged/resolved issues — live CRUD for admins (moved here from Miscellaneous), read-only otherwise |
+
+### Admin access
+
+The Admin tab shares its session with the omnibioai-studio SPA: it reads the same `omnibioai_access_token` from `localStorage`, so an existing Studio login is recognized automatically (same origin, no separate sign-in needed). If no token is present, the tab shows a login form that posts directly to `/auth/login`; if a token is present but lacks the `admin` role, the tab renders everything read-only with an explicit "admin access required" message instead of showing controls that would just fail. A 401 on any admin action (e.g. the 15-minute access-token expiry) clears the stored token and re-prompts for login rather than failing silently.
 
 ### Generate
 
@@ -352,6 +372,13 @@ pip install pandas
 
 # For coverage collection (best-effort)
 pip install pytest pytest-cov
+
+# For npm-audit vulnerability scanning of JS-manifest repos
+# (already installed in the backend Docker image; only needed if running
+# the report generator standalone outside the container)
+sudo apt-get install nodejs npm  # Ubuntu/Debian — pins whatever major
+                                  # version your distro repo ships; the
+                                  # Docker image pins Node 20 explicitly
 ```
 
 ### View
@@ -398,6 +425,11 @@ pytest tests/ -v
 | `test_check_license_status.py` | `/license` — license-seat/expiry status derivation |
 | `test_check_usage_status.py` | `/usage` — user activity, session counts, plugin-run success-rate stats |
 | `test_routes_infra.py` | Wiring for all `/gpu`, `/celery`, `/database`, `/image-freshness`, `/license`, `/usage`, `/gateway-traffic`, `/audit-trail`, `/activity`, `/integrity` routes |
+| `test_core_auth.py` | `require_admin` — JWT decode, expiry, missing/invalid token, role check |
+| `test_check_cron_jobs.py` | Cron-job status derivation and the pause/resume/reschedule crontab-mutation logic |
+| `test_routes_cron.py` | `/cron/jobs` and its admin-gated mutation routes |
+| `test_check_known_issues.py` | Known-issue load/create/update/delete logic, including UUID backfill |
+| `test_routes_known_issues.py` | `/known-issues` CRUD routes, read-open/write-admin-gated |
 
 Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem fixtures, no real external services). The `checks/*.py` and `routes_docker.py`/`routes_llm.py` suites additionally mock `subprocess` (docker/nvidia-smi CLI calls) and network clients (`httpx`, `redis`, `pymysql`, `neo4j`, `celery`) at the call site — no real database, broker, GPU, or Docker daemon is required at test time.
 
@@ -405,14 +437,16 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 
 ## Design Principles
 
-- **Stateless** — no database, no persistent state
+- **Stateless-ish** — no database; the only persistent writes are the YAML config (`/config/service`), `known_issues.json`, and — for admins only — the host crontab itself
 - **Config-driven** — add services via YAML, no code changes
 - **Graceful degradation** — unreachable services show `DOWN`, never crash the dashboard
 - **Zero mandatory cloud** — runs fully offline and air-gapped
-- **Minimal dependencies** — FastAPI, uvicorn, PyYAML, pydantic only
+- **Minimal dependencies** — FastAPI, uvicorn, PyYAML, pydantic, PyJWT only
 - **stdlib HTTP in report** — `urllib` used for health fetching in report generator, no extra deps
 - **Design-token driven** — CSS uses `@omnibioai/design-tokens` vocabulary; zero hardcoded hex values in the report or dashboard
 - **Structured logging** — all key events (startup, report triggered/finished/failed, scheduler) emitted as JSON to stdout
+- **Defense-in-depth on writes** — every admin-gated endpoint checks the JWT's role independently inside the app (`require_admin`), rather than trusting nginx's `auth_request` alone
+- **Honest scope over convenience** — `/coverage/generate` only runs on control-center itself rather than faking full-ecosystem coverage from inside a container that can't actually run the other repos' test suites (see `/coverage/generate` in API Endpoints)
 
 ---
 
@@ -420,6 +454,7 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 
 - Historical uptime tracking
 - Alert hooks (Slack, email)
+- `/auth/login` audit trail — it currently bypasses api-gateway's `AuditMiddleware` entirely (nginx proxies `/auth/*` straight to auth-service), so there's no IP-level or attempt-level record of login attempts anywhere in the ecosystem. Needs deliberate design (what to log, where, without creating a new PII/security concern in the audit stream itself), not a quick patch — tracked as a known issue in the Admin tab
 
 ---
 
@@ -430,18 +465,23 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 | HTTP health checks | ✓ Stable |
 | TCP checks (MySQL, Redis) | ✓ Stable |
 | Disk usage checks | ✓ Stable |
-| Live dashboard UI | ✓ Stable |
 | JSON summary API | ✓ Stable |
 | Ecosystem report — Architecture | ✓ Stable |
 | Ecosystem report — Projects | ✓ Stable |
 | Ecosystem report — Languages | ✓ Stable |
 | Ecosystem report — Coverage | ✓ Stable |
 | Ecosystem report — Health tab | ✓ Stable |
-| Unit tests | ✓ Stable — 413 tests, 99.81% coverage (98% gate met) |
+| Unit tests | ✓ Stable — 529 tests, 99.84% coverage (98% gate met) |
 | Docker Compose deployment | ✓ Stable |
 | Prometheus metrics (/metrics) | ✓ Stable |
 | Scheduled report generation | ✓ Stable |
 | JWT authentication (via nginx) | ✓ Stable |
+| Admin-role gating (app-level, defense-in-depth) | ✓ Stable |
+| Admin tab — Actions (report/coverage regen) | ✓ Stable |
+| Admin tab — Scheduled Jobs (7 cron jobs, pause/resume/reschedule) | ✓ Stable |
+| Admin tab — Known Issues (live CRUD) | ✓ Stable |
+| Coverage collection (/coverage/generate, control-center-scoped) | ✓ Stable |
+| npm-audit vulnerability scanning (CI/CD Health tab) | ✓ Stable |
 | Background report job API | ✓ Stable |
 | Docker inventory endpoints | ✓ Stable |
 | Structured JSON logging | ✓ Stable |
@@ -462,6 +502,7 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 | CVE Trend | ✓ Stable |
 | Historical tracking | Planned |
 | Alert hooks (Slack, email) | Planned |
+| `/auth/login` audit trail | Planned — needs deliberate design, see Planned Enhancements |
 
 ---
 
