@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from control_center.checks.cron_jobs import (
     CronMutationError,
     get_cron_jobs,
+    get_job_log,
     pause_job,
     resume_job,
     update_schedule,
@@ -36,6 +37,15 @@ def cron_jobs() -> JSONResponse:
     """Read-only status for the 4 known host-crontab jobs. Open to everyone."""
     return JSONResponse({"jobs": get_cron_jobs(_workspace_root(), _spool_path())})
 
+@router.get("/cron/jobs/{job_id}/log")
+def cron_job_log(job_id: str, lines: int = 100) -> JSONResponse:
+    """Read-only tail of a job's log file. Open to everyone, same as GET /cron/jobs."""
+    lines = max(1, min(lines, 1000))  # clamp to a sane range
+    try:
+        result = get_job_log(_workspace_root(), job_id, lines)
+    except CronMutationError as e:
+        return JSONResponse({"error": str(e)}, status_code=e.status_code)
+    return JSONResponse(result)
 
 @router.post("/cron/jobs/{job_id}/pause")
 def cron_job_pause(job_id: str, _admin: dict = Depends(require_admin)) -> JSONResponse:

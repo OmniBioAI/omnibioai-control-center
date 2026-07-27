@@ -37,9 +37,9 @@ class TestCronJobsRoute(unittest.TestCase):
         resp = client.get("/cron/jobs")
         self.assertEqual(resp.status_code, 200)
 
-    def test_returns_seven_jobs(self) -> None:
+    def test_returns_ten_jobs(self) -> None:
         data = client.get("/cron/jobs").json()
-        self.assertEqual(len(data["jobs"]), 7)
+        self.assertEqual(len(data["jobs"]), 10)
 
     def test_uses_workspace_root_env_var(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -53,6 +53,56 @@ class TestCronJobsRoute(unittest.TestCase):
                 del os.environ["WORKSPACE_ROOT"]
         pubmed_job = next(j for j in data["jobs"] if j["id"] == "pubmed-sync")
         self.assertEqual(pubmed_job["last_status"], "ok")
+
+
+class TestCronJobLogRoute(unittest.TestCase):
+
+    def test_open_no_auth_required(self) -> None:
+        resp = client.get("/cron/jobs/mysql-backup/log")
+        self.assertEqual(resp.status_code, 200)
+
+    def test_unknown_job_id_returns_404(self) -> None:
+        resp = client.get("/cron/jobs/not-a-real-job/log")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_returns_log_tail_from_real_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["WORKSPACE_ROOT"] = tmp
+            log_dir = Path(tmp) / "work" / "backups"
+            log_dir.mkdir(parents=True)
+            (log_dir / "omnibioai-backup.log").write_text("a\nb\nc\n")
+            try:
+                data = client.get("/cron/jobs/mysql-backup/log?lines=2").json()
+            finally:
+                del os.environ["WORKSPACE_ROOT"]
+        self.assertEqual(data["lines"], ["b", "c"])
+        self.assertEqual(data["total_lines"], 3)
+
+    def test_lines_param_clamped_to_minimum_one(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["WORKSPACE_ROOT"] = tmp
+            log_dir = Path(tmp) / "work" / "backups"
+            log_dir.mkdir(parents=True)
+            (log_dir / "omnibioai-backup.log").write_text("a\nb\nc\n")
+            try:
+                data = client.get("/cron/jobs/mysql-backup/log?lines=0").json()
+            finally:
+                del os.environ["WORKSPACE_ROOT"]
+        self.assertEqual(data["lines_returned"], 1)
+
+    def test_lines_param_clamped_to_maximum_1000(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["WORKSPACE_ROOT"] = tmp
+            log_dir = Path(tmp) / "work" / "backups"
+            log_dir.mkdir(parents=True)
+            (log_dir / "omnibioai-backup.log").write_text(
+                "\n".join(f"line {i}" for i in range(1500)) + "\n"
+            )
+            try:
+                data = client.get("/cron/jobs/mysql-backup/log?lines=5000").json()
+            finally:
+                del os.environ["WORKSPACE_ROOT"]
+        self.assertEqual(data["lines_returned"], 1000)
 
 
 class TestCronMutationRoutes(unittest.TestCase):
@@ -132,7 +182,7 @@ class TestCronMutationRoutes(unittest.TestCase):
         self.assertEqual(resp.status_code, 500)
 
     def test_whitelist_only_arbitrary_job_id_rejected(self) -> None:
-        # Never accepts an arbitrary new job -- only the 7 predefined ids.
+        # Never accepts an arbitrary new job -- only the 10 predefined ids.
         self._set_spool("0 4 * * * echo hi\n")
         resp = client.put(
             "/cron/jobs/my-custom-job/schedule",

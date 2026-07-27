@@ -20,6 +20,27 @@ CRON_JOBS: list[dict[str, str]] = [
         "log_path": "work/backups/omnibioai-backup.log",
     },
     {
+        "id": "neo4j-backup",
+        "name": "Neo4j Backup",
+        "schedule": "0 5 * * *",
+        "script_path": "omnibioai-studio/scripts/backup-neo4j.sh",
+        "log_path": "work/backups/omnibioai-neo4j-backup.log",
+    },
+    {
+        "id": "config-backup",
+        "name": "Config Backup",
+        "schedule": "45 4 * * *",
+        "script_path": "omnibioai-studio/scripts/backup-config.sh",
+        "log_path": "work/backups/omnibioai-config-backup.log",
+    },
+    {
+        "id": "unpushed-work-check",
+        "name": "Unpushed Work Check",
+        "schedule": "0 7 * * *",
+        "script_path": "omnibioai-utils/check_unpushed_work.sh",
+        "log_path": "work/backups/omnibioai-unpushed-check.log",
+    },
+    {
         "id": "coverage-nightly",
         "name": "Coverage Collection",
         "schedule": "0 2 * * *",
@@ -85,6 +106,41 @@ def _last_run_status(log_path: Path) -> dict[str, Any]:
     status = "error" if _ERROR_RE.search(tail) else "ok"
     return {"last_run_at": mtime, "last_status": status}
 
+def get_job_log(workspace_root: Path, job_id: str, lines: int = 100) -> dict[str, Any]:
+    """Return the last `lines` lines of a job's log file, plus the same
+    last_run_at/last_status summary get_cron_jobs() already computes -- so
+    the frontend can render both in one call. Read-only; no auth required
+    beyond whatever routes_cron.py already enforces for GET endpoints.
+    """
+    job = _get_job(job_id)  # raises CronMutationError(404) if unknown id
+    log_path = workspace_root / job["log_path"]
+
+    if not log_path.exists():
+        return {
+            "id": job_id,
+            "log_path": str(job["log_path"]),
+            "last_run_at": None,
+            "last_status": "never_run",
+            "lines": [],
+        }
+
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        raise CronMutationError(f"Cannot read log file: {e}", 500)
+
+    all_lines = text.strip().splitlines()
+    tail = all_lines[-lines:] if lines > 0 else all_lines
+
+    status_info = _last_run_status(log_path)
+    return {
+        "id": job_id,
+        "log_path": str(job["log_path"]),
+        "total_lines": len(all_lines),
+        "lines_returned": len(tail),
+        **status_info,
+        "lines": tail,
+    }
 
 class CronMutationError(Exception):
     """Raised by the pause/resume/reschedule helpers below; routes_cron.py

@@ -62,12 +62,13 @@ class TestLastRunStatus(unittest.TestCase):
 
 class TestGetCronJobs(unittest.TestCase):
 
-    def test_returns_all_seven_known_jobs(self) -> None:
+    def test_returns_all_ten_known_jobs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             jobs = cron_jobs.get_cron_jobs(Path(tmp))
-        self.assertEqual(len(jobs), 7)
+        self.assertEqual(len(jobs), 10)
         self.assertEqual({j["id"] for j in jobs}, {
-            "mysql-backup", "coverage-nightly", "pubmed-sync", "reindex-check",
+            "mysql-backup", "neo4j-backup", "config-backup", "unpushed-work-check",
+            "coverage-nightly", "pubmed-sync", "reindex-check",
             "cron-health-check", "disk-space-check", "domain-health-check",
         })
 
@@ -125,6 +126,61 @@ class TestGetCronJobs(unittest.TestCase):
             jobs = cron_jobs.get_cron_jobs(Path(tmp), spool)
         coverage = next(j for j in jobs if j["id"] == "coverage-nightly")
         self.assertIsNone(coverage["paused"])
+
+
+class TestGetJobLog(unittest.TestCase):
+
+    def test_unknown_job_id_raises_404(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(cron_jobs.CronMutationError) as ctx:
+                cron_jobs.get_job_log(Path(tmp), "not-a-real-job")
+        self.assertEqual(ctx.exception.status_code, 404)
+
+    def test_missing_log_file_returns_never_run_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = cron_jobs.get_job_log(Path(tmp), "mysql-backup")
+        self.assertEqual(result["id"], "mysql-backup")
+        self.assertEqual(result["last_status"], "never_run")
+        self.assertIsNone(result["last_run_at"])
+        self.assertEqual(result["lines"], [])
+
+    def test_existing_log_returns_tail_and_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "work" / "backups"
+            log_dir.mkdir(parents=True)
+            (log_dir / "omnibioai-backup.log").write_text(
+                "\n".join(f"line {i}" for i in range(5)) + "\n"
+            )
+            result = cron_jobs.get_job_log(root, "mysql-backup", lines=3)
+        self.assertEqual(result["total_lines"], 5)
+        self.assertEqual(result["lines_returned"], 3)
+        self.assertEqual(result["lines"], ["line 2", "line 3", "line 4"])
+        self.assertEqual(result["last_status"], "ok")
+        self.assertIsNotNone(result["last_run_at"])
+
+    def test_lines_param_larger_than_file_returns_all(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "work" / "backups"
+            log_dir.mkdir(parents=True)
+            (log_dir / "omnibioai-backup.log").write_text("only line\n")
+            result = cron_jobs.get_job_log(root, "mysql-backup", lines=100)
+        self.assertEqual(result["total_lines"], 1)
+        self.assertEqual(result["lines_returned"], 1)
+        self.assertEqual(result["lines"], ["only line"])
+
+    def test_oserror_on_read_raises_500(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_dir = root / "work" / "backups"
+            log_dir.mkdir(parents=True)
+            log_path = log_dir / "omnibioai-backup.log"
+            log_path.write_text("x\n")
+            with patch.object(cron_jobs.Path, "read_text", side_effect=OSError("denied")):
+                with self.assertRaises(cron_jobs.CronMutationError) as ctx:
+                    cron_jobs.get_job_log(root, "mysql-backup")
+        self.assertEqual(ctx.exception.status_code, 500)
 
 
 class TestCronMutations(unittest.TestCase):
