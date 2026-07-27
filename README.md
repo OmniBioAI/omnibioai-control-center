@@ -284,6 +284,7 @@ uvicorn control_center.main:app --host 0.0.0.0 --port 7070 --reload
 | `WORK_DIR`              | `/workspace/omnibioai-work`   | Path to work/output directory, **container-internal** (same `/workspace` mount as `WORKSPACE_ROOT` above) — on the host this resolves to `${MACHINE_DIR}/omnibioai-work` |
 | `JWT_SECRET`            | `change-me`                   | Shared HS256 secret for validating admin JWTs locally (`require_admin`) — same value as `AUTH_SECRET_KEY` used by omnibioai-auth/workbench/api-gateway/model-registry |
 | `CRONTAB_SPOOL_PATH`    | `/var/spool/cron/crontabs/manish` | Host crontab spool file, bind-mounted in so `/cron/jobs/{id}/pause\|resume\|schedule` can read/write it directly |
+| `DISCORD_ALERT_WEBHOOK_URL` | *(empty)*                 | Discord webhook for new high-severity known-issue alerts — empty disables alerting gracefully, same pattern as `SENTRY_DSN` |
 
 ---
 
@@ -329,11 +330,15 @@ The report is a single interactive HTML file with a left sidebar-nav layout (not
 | | Backup Status | Backup job recency and status |
 | Admin | Actions | Regenerate report / refresh coverage — admin-gated, hidden behind a login form for everyone else |
 | | Scheduled Jobs | Status of the 7 host cron jobs; pause/resume/reschedule for admins, read-only otherwise |
-| | Known Issues | Tracked open/acknowledged/resolved issues — live CRUD for admins (moved here from Miscellaneous), read-only otherwise |
+| | Known Issues | Tracked open/acknowledged/resolved issues — live CRUD for admins (moved here from Miscellaneous), read-only otherwise. Creating a **high**-severity entry fires a Discord alert (see below); medium/low never do |
 
 ### Admin access
 
 The Admin tab shares its session with the omnibioai-studio SPA: it reads the same `omnibioai_access_token` from `localStorage`, so an existing Studio login is recognized automatically (same origin, no separate sign-in needed). If no token is present, the tab shows a login form that posts directly to `/auth/login`; if a token is present but lacks the `admin` role, the tab renders everything read-only with an explicit "admin access required" message instead of showing controls that would just fail. A 401 on any admin action (e.g. the 15-minute access-token expiry) clears the stored token and re-prompts for login rather than failing silently.
+
+### Known-issue Discord alerts
+
+Every genuinely new **high**-severity known issue (create only — never on updates, and never for medium/low, to keep this high-signal) posts a Discord embed via `DISCORD_ALERT_WEBHOOK_URL` (a separate webhook from `DISCORD_WEBHOOK_URL`, which is used for GPU temperature alerts). This fires on the same code path regardless of whether the entry was created by a human via the Admin tab or automatically by one of the host cron self-check scripts (`check_cron_health.py`, `check_disk_space.py`, `check_domain_health.py`) — closing the loop between "the system detected a problem" and "a human finds out." Unset/unreachable webhook, or any error in sending the alert, never blocks the actual known-issue from being recorded — the alert is fire-and-forget.
 
 ### Generate
 

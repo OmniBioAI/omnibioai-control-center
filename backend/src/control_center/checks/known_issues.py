@@ -1,15 +1,25 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from datetime import date
 from pathlib import Path
 from typing import Any
 
+from control_center.notifications.discord import notify as _discord_notify
+
 KNOWN_ISSUES_PATH_DEFAULT = "omnibioai-work/known_issues.json"
 
 _VALID_SEVERITIES = {"high", "medium", "low"}
 _VALID_STATUSES = {"open", "acknowledged", "resolved"}
+
+# Separate from DISCORD_WEBHOOK_URL (used by checks/gpu.py for temperature
+# alerts) -- a different channel/server for known-issue alerts. Same
+# graceful-absence behavior: notify() itself no-ops on an empty URL, so
+# nothing here needs its own "is this configured" branch.
+_ALERT_WEBHOOK_URL = os.environ.get("DISCORD_ALERT_WEBHOOK_URL", "")
+_DESCRIPTION_ALERT_LIMIT = 500
 
 
 class KnownIssueError(Exception):
@@ -73,6 +83,27 @@ def _validate_status(value: str) -> None:
         raise KnownIssueError(f"Invalid status: {value!r} (must be one of {sorted(_VALID_STATUSES)})")
 
 
+def _alert_high_severity(issue: dict[str, Any]) -> None:
+    """Fires on genuinely new high-severity issues only -- not medium/low
+    (avoids alert fatigue) and not on updates to existing entries (only
+    create_known_issue calls this, never update_known_issue). Same code
+    path regardless of whether the entry was created by a human via the
+    Admin tab or a cron self-check script, since both go through this
+    one function. notify() itself is already failure-tolerant (no-ops on
+    an empty webhook URL, swallows request errors) -- a Discord outage
+    must never block a known-issue from being recorded."""
+    description = issue["description"] or ""
+    if len(description) > _DESCRIPTION_ALERT_LIMIT:
+        description = description[:_DESCRIPTION_ALERT_LIMIT].rstrip() + "…"
+    _discord_notify(
+        _ALERT_WEBHOOK_URL,
+        f"🔴 High-severity issue: {issue['title']}",
+        description or "(no description)",
+        color="error",
+        fields={"Area": issue["area"] or "—", "Opened": issue["opened_at"]},
+    )
+
+
 def create_known_issue(path: Path, data: dict[str, Any]) -> dict[str, Any]:
     title = (data.get("title") or "").strip()
     if not title:
@@ -96,6 +127,17 @@ def create_known_issue(path: Path, data: dict[str, Any]) -> dict[str, Any]:
     issues, _ = _backfill_ids(_load_issues(path))
     issues.append(issue)
     _save_issues(path, issues)
+
+    if severity == "high":
+        try:
+            _alert_high_severity(issue)
+        except Exception:
+            # notify() already swallows its own request errors -- this is
+            # belt-and-suspenders against anything else going wrong in the
+            # alert path itself. A failed/misconfigured alert must never
+            # fail the actual known-issue creation.
+            pass
+
     return issue
 
 

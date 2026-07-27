@@ -163,6 +163,92 @@ class TestCreateKnownIssue(unittest.TestCase):
         self.assertEqual(len(on_disk), 2)
         self.assertEqual(on_disk[0]["id"], "existing")
 
+    def test_high_severity_fires_discord_alert(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "issues.json"
+            with patch.object(known_issues, "_discord_notify") as mock_notify:
+                known_issues.create_known_issue(p, {
+                    "title": "Disk almost full", "severity": "high", "area": "Infra",
+                })
+        mock_notify.assert_called_once()
+        args, kwargs = mock_notify.call_args
+        self.assertIn("Disk almost full", args[1])
+        self.assertEqual(kwargs["color"], "error")
+        self.assertEqual(kwargs["fields"]["Area"], "Infra")
+
+    def test_medium_severity_does_not_fire_alert(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "issues.json"
+            with patch.object(known_issues, "_discord_notify") as mock_notify:
+                known_issues.create_known_issue(p, {"title": "x", "severity": "medium"})
+        mock_notify.assert_not_called()
+
+    def test_low_severity_does_not_fire_alert(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "issues.json"
+            with patch.object(known_issues, "_discord_notify") as mock_notify:
+                known_issues.create_known_issue(p, {"title": "x", "severity": "low"})
+        mock_notify.assert_not_called()
+
+    def test_default_severity_medium_does_not_fire_alert(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "issues.json"
+            with patch.object(known_issues, "_discord_notify") as mock_notify:
+                known_issues.create_known_issue(p, {"title": "x"})
+        mock_notify.assert_not_called()
+
+    def test_long_description_truncated_in_alert(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "issues.json"
+            long_desc = "x" * 1000
+            with patch.object(known_issues, "_discord_notify") as mock_notify:
+                known_issues.create_known_issue(p, {
+                    "title": "x", "severity": "high", "description": long_desc,
+                })
+        args, _ = mock_notify.call_args
+        sent_description = args[2]
+        self.assertLessEqual(len(sent_description), known_issues._DESCRIPTION_ALERT_LIMIT + 1)
+        self.assertTrue(sent_description.endswith("…"))
+
+    def test_discord_alert_failure_does_not_block_creation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "issues.json"
+            with patch.object(known_issues, "_discord_notify", side_effect=RuntimeError("boom")):
+                issue = known_issues.create_known_issue(p, {"title": "x", "severity": "high"})
+            on_disk = json.loads(p.read_text())
+        self.assertEqual(issue["title"], "x")
+        self.assertEqual(len(on_disk), 1)
+
+    def test_alert_not_fired_on_update(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "issues.json"
+            p.write_text(json.dumps([{
+                "id": "abc", "title": "x", "description": "", "severity": "low",
+                "status": "open", "area": "", "opened_at": "2026-01-01",
+            }]))
+            with patch.object(known_issues, "_discord_notify") as mock_notify:
+                known_issues.update_known_issue(p, "abc", {"severity": "high"})
+        mock_notify.assert_not_called()
+
+
+class TestAlertHighSeverity(unittest.TestCase):
+
+    def test_no_description_uses_placeholder(self) -> None:
+        with patch.object(known_issues, "_discord_notify") as mock_notify:
+            known_issues._alert_high_severity({
+                "title": "x", "description": "", "area": "", "opened_at": "2026-01-01",
+            })
+        args, _ = mock_notify.call_args
+        self.assertEqual(args[2], "(no description)")
+
+    def test_missing_area_shows_dash(self) -> None:
+        with patch.object(known_issues, "_discord_notify") as mock_notify:
+            known_issues._alert_high_severity({
+                "title": "x", "description": "d", "area": "", "opened_at": "2026-01-01",
+            })
+        _, kwargs = mock_notify.call_args
+        self.assertEqual(kwargs["fields"]["Area"], "—")
+
 
 class TestUpdateKnownIssue(unittest.TestCase):
 
