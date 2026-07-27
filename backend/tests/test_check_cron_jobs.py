@@ -62,12 +62,13 @@ class TestLastRunStatus(unittest.TestCase):
 
 class TestGetCronJobs(unittest.TestCase):
 
-    def test_returns_all_four_known_jobs(self) -> None:
+    def test_returns_all_seven_known_jobs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             jobs = cron_jobs.get_cron_jobs(Path(tmp))
-        self.assertEqual(len(jobs), 4)
+        self.assertEqual(len(jobs), 7)
         self.assertEqual({j["id"] for j in jobs}, {
             "mysql-backup", "coverage-nightly", "pubmed-sync", "reindex-check",
+            "cron-health-check", "disk-space-check", "domain-health-check",
         })
 
     def test_each_job_has_expected_fields(self) -> None:

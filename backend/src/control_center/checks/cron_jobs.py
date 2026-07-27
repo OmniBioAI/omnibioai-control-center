@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-# The 4 real jobs installed in the host crontab (`crontab -l`). Whitelist-only
+# The 7 real jobs installed in the host crontab (`crontab -l`). Whitelist-only
 # by design -- /cron/jobs/{id}/... endpoints only ever operate on one of
-# these 4 ids, never an arbitrary new job. schedule here is the *default*
+# these 7 ids, never an arbitrary new job. schedule here is the *default*
 # baked-in value; PUT /cron/jobs/{id}/schedule (once implemented) updates the
 # live crontab, not this list, so this is just the fallback shown before any
 # live crontab read succeeds.
@@ -39,6 +39,27 @@ CRON_JOBS: list[dict[str, str]] = [
         "schedule": "0 * * * *",
         "script_path": "omnibioai-dev-hub/scripts/check_and_reindex.sh",
         "log_path": "work/backups/omnibioai-reindex.log",
+    },
+    {
+        "id": "cron-health-check",
+        "name": "Cron Health Check",
+        "schedule": "0 */6 * * *",
+        "script_path": "omnibioai-control-center/scripts/check_cron_health.py",
+        "log_path": "work/backups/omnibioai-cron-health.log",
+    },
+    {
+        "id": "disk-space-check",
+        "name": "Disk Space Check",
+        "schedule": "0 6 * * *",
+        "script_path": "omnibioai-control-center/scripts/check_disk_space.py",
+        "log_path": "work/backups/omnibioai-disk-space.log",
+    },
+    {
+        "id": "domain-health-check",
+        "name": "Domain & SSL Health Check",
+        "schedule": "0 5 * * *",
+        "script_path": "omnibioai-control-center/scripts/check_domain_health.py",
+        "log_path": "work/backups/omnibioai-domain-health.log",
     },
 ]
 
@@ -140,7 +161,7 @@ def _spool_path(env_value: str | None) -> Path:
 
 
 def get_cron_jobs(workspace_root: Path, spool_path: Path | None = None) -> list[dict[str, Any]]:
-    """Status for the 4 known jobs: last-run info from log files (always
+    """Status for the 7 known jobs: last-run info from log files (always
     available, pure filesystem reads) plus live paused/schedule state read
     from the crontab spool file when it's mounted and readable -- falls
     back to the static defaults (paused=None, i.e. unknown) otherwise, so
