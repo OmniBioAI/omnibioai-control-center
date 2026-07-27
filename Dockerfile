@@ -11,8 +11,13 @@ FROM ghcr.io/omnibioai/omnibioai-base:latest AS backend
 LABEL org.opencontainers.image.source=https://github.com/man4ish/omnibioai
 WORKDIR /app
 
-# Rust needed for gseapy compilation
-RUN apt-get update && apt-get install -y --no-install-recommends     build-essential gcc g++ pkg-config libssl-dev libffi-dev curl ca-certificates cloc     && curl https://sh.rustup.rs -sSf | sh -s -- -y     && rm -rf /var/lib/apt/lists/*
+# Rust needed for gseapy compilation.
+# nodejs/npm needed for _run_vuln_scan()'s npm-audit branch (the 4
+# npm-manifest repos: omnibioai-studio, omnibioai-design-tokens,
+# omnibioai-ui, omnibioai-launcher) -- Debian trixie's own repo ships
+# nodejs 20.x, matching the frontend-builder stage's node:20 above, so no
+# third-party NodeSource script is needed to pin the major version.
+RUN apt-get update && apt-get install -y --no-install-recommends     build-essential gcc g++ pkg-config libssl-dev libffi-dev curl ca-certificates cloc nodejs npm     && curl https://sh.rustup.rs -sSf | sh -s -- -y     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/root/.cargo/bin:${PATH}"
 
