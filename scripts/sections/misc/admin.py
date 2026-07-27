@@ -71,8 +71,8 @@ def admin_jobs_section_html() -> str:
     return """
 <div class="tbl-wrap">
   <table>
-    <thead><tr><th>Job</th><th>Schedule</th><th>State</th><th>Last Run</th><th>Last Run At</th><th></th></tr></thead>
-    <tbody id="adm-jobs-tbody"><tr><td colspan="6" style="text-align:center;color:var(--color-text-muted);padding:24px 12px">loading…</td></tr></tbody>
+    <thead><tr><th>Job</th><th>Schedule</th><th>State</th><th>Last Run</th><th>Last Run At</th><th>Log</th><th></th></tr></thead>
+    <tbody id="adm-jobs-tbody"><tr><td colspan="7" style="text-align:center;color:var(--color-text-muted);padding:24px 12px">loading…</td></tr></tbody>
   </table>
 </div>
 """
@@ -107,6 +107,7 @@ _ADMIN_SCRIPT = """
   var admState = {token: null, roles: [], isAdmin: false};
   var admJobs = [];
   var admIssues = [];
+  var admLogState = {}; // job id -> {expanded, loading, lines, error}
 
   var _SEV = {
     high:   ['var(--color-danger)',  'var(--color-danger-dim)'],
@@ -242,15 +243,39 @@ _ADMIN_SCRIPT = """
       admRenderJobs();
     }).catch(function() {
       var tb = document.getElementById('adm-jobs-tbody');
-      if (tb) tb.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--color-danger);padding:24px 12px">Control center unreachable</td></tr>';
+      if (tb) tb.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--color-danger);padding:24px 12px">Control center unreachable</td></tr>';
     });
   }
+
+  function admLoadJobLog(id) {
+    admLogState[id] = Object.assign({}, admLogState[id], {expanded: true, loading: true, error: null});
+    admRenderJobs();
+    fetch(admApi('/cron/jobs/' + id + '/log?lines=100')).then(function(r) { return r.json(); }).then(function(d) {
+      admLogState[id] = {expanded: true, loading: false, lines: d.lines || [], error: null};
+      admRenderJobs();
+    }).catch(function(e) {
+      admLogState[id] = {expanded: true, loading: false, lines: [], error: 'Failed to load log: ' + e.message};
+      admRenderJobs();
+    });
+  }
+  window.admLoadJobLog = admLoadJobLog;
+
+  function admToggleLog(id) {
+    var st = admLogState[id];
+    if (st && st.expanded) {
+      admLogState[id] = Object.assign({}, st, {expanded: false});
+      admRenderJobs();
+    } else {
+      admLoadJobLog(id);
+    }
+  }
+  window.admToggleLog = admToggleLog;
 
   function admRenderJobs() {
     var tbody = document.getElementById('adm-jobs-tbody');
     if (!tbody) return;
     if (!admJobs.length) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--color-text-muted);padding:24px 12px">loading…</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--color-text-muted);padding:24px 12px">loading…</td></tr>';
       return;
     }
     tbody.innerHTML = admJobs.map(function(j) {
@@ -273,14 +298,32 @@ _ADMIN_SCRIPT = """
             : '<button onclick="admPauseJob(\\'' + j.id + '\\')" class="adm-btn-sm">Pause</button>') +
           '</div>';
       }
-      return '<tr>' +
+      var logSt = admLogState[j.id] || {};
+      var logBtn = '<button onclick="admToggleLog(\\'' + j.id + '\\')" class="adm-btn-sm">' + (logSt.expanded ? 'Hide' : 'View') + '</button>';
+      var row = '<tr>' +
         '<td style="font-weight:600">' + admEsc(j.name) + '</td>' +
         '<td class="mono">' + admEsc(j.schedule) + '</td>' +
         '<td>' + pausedBadge + '</td>' +
         '<td style="color:' + statusColor + '">' + admEsc(j.last_status) + '</td>' +
         '<td style="font-size:11px;color:var(--color-text-muted)">' + lastRunAt + '</td>' +
+        '<td>' + logBtn + '</td>' +
         '<td>' + controls + '</td>' +
         '</tr>';
+      if (logSt.expanded) {
+        var body;
+        if (logSt.loading) {
+          body = '<div style="font-size:11px;color:var(--color-text-muted)">loading log…</div>';
+        } else if (logSt.error) {
+          body = '<div style="font-size:11px;color:var(--color-danger)">' + admEsc(logSt.error) + '</div>';
+        } else if (!logSt.lines || !logSt.lines.length) {
+          body = '<div style="font-size:11px;color:var(--color-text-muted)">Log is empty.</div>';
+        } else {
+          body = '<pre style="margin:0;padding:8px 10px;background:var(--color-bg-surface2);border-radius:6px;font-family:monospace;font-size:11px;line-height:1.5;max-height:280px;overflow:auto;white-space:pre-wrap;word-break:break-all">' +
+            logSt.lines.map(admEsc).join('\\n') + '</pre>';
+        }
+        row += '<tr><td colspan="7" style="padding:6px 12px 14px">' + body + '</td></tr>';
+      }
+      return row;
     }).join('');
   }
 

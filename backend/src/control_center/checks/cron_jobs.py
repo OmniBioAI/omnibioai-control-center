@@ -41,6 +41,13 @@ CRON_JOBS: list[dict[str, str]] = [
         "log_path": "work/backups/omnibioai-unpushed-check.log",
     },
     {
+        "id": "nvme-backup",
+        "name": "NVMe Data Backup",
+        "schedule": "0 1 * * *",
+        "script_path": "omnibioai-studio/scripts/backup-nvme.sh",
+        "log_path": "work/backups/omnibioai-nvme-backup.log",
+    },
+    {
         "id": "coverage-nightly",
         "name": "Coverage Collection",
         "schedule": "0 2 * * *",
@@ -81,6 +88,38 @@ CRON_JOBS: list[dict[str, str]] = [
         "schedule": "0 5 * * *",
         "script_path": "omnibioai-control-center/scripts/check_domain_health.py",
         "log_path": "work/backups/omnibioai-domain-health.log",
+    },
+    {
+        # Not yet installed in the live crontab -- registered here so it's
+        # visible via GET /cron/jobs, but pause/resume/schedule will 404
+        # against it (_match_line_index finds no line) until a crontab line
+        # is added. schedule below is inert until that happens.
+        "id": "run-chunks",
+        "name": "Run Chunks (Embedding)",
+        "schedule": "0 1 * * *",
+        "script_path": "omnibioai-utils/run_chunks.sh",
+        "log_path": "work/backups/omnibioai-run-chunks.log",
+    },
+    {
+        "id": "base-images-check",
+        "name": "Base Docker Image Freshness Check",
+        "schedule": "0 8 * * *",
+        "script_path": "omnibioai-utils/check_base_images.sh",
+        "log_path": "work/backups/omnibioai-base-images-check.log",
+    },
+    {
+        "id": "platform-workflows-check",
+        "name": "Platform Image CI/CD Workflow Health Check",
+        "schedule": "15 8 * * *",
+        "script_path": "omnibioai-utils/check_platform_workflows.sh",
+        "log_path": "work/backups/omnibioai-platform-workflows-check.log",
+    },
+    {
+        "id": "plugin-image-sync-check",
+        "name": "Plugin Docker Image Sync Check",
+        "schedule": "30 8 * * *",
+        "script_path": "omnibioai-utils/check_plugin_image_sync.sh",
+        "log_path": "work/backups/omnibioai-plugin-sync-check.log",
     },
 ]
 
