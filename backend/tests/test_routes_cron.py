@@ -39,7 +39,7 @@ class TestCronJobsRoute(unittest.TestCase):
 
     def test_returns_all_jobs(self) -> None:
         data = client.get("/cron/jobs").json()
-        self.assertEqual(len(data["jobs"]), 16)
+        self.assertEqual(len(data["jobs"]), 15)
 
     def test_uses_workspace_root_env_var(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -182,7 +182,7 @@ class TestCronMutationRoutes(unittest.TestCase):
         self.assertEqual(resp.status_code, 500)
 
     def test_whitelist_only_arbitrary_job_id_rejected(self) -> None:
-        # Never accepts an arbitrary new job -- only the 16 predefined ids.
+        # Never accepts an arbitrary new job -- only the 15 predefined ids.
         self._set_spool("0 4 * * * echo hi\n")
         resp = client.put(
             "/cron/jobs/my-custom-job/schedule",

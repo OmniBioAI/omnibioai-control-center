@@ -65,9 +65,9 @@ class TestGetCronJobs(unittest.TestCase):
     def test_returns_all_known_jobs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             jobs = cron_jobs.get_cron_jobs(Path(tmp))
-        self.assertEqual(len(jobs), 16)
+        self.assertEqual(len(jobs), 15)
         self.assertEqual({j["id"] for j in jobs}, {
-            "mysql-backup", "neo4j-backup", "config-backup", "system-state-backup",
+            "mysql-backup", "neo4j-backup", "system-state-backup",
             "unpushed-work-check", "nvme-backup", "coverage-nightly", "pubmed-sync",
             "reindex-check", "cron-health-check", "disk-space-check", "domain-health-check",
             "run-chunks", "base-images-check", "platform-workflows-check",
