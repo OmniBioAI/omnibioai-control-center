@@ -27,11 +27,23 @@ CRON_JOBS: list[dict[str, str]] = [
         "log_path": "work/backups/omnibioai-neo4j-backup.log",
     },
     {
+        # Superseded by system-state-backup (broader scope: all .env files
+        # across repos, plus crontab/cloudflared/systemd, with off-site
+        # push) on 2026-07-28. Left registered but not in the live
+        # crontab so historical logs remain viewable via GET
+        # /cron/jobs/config-backup/log.
         "id": "config-backup",
-        "name": "Config Backup",
+        "name": "Config Backup (superseded — see system-state-backup)",
         "schedule": "45 4 * * *",
         "script_path": "omnibioai-studio/scripts/backup-config.sh",
         "log_path": "work/backups/omnibioai-config-backup.log",
+    },
+    {
+        "id": "system-state-backup",
+        "name": "System State Backup (.env/cloudflared/systemd/crontab)",
+        "schedule": "0 4 * * *",
+        "script_path": "omnibioai-utils/backup-system-state.sh",
+        "log_path": "work/backups/omnibioai-system-state-backup.log",
     },
     {
         "id": "unpushed-work-check",
