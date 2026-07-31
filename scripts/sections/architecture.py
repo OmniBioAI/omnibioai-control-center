@@ -131,8 +131,12 @@ def architecture_section_html(project_totals: Dict[str, Totals],
 
 <script>
 var _hd={{}};var _cc='';
+function _ccAuthHeader(){{
+  var t=localStorage.getItem('omnibioai_access_token');
+  return t?{{'Authorization':'Bearer '+t}}:{{}};
+}}
 function fetchH(){{
-  fetch(_cc+'/summary').then(function(r){{return r.json();}}).then(function(d){{
+  fetch(_cc+'/summary',{{headers:_ccAuthHeader()}}).then(function(r){{return r.json();}}).then(function(d){{
     var svcs=d.services||[];
     _hd={{}};svcs.forEach(function(s){{_hd[s.name]=s;}});
     var ov=(d.overall_status||'').toUpperCase();

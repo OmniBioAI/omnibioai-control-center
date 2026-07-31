@@ -90,12 +90,18 @@ app.add_middleware(
 )
 
 app.include_router(health_router)
-app.include_router(services_router)
-app.include_router(summary_router)
+# summary/config/docker/services expose internal topology (hostnames, LAN
+# IPs, container inventory, mount paths) -- control.omnibioai.org routes
+# here directly, bypassing nginx-router's auth_request gate entirely (see
+# /etc/cloudflared/config.yml), so these were reachable with no auth at
+# all. Gate them the same way report_generate/coverage_generate already
+# are below.
+app.include_router(services_router, dependencies=[Depends(require_admin)])
+app.include_router(summary_router, dependencies=[Depends(require_admin)])
 app.include_router(report_router)
-app.include_router(config_router)
+app.include_router(config_router, dependencies=[Depends(require_admin)])
 app.include_router(cron_router)
-app.include_router(docker_router)
+app.include_router(docker_router, dependencies=[Depends(require_admin)])
 app.include_router(known_issues_router)
 app.include_router(llm_router)
 app.include_router(infra_router)
@@ -195,6 +201,13 @@ _DOCKER_INJECT_JS = r"""<style>
 
   function omniEsc(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // /docker/* now requires require_admin (core/auth.py) -- same
+  // omnibioai_access_token localStorage key the Admin tab's login sets.
+  function omniAuthHeader() {
+    var t = localStorage.getItem('omnibioai_access_token');
+    return t ? {'Authorization': 'Bearer ' + t} : {};
   }
 
   function omniPagerHtml(pId, navFn) {
@@ -339,7 +352,12 @@ _DOCKER_INJECT_JS = r"""<style>
   async function omniLoadCt() {
     document.getElementById('omni-d-ct-tbody').innerHTML = '<tr><td colspan="5" class="omni-d-loading">Loading…</td></tr>';
     try {
-      var res = await fetch('/docker/containers'), d = await res.json();
+      var res = await fetch('/docker/containers', {headers: omniAuthHeader()});
+      if (res.status === 401) {
+        document.getElementById('omni-d-ct-tbody').innerHTML = '<tr><td colspan="5" class="omni-d-loading">Sign in on the Admin tab to view this</td></tr>';
+        return;
+      }
+      var d = await res.json();
       var pills = '';
       if (d.running != null) pills += '<span class="omni-d-pill" style="color:#059669">' + d.running + ' running</span>';
       if (d.stopped != null) pills += '<span class="omni-d-pill" style="color:#dc2626">' + d.stopped + ' stopped</span>';
@@ -415,7 +433,12 @@ _DOCKER_INJECT_JS = r"""<style>
   async function omniLoadSif() {
     document.getElementById('omni-d-sif-tbody').innerHTML = '<tr><td colspan="4" class="omni-d-loading">Scanning SIF images…</td></tr>';
     try {
-      var res = await fetch('/docker/sif-images'), d = await res.json();
+      var res = await fetch('/docker/sif-images', {headers: omniAuthHeader()});
+      if (res.status === 401) {
+        document.getElementById('omni-d-sif-tbody').innerHTML = '<tr><td colspan="4" class="omni-d-loading">Sign in on the Admin tab to view this</td></tr>';
+        return;
+      }
+      var d = await res.json();
       _sifData = d.images || []; _sifPage = 0;
       var pills = '';
       if (d.built != null) pills += '<span class="omni-d-pill" style="color:#059669">' + d.built + ' built</span>';
@@ -455,7 +478,12 @@ _DOCKER_INJECT_JS = r"""<style>
   async function omniLoadPl() {
     document.getElementById('omni-d-pl-tbody').innerHTML = '<tr><td colspan="5" class="omni-d-loading">Scanning plugin images…</td></tr>';
     try {
-      var res = await fetch('/docker/plugin-images'), d = await res.json();
+      var res = await fetch('/docker/plugin-images', {headers: omniAuthHeader()});
+      if (res.status === 401) {
+        document.getElementById('omni-d-pl-tbody').innerHTML = '<tr><td colspan="5" class="omni-d-loading">Sign in on the Admin tab to view this</td></tr>';
+        return;
+      }
+      var d = await res.json();
       _plData = d.plugins || []; _plPage = 0;
       var pills = '';
       if (d.present != null) pills += '<span class="omni-d-pill">' + _plData.length + ' plugins</span>';
@@ -775,10 +803,16 @@ def root() -> HTMLResponse:
   // Regenerate/coverage-refresh controls now live in the Admin tab
   // (admin-gated there, both client-side and server-side) rather than
   // this always-visible header -- this script now only drives the live
-  // service-status chip, which is read-only and fine for anyone to see.
+  // service-status chip. /summary itself moved behind require_admin
+  // (it leaks internal hostnames/LAN IPs, not just up/down counts) --
+  // attach the token if the visitor happens to already be signed in via
+  // the Admin tab; anonymous visitors just see no chip (badge stays
+  // hidden), same as any other unreachable-state failure below.
   async function omniLoadStatus() {{
     try {{
-      var res = await fetch('/summary');
+      var _t = localStorage.getItem('omnibioai_access_token');
+      var res = await fetch('/summary', {{headers: _t ? {{'Authorization': 'Bearer ' + _t}} : {{}}}});
+      if (res.status === 401) return;
       var data = await res.json();
       var svcs = data.services || [];
       var up = svcs.filter(function(s){{return s.status==='UP';}}).length;

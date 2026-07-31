@@ -1,4 +1,20 @@
+import { authHeaders, reportUnauthorized } from './auth'
+
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
+
+// Wraps fetch() with the admin Authorization header and centralizes the
+// 401 handling (main.py's require_admin gate) so every call site doesn't
+// have to re-implement "session expired, go back to login".
+async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const r = await fetch(path, {
+    ...init,
+    headers: { ...authHeaders(), ...(init.headers ?? {}) },
+  })
+  if (r.status === 401) {
+    reportUnauthorized()
+  }
+  return r
+}
 
 export interface ServiceResult {
   name: string
@@ -84,13 +100,13 @@ export interface PluginImagesResponse {
 }
 
 export async function fetchSummary(): Promise<SummaryResponse> {
-  const r = await fetch(`${BASE}/summary`)
+  const r = await apiFetch(`${BASE}/summary`)
   if (!r.ok) throw new Error(`/summary ${r.status}`)
   return r.json()
 }
 
 export async function fetchConfig(): Promise<string> {
-  const r = await fetch(`${BASE}/config`)
+  const r = await apiFetch(`${BASE}/config`)
   if (!r.ok) throw new Error(`/config ${r.status}`)
   return r.text()
 }
@@ -119,24 +135,24 @@ export interface ReportData {
 }
 
 export async function fetchReportData(): Promise<ReportData> {
-  const r = await fetch(`${BASE}/report/data`)
+  const r = await apiFetch(`${BASE}/report/data`)
   if (!r.ok) throw new Error(`/report/data ${r.status}`)
   return r.json()
 }
 
 export async function fetchReportStatus(): Promise<ReportStatus> {
-  const r = await fetch(`${BASE}/report/status`)
+  const r = await apiFetch(`${BASE}/report/status`)
   if (!r.ok) throw new Error(`/report/status ${r.status}`)
   return r.json()
 }
 
 export async function triggerGenerate(): Promise<void> {
-  const r = await fetch(`${BASE}/report/generate`, { method: 'POST' })
+  const r = await apiFetch(`${BASE}/report/generate`, { method: 'POST' })
   if (!r.ok && r.status !== 409) throw new Error(`/report/generate ${r.status}`)
 }
 
 export async function addService(name: string, type: string, url: string): Promise<void> {
-  const r = await fetch(`${BASE}/config/service`, {
+  const r = await apiFetch(`${BASE}/config/service`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, type, url }),
@@ -145,19 +161,19 @@ export async function addService(name: string, type: string, url: string): Promi
 }
 
 export async function fetchContainers(): Promise<ContainersResponse> {
-  const r = await fetch(`${BASE}/docker/containers`)
+  const r = await apiFetch(`${BASE}/docker/containers`)
   if (!r.ok) throw new Error(`/docker/containers ${r.status}`)
   return r.json()
 }
 
 export async function fetchSifImages(): Promise<SifImagesResponse> {
-  const r = await fetch(`${BASE}/docker/sif-images`)
+  const r = await apiFetch(`${BASE}/docker/sif-images`)
   if (!r.ok) throw new Error(`/docker/sif-images ${r.status}`)
   return r.json()
 }
 
 export async function fetchPluginImages(): Promise<PluginImagesResponse> {
-  const r = await fetch(`${BASE}/docker/plugin-images`)
+  const r = await apiFetch(`${BASE}/docker/plugin-images`)
   if (!r.ok) throw new Error(`/docker/plugin-images ${r.status}`)
   return r.json()
 }

@@ -244,7 +244,7 @@ def build_report(out_html: Path, title: str, timestamp: str,
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{title}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
   {_CHARTJS}
   {SHARED_CSS}
   <style>
@@ -255,6 +255,8 @@ def build_report(out_html: Path, title: str, timestamp: str,
     .hero-sub {{font-size:13px;color:var(--color-text)}}
     .hero-ts {{font-size:11px;color:var(--color-text-muted);margin-top:4px}}
     .hero-right {{display:flex;align-items:center;gap:8px;flex-wrap:wrap}}
+    .hero-link {{font-size:12px;color:var(--color-text-muted);text-decoration:none;padding:5px 10px;border:0.5px solid var(--color-border);border-radius:99px;white-space:nowrap}}
+    .hero-link:hover {{color:var(--color-text);border-color:var(--color-accent)}}
     .regen-btn {{display:flex;align-items:center;gap:5px;padding:8px 16px;border-radius:8px;background:var(--color-accent);color:#000;font-size:13px;font-weight:600;border:none;cursor:pointer;text-decoration:none}}
     .regen-btn:hover {{background:var(--color-bg-surface2)}}
     .status-badge {{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:99px;font-size:12px;font-weight:600}}
@@ -293,6 +295,7 @@ def build_report(out_html: Path, title: str, timestamp: str,
       <div class="hero-ts">Generated: {timestamp}</div>
     </div>
     <div class="hero-right">
+      <a class="hero-link" href="https://webstudio.omnibioai.org" target="_blank" rel="noopener noreferrer">&#127760; Open Web App</a>
       <div class="status-badge sb-unknown" id="global-health-badge">
         <span class="status-dot dot-loading" id="global-health-dot"></span>
         <span id="global-health-text">checking...</span>
@@ -334,7 +337,8 @@ def build_report(out_html: Path, title: str, timestamp: str,
   <div class="footer">
     cloc counts exclude vendored/runtime directories and selected extensions per cloc policy.<br>
     Coverage is best-effort and does not fail the report when a repository has test or configuration issues.<br>
-    Health data is live — fetched from the Control Center /summary endpoint with 30-second auto-refresh.
+    Health data is live — fetched from the Control Center /summary endpoint with 30-second auto-refresh.<br>
+    <a href="https://omnibioai.org" target="_blank" rel="noopener noreferrer" style="color:var(--color-accent);text-decoration:none">← Back to omnibioai.org</a>
   </div>
 </div>
 

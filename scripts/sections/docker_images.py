@@ -301,6 +301,11 @@ var _DC={pp:15,page:1,all:[],filtered:[],q:''};
 var _DS={pp:15,page:1,all:[],filtered:[],q:'',cat:null};
 var _DP={pp:15,page:1,all:[],filtered:[],q:'',cat:null,miss:false};
 
+function _dkAuthHeader(){
+  var t=localStorage.getItem('omnibioai_access_token');
+  return t?{'Authorization':'Bearer '+t}:{};
+}
+
 function _dkBadge(r,re){
   var bg=r?'rgba(34,197,94,.12)':re?'rgba(245,158,11,.12)':'rgba(239,68,68,.12)';
   var c=r?'#22c55e':re?'#f59e0b':'#ef4444';
@@ -385,15 +390,25 @@ function dkPA(){
   renderPg('dk-plug',_DP,dkPA);
 }
 
-/* ── Fetch all three endpoints on load ── */
+/* ── Fetch all three endpoints on load (admin-gated -- require_admin) ── */
 (function(){
-  fetch(_DKU+'/docker/containers').then(function(r){return r.json();}).then(function(d){
+  var _authMsg='<tr><td colspan="5" style="text-align:center;color:#f59e0b;padding:24px 12px">Sign in on the Admin tab to view this</td></tr>';
+
+  fetch(_DKU+'/docker/containers',{headers:_dkAuthHeader()}).then(function(r){
+    if(r.status===401){document.getElementById('dk-cont-tbody').innerHTML=_authMsg;return null;}
+    return r.json();
+  }).then(function(d){
+    if(!d)return;
     _DC.all=d.containers||[];
     document.getElementById('dk-k-run').textContent=(d.running||0)+'/'+_DC.all.length;
     dkCA();
   }).catch(function(){document.getElementById('dk-cont-tbody').innerHTML='<tr><td colspan="5" style="text-align:center;color:#ef4444;padding:24px 12px">Control center unreachable</td></tr>';});
 
-  fetch(_DKU+'/docker/sif-images').then(function(r){return r.json();}).then(function(d){
+  fetch(_DKU+'/docker/sif-images',{headers:_dkAuthHeader()}).then(function(r){
+    if(r.status===401){document.getElementById('dk-sif-tbody').innerHTML=_authMsg.replace('colspan="5"','colspan="4"');return null;}
+    return r.json();
+  }).then(function(d){
+    if(!d)return;
     _DS.all=d.images||[];
     document.getElementById('dk-k-sif-ok').textContent=d.built||0;
     document.getElementById('dk-k-sif-miss').textContent=d.missing||0;
@@ -402,7 +417,11 @@ function dkPA(){
     dkSA();
   }).catch(function(){document.getElementById('dk-sif-tbody').innerHTML='<tr><td colspan="4" style="text-align:center;color:#ef4444;padding:24px 12px">Control center unreachable</td></tr>';});
 
-  fetch(_DKU+'/docker/plugin-images').then(function(r){return r.json();}).then(function(d){
+  fetch(_DKU+'/docker/plugin-images',{headers:_dkAuthHeader()}).then(function(r){
+    if(r.status===401){document.getElementById('dk-plug-tbody').innerHTML=_authMsg;return null;}
+    return r.json();
+  }).then(function(d){
+    if(!d)return;
     _DP.all=d.plugins||[];
     document.getElementById('dk-k-plug').textContent=_DP.all.length;
     document.getElementById('dk-k-plug-ok').textContent=d.present||0;

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+import jwt
 
 @dataclass
 class ServiceHealth:
@@ -37,10 +40,23 @@ def _parse_disk(raw: Dict[str, Any]) -> DiskHealth:
                       status=str(raw.get("status", "WARN")).upper(),
                       message=str(raw.get("message", "")))
 
+def _admin_header() -> Dict[str, str]:
+    # /summary now requires require_admin (core/auth.py) -- self-mint a
+    # short-lived admin token with the same shared secret it validates
+    # against (JWT_SECRET, already set on this container -- see
+    # docker-compose.yml's control-center service) rather than doing an
+    # interactive login round-trip. Same pattern check_domain_health.py /
+    # check_disk_space.py already use for their own admin-gated calls.
+    secret = os.environ.get("JWT_SECRET", "change-me")
+    token = jwt.encode({"sub": "generate-report", "roles": ["admin"]}, secret, algorithm="HS256")
+    return {"Authorization": f"Bearer {token}"}
+
 def fetch_health(base_url: str, timeout_s: float = 5.0) -> EcosystemHealth:
     url = base_url.rstrip("/") + "/summary"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "omnibioai-report/1.0"})
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "omnibioai-report/1.0", **_admin_header()},
+        )
         with urllib.request.urlopen(req, timeout=timeout_s) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
         services = [_parse_service(s) for s in (payload.get("services") or [])]

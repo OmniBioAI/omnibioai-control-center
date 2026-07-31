@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { fetchSummary, fetchReportStatus, triggerGenerate } from './api'
+import { getToken, UNAUTHORIZED_EVENT } from './auth'
 import Header from './components/Header'
 import type { Tab } from './components/Header'
+import LoginScreen from './components/LoginScreen'
 import HealthPage from './pages/HealthPage'
 import DockerPage from './pages/DockerPage'
 import EcosystemPage from './pages/EcosystemPage'
@@ -10,6 +12,22 @@ import LlmPage from './pages/LlmPage'
 import CloudPage from './pages/CloudPage'
 
 export default function App() {
+  const [authed, setAuthed] = useState(() => !!getToken())
+
+  useEffect(() => {
+    const onUnauthorized = () => setAuthed(false)
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
+  }, [])
+
+  if (!authed) {
+    return <LoginScreen onSuccess={() => setAuthed(true)} />
+  }
+
+  return <Dashboard />
+}
+
+function Dashboard() {
   const [tab, setTab] = useState<Tab>('health')
   const [overallStatus, setOverallStatus] = useState<'UP' | 'WARN' | 'DOWN' | null>(null)
   const [reportExists, setReportExists] = useState(false)

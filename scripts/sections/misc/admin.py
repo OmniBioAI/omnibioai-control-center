@@ -27,6 +27,12 @@ ADMIN_STYLE = """
 .adm-btn-primary:disabled{opacity:0.5;cursor:not-allowed}
 .adm-btn-sm{font-size:11px;font-weight:600;padding:4px 10px;border-radius:6px;border:0.5px solid var(--color-border);background:var(--color-bg-surface2);color:var(--color-text);cursor:pointer;font-family:inherit}
 .adm-input{padding:6px 10px;font-size:12px;border-radius:6px;border:0.5px solid var(--color-border);background:var(--color-bg-surface2);color:var(--color-text);font-family:inherit}
+.adm-input:focus{outline:none;border-color:var(--color-accent);box-shadow:0 0 0 3px var(--color-accent-dim)}
+.adm-login-card{max-width:360px}
+.adm-brand{display:flex;align-items:center;gap:8px;margin-bottom:16px}
+.adm-brand-label{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;font-weight:600;color:var(--color-accent);letter-spacing:0.04em}
+.adm-field{display:flex;flex-direction:column;gap:8px;max-width:320px}
+.adm-label{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;font-weight:600;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;display:block}
 </style>
 """
 
@@ -36,14 +42,27 @@ def admin_auth_header_html() -> str:
     header_html) -- login state applies across the whole group, not to a
     single sub-tab."""
     return ADMIN_STYLE + """
-<div class="section" id="adm-login-section" style="display:none">
+<div class="section adm-login-card" id="adm-login-section" style="display:none">
+  <div class="adm-brand">
+    <svg width="20" height="20" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path d="M20 2 L36 11 V29 L20 38 L4 29 V11 Z" stroke="var(--color-accent)" stroke-width="2.5" fill="var(--color-accent-dim)"/>
+      <path d="M20 12 L28 16.5 V25.5 L20 30 L12 25.5 V16.5 Z" fill="var(--color-accent)" opacity="0.85"/>
+    </svg>
+    <span class="adm-brand-label">OmniBioAI Admin</span>
+  </div>
   <div class="sec-title">Sign in</div>
   <div class="sec-sub">Admin access is required to make changes on this tab -- everything here is still visible without signing in.</div>
   <div id="adm-login-error" style="color:var(--color-danger);font-size:12px;margin-bottom:8px;display:none"></div>
-  <div style="display:flex;flex-direction:column;gap:8px;max-width:320px">
-    <input type="email" id="adm-login-email" placeholder="email" class="adm-input">
-    <input type="password" id="adm-login-password" placeholder="password" class="adm-input" onkeydown="if(event.key==='Enter')admLogin()">
-    <button onclick="admLogin()" class="adm-btn-primary">Sign in</button>
+  <div class="adm-field">
+    <div>
+      <label class="adm-label" for="adm-login-email">Email</label>
+      <input type="email" id="adm-login-email" placeholder="you@omnibioai.org" class="adm-input" style="width:100%">
+    </div>
+    <div>
+      <label class="adm-label" for="adm-login-password">Password</label>
+      <input type="password" id="adm-login-password" placeholder="••••••••" class="adm-input" style="width:100%" onkeydown="if(event.key==='Enter')admLogin()">
+    </div>
+    <button onclick="admLogin()" class="adm-btn-primary" style="margin-top:2px">Sign in</button>
   </div>
 </div>
 <div class="section" id="adm-readonly-banner" style="display:none">
