@@ -199,5 +199,38 @@ class TestGetPlatformOrgProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 404)
 
 
+class TestListOrgMembersProxy(unittest.TestCase):
+    """Phase 3 PR3B: added for the new Members & Roles section on
+    OrganizationDetailPage.tsx -- the underlying GET /orgs/{org_id}/members
+    endpoint itself is Phase 1, unmodified; only the proxy route is new."""
+
+    def test_forwards_success_response(self) -> None:
+        upstream = _mock_response(200, [{"user_id": 1, "email": "a@b.com", "status": "active", "roles": ["org_admin"]}])
+        with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.get("/orgs/7/members", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()[0]["roles"], ["org_admin"])
+
+    def test_forwards_org_id_in_path(self) -> None:
+        upstream = _mock_response(200, [])
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            client.get("/orgs/42/members", headers={"Authorization": "Bearer tok"})
+        call_args = mock_ctx.__aenter__.return_value.request.call_args
+        self.assertTrue(call_args.args[1].endswith("/orgs/42/members"))
+
+    def test_forwards_403_for_non_member(self) -> None:
+        upstream = _mock_response(403, {"detail": "Forbidden"})
+        with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.get("/orgs/7/members", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_forwards_404_for_nonmember_org(self) -> None:
+        upstream = _mock_response(404, {"detail": "Organization not found"})
+        with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.get("/orgs/999999/members", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 404)
+
+
 if __name__ == "__main__":
     unittest.main()

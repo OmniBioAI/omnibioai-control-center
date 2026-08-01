@@ -79,6 +79,16 @@ async def update_org_proxy(org_id: int, request: Request) -> JSONResponse:
     return await _proxy("PATCH", f"/orgs/{org_id}", request)
 
 
+# Phase 3 PR3B: added for the new Members & Roles section on
+# OrganizationDetailPage.tsx -- GET /orgs/{org_id}/members has existed in
+# omnibioai-auth since Phase 1 PR2 (routes_orgs.py's list_members), but
+# nothing on this side ever proxied it until this PR needed the member
+# list to render alongside each member's role editor.
+@router.get("/orgs/{org_id}/members")
+async def list_org_members_proxy(org_id: int, request: Request) -> JSONResponse:
+    return await _proxy("GET", f"/orgs/{org_id}/members", request)
+
+
 # ---------------- Platform-admin discovery (Phase 3 PR1) ----------------
 
 

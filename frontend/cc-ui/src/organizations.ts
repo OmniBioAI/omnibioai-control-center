@@ -161,6 +161,22 @@ export async function createOrganization(name: string, slug: string): Promise<My
   return r.json()
 }
 
+// Phase 3 PR3B: added for the Members & Roles section -- GET
+// /orgs/{org_id}/members has existed since Phase 1 PR2 (routes_orgs.py's
+// list_members), this is simply the first frontend caller of it.
+export interface OrgMember {
+  user_id: number
+  email: string
+  status: string
+  roles: string[]
+}
+
+export async function fetchOrgMembers(orgId: number): Promise<OrgMember[]> {
+  const r = await apiFetch(`/orgs/${orgId}/members`)
+  if (!r.ok) throw new Error(`/orgs/${orgId}/members ${r.status}`)
+  return r.json()
+}
+
 // Phase 3 PR2: platform-admin-only server-side (omnibioai-auth's PATCH
 // /orgs/{org_id} rejects this with 403 for anyone lacking manage_all_orgs
 // -- this function does not and cannot enforce that itself, it just calls

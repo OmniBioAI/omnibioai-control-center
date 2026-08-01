@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
 import { fetchPlatformUserDetail, type PlatformUserDetail } from '../users'
+import { assignUserRole, fetchPlatformRoles, removeUserRole, type RoleSummary } from '../roles'
 import StatusBadge from '../components/StatusBadge'
 import UserOrgMembershipList from '../components/users/UserOrgMembershipList'
 import UserStatusAction from '../components/users/UserStatusAction'
+import RoleAssignmentList from '../components/roles/RoleAssignmentList'
+import RoleSelector from '../components/roles/RoleSelector'
 
 const card: React.CSSProperties = {
   background: 'var(--surface)', border: '1px solid var(--border)',
@@ -62,6 +65,13 @@ export default function UserDetailPage({ userId, onBack }: Props) {
   const [user, setUser] = useState<PlatformUserDetail | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  // Phase 3 PR3B: the role catalog is fetched independently of the user
+  // detail load above -- a failure here degrades the Global Roles section
+  // to a read-only RoleAssignmentList (no role IDs available to remove
+  // by) rather than failing the whole page, since every other field on
+  // this page is unaffected by whether /platform/roles happens to be
+  // reachable.
+  const [roleCatalog, setRoleCatalog] = useState<RoleSummary[] | null>(null)
 
   const load = () => {
     setLoading(true)
@@ -72,6 +82,18 @@ export default function UserDetailPage({ userId, onBack }: Props) {
   }
 
   useEffect(load, [userId])
+  useEffect(() => {
+    fetchPlatformRoles().then(setRoleCatalog).catch(() => setRoleCatalog(null))
+  }, [])
+
+  const handleAssignGlobalRole = async (roleName: string) => {
+    await assignUserRole(userId, roleName)
+    load()
+  }
+  const handleRemoveGlobalRole = async (_roleName: string, roleId: number) => {
+    await removeUserRole(userId, roleId)
+    load()
+  }
 
   if (loading) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted)' }}>Loading user…</div>
   if (err || !user) {
@@ -100,7 +122,6 @@ export default function UserDetailPage({ userId, onBack }: Props) {
         <div style={grid}>
           <Field title="User ID">{user.id}</Field>
           <Field title="Email">{user.email}</Field>
-          <Field title="Global Roles">{user.global_roles.length ? user.global_roles.join(', ') : '—'}</Field>
           <Field title="Created">{user.created_at ? new Date(user.created_at).toLocaleString() : '—'}</Field>
         </div>
         {user.status_changed_at && (
@@ -113,6 +134,20 @@ export default function UserDetailPage({ userId, onBack }: Props) {
         <div style={{ marginTop: 16 }}>
           <UserStatusAction user={user} onChanged={load} />
         </div>
+      </div>
+
+      <div style={{ ...card, marginTop: 16 }}>
+        <div style={{ ...label, marginBottom: 12 }}>Global Roles</div>
+        {roleCatalog ? (
+          <RoleSelector
+            allRoles={roleCatalog}
+            assignedRoleNames={user.global_roles}
+            onAssign={handleAssignGlobalRole}
+            onRemove={handleRemoveGlobalRole}
+          />
+        ) : (
+          <RoleAssignmentList roles={user.global_roles} />
+        )}
       </div>
 
       <div style={{ ...card, marginTop: 16 }}>

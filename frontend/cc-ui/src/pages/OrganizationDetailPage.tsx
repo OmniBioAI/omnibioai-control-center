@@ -1,14 +1,19 @@
 import { useEffect, useState } from 'react'
 import {
   fetchMyOrg,
+  fetchOrgMembers,
   fetchPlatformOrgDetail,
   setOrganizationStatus,
   type MyOrg,
+  type OrgMember,
   type PlatformOrgDetail,
 } from '../organizations'
+import { assignOrgMemberRole, fetchOrgRoles, removeOrgMemberRole, type RoleSummary } from '../roles'
 import { hasPlatformAdminAccess } from '../auth'
 import OrganizationStatusBadge from '../components/organizations/OrganizationStatusBadge'
 import OrganizationSummaryCard from '../components/organizations/OrganizationSummaryCard'
+import RoleAssignmentList from '../components/roles/RoleAssignmentList'
+import RoleSelector from '../components/roles/RoleSelector'
 
 const card: React.CSSProperties = {
   background: 'var(--surface)', border: '1px solid var(--border)',
@@ -144,6 +149,69 @@ function StatusAction({ org, onChanged }: { org: PlatformOrgDetail; onChanged: (
   )
 }
 
+/* ── Phase 3 PR3B: Members & Roles, shared by both views below. Uses
+   GET /orgs/{org_id}/members (Phase 1, existing, newly proxied by this
+   PR) + GET /orgs/{org_id}/roles (new) -- both gated server-side by
+   require_org_permission_or_platform_admin(MANAGE_ORG), the same
+   dependency every other route in this org already uses. A platform
+   admin reaches this via the synthetic-membership bypass (PR0.4); a real
+   org_admin via their own manage_org; a plain org_member (no manage_org)
+   gets 403 from the members fetch, and this section simply doesn't
+   render for them -- not an error state, an expected permission boundary
+   (the org_admin-vs-member distinction), so it fails silent rather than
+   showing an ErrBox that would look like something broke. ──────────── */
+function MembersRolesCard({ orgId }: { orgId: number }) {
+  const [members, setMembers] = useState<OrgMember[] | null>(null)
+  const [roleCatalog, setRoleCatalog] = useState<RoleSummary[] | null>(null)
+  const [hidden, setHidden] = useState(false)
+
+  const loadMembers = () => {
+    fetchOrgMembers(orgId).then(setMembers).catch(() => setHidden(true))
+  }
+
+  useEffect(() => {
+    setHidden(false)
+    setMembers(null)
+    loadMembers()
+    fetchOrgRoles(orgId).then(setRoleCatalog).catch(() => setRoleCatalog(null))
+  }, [orgId])
+
+  if (hidden) return null
+
+  return (
+    <div style={{ ...card, marginTop: 16 }}>
+      <div style={{ ...label, marginBottom: 12 }}>Members & Roles</div>
+      {!members ? (
+        <div style={{ fontSize: 12, color: 'var(--muted)' }}>Loading members…</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {members.map(m => (
+            <div key={m.user_id}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>{m.email}</div>
+              {roleCatalog ? (
+                <RoleSelector
+                  allRoles={roleCatalog}
+                  assignedRoleNames={m.roles}
+                  onAssign={async roleName => {
+                    await assignOrgMemberRole(orgId, m.user_id, roleName)
+                    loadMembers()
+                  }}
+                  onRemove={async (_roleName, roleId) => {
+                    await removeOrgMemberRole(orgId, m.user_id, roleId)
+                    loadMembers()
+                  }}
+                />
+              ) : (
+                <RoleAssignmentList roles={m.roles} />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ── Platform-admin view: GET /platform/orgs/{id} -- full detail. ────── */
 function PlatformDetailView({ orgId, onBack }: Props) {
   const [org, setOrg] = useState<PlatformOrgDetail | null>(null)
@@ -210,6 +278,8 @@ function PlatformDetailView({ orgId, onBack }: Props) {
         <OrganizationSummaryCard title="OAuth Clients" summary={org.oauth_client_summary} />
         <OrganizationSummaryCard title="Licenses" summary={org.license_summary} />
       </div>
+
+      <MembersRolesCard orgId={org.id} />
 
       <div style={{ ...card, marginTop: 16 }}>
         <div style={{ ...label, marginBottom: 12 }}>SSO Configuration</div>
@@ -309,9 +379,13 @@ function MyOrgDetailView({ orgId, onBack }: Props) {
         )}
       </div>
 
+      <MembersRolesCard orgId={org.id} />
+
       <div style={{ marginTop: 16, fontSize: 12, color: 'var(--muted)' }}>
-        Member/team/API-client/license/SSO summaries and platform-admin actions are not available
-        in this view -- see this PR's implementation report for why.
+        Team/API-client/license/SSO summaries and platform-admin status actions are not available
+        in this view -- see this PR's implementation report for why. Members & Roles above appears
+        only if you hold manage_org over this organization (its own GET /orgs/{'{'}org_id{'}'}/members
+        requires it, same as every other org-scoped route).
       </div>
     </div>
   )
