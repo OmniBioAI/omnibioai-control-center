@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { fetchSummary, fetchReportStatus, triggerGenerate } from './api'
-import { getToken, UNAUTHORIZED_EVENT } from './auth'
+import { getToken, clearToken, ensureSession, hasAdminAccess, UNAUTHORIZED_EVENT } from './auth'
+import type { SessionUser } from './auth'
 import Header from './components/Header'
 import type { Tab } from './components/Header'
 import LoginScreen from './components/LoginScreen'
+import AccessDenied from './components/AccessDenied'
 import HealthPage from './pages/HealthPage'
 import DockerPage from './pages/DockerPage'
 import EcosystemPage from './pages/EcosystemPage'
@@ -11,17 +13,68 @@ import ConfigPage from './pages/ConfigPage'
 import LlmPage from './pages/LlmPage'
 import CloudPage from './pages/CloudPage'
 
+type AuthState = 'resolving' | 'anonymous' | 'denied' | 'admin'
+
 export default function App() {
-  const [authed, setAuthed] = useState(() => !!getToken())
+  const [state, setState] = useState<AuthState>('resolving')
+  const [user, setUser] = useState<SessionUser | null>(null)
+
+  const resolve = useCallback(async () => {
+    if (!getToken()) {
+      setState('anonymous')
+      return
+    }
+    const resolved = await ensureSession()
+    setUser(resolved)
+    setState(resolved && hasAdminAccess() ? 'admin' : resolved ? 'denied' : 'anonymous')
+  }, [])
 
   useEffect(() => {
-    const onUnauthorized = () => setAuthed(false)
+    resolve()
+  }, [resolve])
+
+  useEffect(() => {
+    const onUnauthorized = () => {
+      setUser(null)
+      setState('anonymous')
+    }
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
   }, [])
 
-  if (!authed) {
-    return <LoginScreen onSuccess={() => setAuthed(true)} />
+  if (state === 'resolving') {
+    return (
+      <div style={{
+        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'var(--bg)', color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: 13,
+      }}>
+        Authenticating…
+      </div>
+    )
+  }
+
+  if (state === 'anonymous') {
+    return (
+      <LoginScreen
+        onSuccess={(loggedInUser) => {
+          setUser(loggedInUser)
+          setState(loggedInUser && hasAdminAccess() ? 'admin' : loggedInUser ? 'denied' : 'anonymous')
+        }}
+      />
+    )
+  }
+
+  if (state === 'denied') {
+    return (
+      <AccessDenied
+        user={user}
+        onSignOut={() => {
+          clearToken()
+          setUser(null)
+          setState('anonymous')
+        }}
+      />
+    )
   }
 
   return <Dashboard />
