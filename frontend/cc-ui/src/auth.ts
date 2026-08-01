@@ -60,6 +60,35 @@ export function hasPermission(permission: string): boolean {
   return !!cachedUser?.permissions.includes(permission)
 }
 
+// Phase 3 PR0.4's global permission -- checked here exactly as the
+// backend checks it (a permission string, never a role name), never
+// re-derived or guessed. This is a UX signal only: it decides which
+// backend endpoint the Organizations page *tries* first
+// (/platform/orgs vs /orgs), never whether a request is actually
+// allowed -- omnibioai-auth's own require_permission(MANAGE_ALL_ORGS)
+// re-checks this independently and is the only check that matters for
+// security. See OrganizationsPage.tsx.
+export function hasPlatformAdminAccess(): boolean {
+  return hasPermission('manage_all_orgs')
+}
+
+// Phase 3 PR2. Broader than hasAdminAccess(): admits anyone with real
+// organizational context (a member of at least one org, reflected by a
+// non-null orgId -- Phase 1 PR3) in addition to the existing global
+// "admin" role, so the Organizations page has an audience beyond
+// ops staff. This is a deliberate, minimal widening of the single
+// existing App-level gate below, not the full admin.omnibioai.org /
+// control.omnibioai.org build-and-domain split the original Phase 3
+// blueprint (~/phase3_design.md) envisioned for this purpose -- that
+// split has not been implemented in this repository as of this PR
+// (confirmed directly, not assumed) and remains a larger, separate
+// piece of follow-up work; see this PR's implementation report for the
+// full reasoning. Existing ops pages (Health/Docker/Config/LLM/Cloud/
+// Ecosystem) still check hasAdminAccess() specifically, unchanged.
+export function hasOrganizationsAccess(): boolean {
+  return hasAdminAccess() || hasPlatformAdminAccess() || cachedUser?.orgId != null
+}
+
 // Fired whenever a gated request comes back 401 (missing/expired/invalid
 // token) so App.tsx can drop back to the login screen without every
 // call site needing to know about auth.
