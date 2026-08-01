@@ -1,4 +1,4 @@
-export type Tab = 'health' | 'docker' | 'ecosystem' | 'config' | 'llms' | 'cloud'
+export type Tab = 'health' | 'docker' | 'ecosystem' | 'config' | 'llms' | 'cloud' | 'organizations' | 'users'
 
 interface Props {
   tab: Tab
@@ -8,11 +8,25 @@ interface Props {
   reportExists: boolean
   onRefresh: () => void
   onGenerate: () => void
+  // Phase 3 PR2: the existing ops tabs stay admin-role-gated exactly as
+  // before; "Organizations" has a broader audience (org_admin/platform_admin
+  // too, not just the global "admin" role) -- see auth.ts's
+  // hasOrganizationsAccess(). Both default true so every existing caller
+  // of Header (App.test.tsx, any future one that doesn't pass these) keeps
+  // seeing today's full tab set unless explicitly told otherwise.
+  showOpsTabs?: boolean
+  showOrganizationsTab?: boolean
+  // Phase 3 PR3A: narrower than showOrganizationsTab -- platform_admin
+  // only (hasPlatformAdminAccess()), since org_admins have no capability
+  // in this cross-tenant user directory at all (their own org's members
+  // stay reachable via the existing, unrelated /orgs/{id}/members).
+  // Defaults true for the same "unaffected caller" reason as above.
+  showUsersTab?: boolean
 }
 
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
 
-const TABS: { id: Tab; label: string }[] = [
+const OPS_TABS: { id: Tab; label: string }[] = [
   { id: 'health',    label: 'Health Dashboard' },
   { id: 'docker',    label: 'Docker Images' },
   { id: 'ecosystem', label: 'Ecosystem Report' },
@@ -21,14 +35,25 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'cloud',     label: 'Cloud' },
 ]
 
+const ORGANIZATIONS_TAB: { id: Tab; label: string } = { id: 'organizations', label: 'Organizations' }
+const USERS_TAB: { id: Tab; label: string } = { id: 'users', label: 'Users' }
+
 const STATUS_CFG = {
   UP:   { label: 'All systems operational', bg: 'rgba(34,197,94,0.12)',   color: '#22c55e', border: 'rgba(34,197,94,0.3)',   dot: '#22c55e', pulse: true },
   WARN: { label: 'Services degraded',       bg: 'rgba(245,158,11,0.12)',  color: '#f59e0b', border: 'rgba(245,158,11,0.3)',  dot: '#f59e0b', pulse: false },
   DOWN: { label: 'One or more systems down',bg: 'rgba(239,68,68,0.12)',   color: '#ef4444', border: 'rgba(239,68,68,0.3)',   dot: '#ef4444', pulse: false },
 }
 
-export default function Header({ tab, onTab, status, generating, reportExists, onRefresh, onGenerate }: Props) {
+export default function Header({
+  tab, onTab, status, generating, reportExists, onRefresh, onGenerate,
+  showOpsTabs = true, showOrganizationsTab = true, showUsersTab = true,
+}: Props) {
   const sc = status ? STATUS_CFG[status] : null
+  const tabs = [
+    ...(showOpsTabs ? OPS_TABS : []),
+    ...(showOrganizationsTab ? [ORGANIZATIONS_TAB] : []),
+    ...(showUsersTab ? [USERS_TAB] : []),
+  ]
 
   return (
     <header style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100 }}>
@@ -133,7 +158,7 @@ export default function Header({ tab, onTab, status, generating, reportExists, o
         display: 'flex', alignItems: 'stretch',
         padding: '0 28px',
       }}>
-        {TABS.map(t => (
+        {tabs.map(t => (
           <button
             key={t.id}
             onClick={() => onTab(t.id)}

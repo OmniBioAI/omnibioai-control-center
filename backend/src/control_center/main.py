@@ -33,6 +33,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from control_center.api.routes_auth_proxy import router as auth_proxy_router
+from control_center.api.routes_org_proxy import router as org_proxy_router
+from control_center.api.routes_user_proxy import router as user_proxy_router
 from control_center.api.routes_cloud import router as cloud_router
 from control_center.core.auth import require_admin
 from control_center.api.routes_config import router as config_router
@@ -109,6 +111,8 @@ app.include_router(cloud_router)
 app.include_router(reference_router)
 app.include_router(router_storage)
 app.include_router(auth_proxy_router)
+app.include_router(org_proxy_router)
+app.include_router(user_proxy_router)
 
 
 # ==============================================================================
