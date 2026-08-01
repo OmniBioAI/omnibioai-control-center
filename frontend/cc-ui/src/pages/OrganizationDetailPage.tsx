@@ -14,6 +14,7 @@ import OrganizationStatusBadge from '../components/organizations/OrganizationSta
 import OrganizationSummaryCard from '../components/organizations/OrganizationSummaryCard'
 import RoleAssignmentList from '../components/roles/RoleAssignmentList'
 import RoleSelector from '../components/roles/RoleSelector'
+import TeamsCard from '../components/teams/TeamsCard'
 
 const card: React.CSSProperties = {
   background: 'var(--surface)', border: '1px solid var(--border)',
@@ -281,6 +282,8 @@ function PlatformDetailView({ orgId, onBack }: Props) {
 
       <MembersRolesCard orgId={org.id} />
 
+      <TeamsCard orgId={org.id} />
+
       <div style={{ ...card, marginTop: 16 }}>
         <div style={{ ...label, marginBottom: 12 }}>SSO Configuration</div>
         {org.sso.configured ? (
@@ -381,11 +384,14 @@ function MyOrgDetailView({ orgId, onBack }: Props) {
 
       <MembersRolesCard orgId={org.id} />
 
+      <TeamsCard orgId={org.id} />
+
       <div style={{ marginTop: 16, fontSize: 12, color: 'var(--muted)' }}>
-        Team/API-client/license/SSO summaries and platform-admin status actions are not available
-        in this view -- see this PR's implementation report for why. Members & Roles above appears
+        API-client/license/SSO summaries and platform-admin status actions are not available in
+        this view -- see this PR's implementation report for why. Members & Roles above appears
         only if you hold manage_org over this organization (its own GET /orgs/{'{'}org_id{'}'}/members
-        requires it, same as every other org-scoped route).
+        requires it, same as every other org-scoped route). Teams above appears for any member --
+        listing teams only requires org membership, not manage_org.
       </div>
     </div>
   )

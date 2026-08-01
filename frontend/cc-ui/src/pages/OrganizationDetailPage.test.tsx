@@ -7,6 +7,8 @@ import * as organizations from '../organizations'
 import type { PlatformOrgDetail, MyOrg, OrgMember } from '../organizations'
 import * as roles from '../roles'
 import type { RoleSummary } from '../roles'
+import * as teams from '../teams'
+import type { Team } from '../teams'
 
 vi.mock('../auth', async () => {
   const actual = await vi.importActual<typeof import('../auth')>('../auth')
@@ -31,6 +33,17 @@ vi.mock('../roles', async () => {
     fetchOrgRoles: vi.fn(),
     assignOrgMemberRole: vi.fn(),
     removeOrgMemberRole: vi.fn(),
+  }
+})
+
+vi.mock('../teams', async () => {
+  const actual = await vi.importActual<typeof import('../teams')>('../teams')
+  return {
+    ...actual,
+    listTeams: vi.fn(),
+    createTeam: vi.fn(),
+    updateTeamMembers: vi.fn(),
+    deleteTeam: vi.fn(),
   }
 })
 
@@ -60,6 +73,10 @@ const platformDetail: PlatformOrgDetail = {
   status_changed_at: null, status_changed_reason: null, status_changed_by_email: null,
 }
 
+const orgTeams: Team[] = [
+  { id: 1, organization_id: 42, name: 'Genomics', member_user_ids: [7] },
+]
+
 const myOrg: MyOrg = {
   id: 5, slug: 'my-org', name: 'My Org', plan: 'beta', status: 'active',
   status_changed_at: null, status_changed_reason: null, status_changed_by_user_id: null,
@@ -74,12 +91,20 @@ describe('OrganizationDetailPage -- platform admin', () => {
     vi.mocked(roles.fetchOrgRoles).mockReset()
     vi.mocked(roles.assignOrgMemberRole).mockReset()
     vi.mocked(roles.removeOrgMemberRole).mockReset()
+    vi.mocked(teams.listTeams).mockReset()
+    vi.mocked(teams.createTeam).mockReset()
+    vi.mocked(teams.updateTeamMembers).mockReset()
+    vi.mocked(teams.deleteTeam).mockReset()
     // Tests below that don't care about Members & Roles never call
     // fetchOrgMembers explicitly -- default to a rejection so the section
     // hides itself silently, matching what a real 403 for a non-manage_org
     // caller would do, rather than an unhandled-rejection-shaped default.
     vi.mocked(organizations.fetchOrgMembers).mockRejectedValue(new Error('/orgs/x/members 403'))
     vi.mocked(roles.fetchOrgRoles).mockResolvedValue([])
+    // Same reasoning for Teams -- default to an empty list so tests that
+    // don't care about it see "No teams yet." rather than a permanently
+    // pending fetch.
+    vi.mocked(teams.listTeams).mockResolvedValue([])
   })
 
   it('reuses the PR1 detail response directly -- no separate calls invented', async () => {
@@ -136,10 +161,18 @@ describe('OrganizationDetailPage -- platform admin', () => {
     await screen.findByText('Acme Corp')
 
     const orgMemberCheckbox = await screen.findByRole('checkbox', { name: /^org_member\b/ })
+    // Phase 3 PR3C's TeamsCard also independently fetches org members on
+    // mount (its own, separate card, same page) -- so the absolute call
+    // count here is no longer just MembersRolesCard's. Assert the count
+    // increases after the assignment (proving MembersRolesCard refreshed),
+    // not an exact total tied to how many sibling cards happen to exist.
+    const callsBeforeAssign = vi.mocked(organizations.fetchOrgMembers).mock.calls.length
     await user.click(orgMemberCheckbox)
 
     await waitFor(() => expect(roles.assignOrgMemberRole).toHaveBeenCalledWith(42, 7, 'org_member'))
-    await waitFor(() => expect(organizations.fetchOrgMembers).toHaveBeenCalledTimes(2))
+    await waitFor(() =>
+      expect(vi.mocked(organizations.fetchOrgMembers).mock.calls.length).toBeGreaterThan(callsBeforeAssign)
+    )
   })
 
   it('removes an org role from a member', async () => {
@@ -167,6 +200,100 @@ describe('OrganizationDetailPage -- platform admin', () => {
     expect(screen.queryByText('Members & Roles')).not.toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
+
+  // ── Phase 3 PR3C: Teams ─────────────────────────────────────────────────
+
+  it('renders the Teams card with resolved member emails', async () => {
+    vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
+    vi.mocked(organizations.fetchOrgMembers).mockResolvedValue(orgMembers)
+    vi.mocked(teams.listTeams).mockResolvedValue(orgTeams)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} />)
+    await screen.findByText('Acme Corp')
+
+    expect(await screen.findByText('Genomics')).toBeInTheDocument()
+    // member-seven@acme.test renders twice on this page -- once as
+    // MembersRolesCard's own row heading, once as TeamRow's resolved
+    // member email -- both are correct, so assert presence, not a single
+    // match.
+    expect(screen.getAllByText('member-seven@acme.test').length).toBeGreaterThan(0)
+  })
+
+  it('creates a team via the create form and refreshes the list', async () => {
+    const user = userEvent.setup()
+    vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
+    vi.mocked(teams.listTeams).mockResolvedValue([])
+    vi.mocked(teams.createTeam).mockResolvedValue({ id: 2, organization_id: 42, name: 'Proteomics', member_user_ids: [] })
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} />)
+    await screen.findByText('Acme Corp')
+    await screen.findByText('No teams yet.')
+
+    await user.type(screen.getByLabelText('New team name'), 'Proteomics')
+    await user.click(screen.getByRole('button', { name: 'Create Team' }))
+
+    await waitFor(() => expect(teams.createTeam).toHaveBeenCalledWith(42, { name: 'Proteomics' }))
+    await waitFor(() => expect(teams.listTeams).toHaveBeenCalledTimes(2))
+  })
+
+  it('deletes a team after confirmation, not before', async () => {
+    const user = userEvent.setup()
+    vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
+    vi.mocked(organizations.fetchOrgMembers).mockResolvedValue(orgMembers)
+    vi.mocked(teams.listTeams).mockResolvedValue(orgTeams)
+    vi.mocked(teams.deleteTeam).mockResolvedValue(undefined)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} />)
+    await screen.findByText('Genomics')
+
+    const deleteButtons = screen.getAllByRole('button', { name: 'Delete' })
+    await user.click(deleteButtons[deleteButtons.length - 1])
+    expect(teams.deleteTeam).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Confirm delete' }))
+    await waitFor(() => expect(teams.deleteTeam).toHaveBeenCalledWith(42, 1))
+  })
+
+  it('edits team members via the member selector, full-replacing the list', async () => {
+    const user = userEvent.setup()
+    vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
+    vi.mocked(organizations.fetchOrgMembers).mockResolvedValue([
+      ...orgMembers,
+      { user_id: 9, email: 'second-member@acme.test', status: 'active', roles: ['org_member'] },
+    ])
+    vi.mocked(teams.listTeams).mockResolvedValue(orgTeams)
+    vi.mocked(teams.updateTeamMembers).mockResolvedValue({ ...orgTeams[0], member_user_ids: [7, 9] })
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} />)
+    await screen.findByText('Genomics')
+
+    await user.click(screen.getByRole('button', { name: 'Edit Members' }))
+    await user.click(screen.getByRole('checkbox', { name: 'second-member@acme.test' }))
+
+    await waitFor(() => expect(teams.updateTeamMembers).toHaveBeenCalledWith(42, 1, [7, 9]))
+  })
+
+  it('hides the Teams card entirely when the teams fetch itself is forbidden', async () => {
+    vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
+    vi.mocked(teams.listTeams).mockRejectedValue(new Error('/orgs/42/teams 403'))
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} />)
+    await screen.findByText('Acme Corp')
+
+    await waitFor(() => expect(teams.listTeams).toHaveBeenCalled())
+    // Not 'Teams' -- OrganizationSummaryCard already renders that exact
+    // text as its own, unrelated summary-tile title (org.team_summary),
+    // regardless of whether TeamsCard renders at all. "New team name" is
+    // unique to TeamsCard's own create form.
+    expect(screen.queryByLabelText('New team name')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('falls back to raw user ids and disables member editing when the org roster is unavailable', async () => {
+    vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
+    vi.mocked(organizations.fetchOrgMembers).mockRejectedValue(new Error('/orgs/42/members 403'))
+    vi.mocked(teams.listTeams).mockResolvedValue(orgTeams)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} />)
+    await screen.findByText('Genomics')
+
+    expect(await screen.findByText('User #7')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Edit Members' })).not.toBeInTheDocument()
+  })
 })
 
 describe('OrganizationDetailPage -- organization admin', () => {
@@ -178,8 +305,13 @@ describe('OrganizationDetailPage -- organization admin', () => {
     vi.mocked(roles.fetchOrgRoles).mockReset()
     vi.mocked(roles.assignOrgMemberRole).mockReset()
     vi.mocked(roles.removeOrgMemberRole).mockReset()
+    vi.mocked(teams.listTeams).mockReset()
+    vi.mocked(teams.createTeam).mockReset()
+    vi.mocked(teams.updateTeamMembers).mockReset()
+    vi.mocked(teams.deleteTeam).mockReset()
     vi.mocked(organizations.fetchOrgMembers).mockRejectedValue(new Error('/orgs/x/members 403'))
     vi.mocked(roles.fetchOrgRoles).mockResolvedValue([])
+    vi.mocked(teams.listTeams).mockResolvedValue([])
   })
 
   it('uses GET /orgs/{id} and shows only what OrganizationOut provides -- no summaries invented', async () => {
@@ -204,5 +336,19 @@ describe('OrganizationDetailPage -- organization admin', () => {
     render(<OrganizationDetailPage orgId={777} onBack={vi.fn()} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('404')
     expect(screen.queryByText('My Org')).not.toBeInTheDocument()
+  })
+
+  // Phase 3 PR3C: Teams also appears in the org-admin view -- listing
+  // teams only requires org membership, not manage_org, unlike Members &
+  // Roles above (which does require it, and stays absent for a plain
+  // member -- see MyOrgDetailView's own note in the page component).
+  it('shows the Teams card for an org-admin/member viewing their own org', async () => {
+    vi.mocked(organizations.fetchMyOrg).mockResolvedValue(myOrg)
+    vi.mocked(teams.listTeams).mockResolvedValue(orgTeams)
+    render(<OrganizationDetailPage orgId={5} onBack={vi.fn()} />)
+    await screen.findByText('My Org')
+
+    expect(await screen.findByText('Genomics')).toBeInTheDocument()
+    expect(teams.listTeams).toHaveBeenCalledWith(5)
   })
 })
