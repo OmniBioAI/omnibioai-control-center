@@ -27,6 +27,134 @@ The Control Center is a FastAPI service that aggregates health status across all
 ![Architecture](images/OmniBioAI_ecosystem_architecture_diagram.png)
 ---
 
+## Authentication
+
+Control Center delegates all authentication to `omnibioai-auth`; it never
+verifies a password or issues a token itself. It plays two distinct roles:
+
+1. **Same-origin proxy for the browser** — `routes_auth_proxy.py` relays
+   `/auth/login`, `/auth/refresh`, `/auth/logout`, and `/auth/validate`
+   straight through to auth-service, existing purely because
+   `control.omnibioai.org`'s ingress reaches this service directly,
+   bypassing the nginx router that fronts every other domain's `/auth/*`
+   path.
+2. **Local verifier for its own admin-gated endpoints** — `require_admin`
+   (`core/auth.py`) independently checks every write endpoint's bearer
+   token, rather than trusting the proxy hop above.
+
+### Login
+
+The Admin tab's login form (or the omnibioai-studio SPA sharing the same
+origin) `POST`s credentials through this service's `/auth/login` proxy.
+auth-service authenticates and returns an `access_token` in the JSON body
+*and* sets the `omnibioai_session` cookie on the response — the proxy
+relays that `Set-Cookie` back to the browser rather than dropping it.
+
+### Browser session
+
+The frontend (`frontend/cc-ui/src/auth.ts`) keeps only the short-lived
+**access token** client-side, in `localStorage` (`omnibioai_access_token`)
+— attached as `Authorization: Bearer <token>` on every gated request. It
+never reads, stores, or forwards the refresh token: that lives solely in
+the `HttpOnly` `omnibioai_session` cookie the browser attaches
+automatically to same-origin requests, invisible to page JavaScript.
+
+### Refresh flow
+
+The frontend decodes the access token's own `exp` claim (no signature
+check needed — it's opaque either way until the server re-validates it)
+and schedules a silent refresh ~60 seconds before it expires. That refresh
+call sends an **empty body** to `/auth/refresh` — the browser's
+`omnibioai_session` cookie is what actually authorizes the rotation; the
+proxy relays the incoming `Cookie` header upstream and the rotated
+`Set-Cookie` back downstream. A failed refresh (missing/expired/revoked
+session) forces a return to the login screen; a network-level failure
+fails open and simply lets the current access token run out naturally.
+
+### Logout
+
+`POST /auth/logout` (via the proxy) sends only the access token in the
+body — the refresh token is never available to send, since it's cookie-only.
+The proxy fills in `refresh_token` server-side from the
+`omnibioai_session` cookie before forwarding to auth-service, which
+revokes it, blacklists the access token's `jti`, and clears the cookie;
+the frontend clears its own `localStorage` entry regardless of whether the
+network call itself succeeded.
+
+### Admin authorization
+
+`require_admin` (`core/auth.py`) gates every write endpoint (see the
+"Admin-gated" markers in [API Endpoints](#api-endpoints)):
+
+```
+verify token
+      │
+      ▼
+check roles
+      │
+      ▼
+allow / deny
+```
+
+It parses the `Authorization` header, delegates signature/expiry/type/
+claim/revocation verification to `core/jwt_verify.py`, and then makes its
+own decision: 401 if the token itself is invalid, 403 if it's valid but
+lacks the `admin` role. This runs independently of nginx's own
+`auth_request` check in front of `/_svc/control` — so a misconfigured
+nginx rule alone can never expose a write endpoint, since this service
+checks the specific role itself either way.
+
+### JWT verification
+
+`core/jwt_verify.py` is this service's own local copy of the shared
+verification logic (structurally identical to
+[omnibioai-security-audit](../omnibioai-security-audit)'s) — it does not
+call back into auth-service on every request. It checks signature,
+expiry, token type (rejects a presented refresh token), the required
+`sub` claim, and Redis jti-blacklist revocation, dispatched by each
+token's own `alg` header (see RS256 readiness below).
+
+### Redis revocation
+
+The same jti-blacklist auth-service writes to on logout
+(`blacklist:jti:{jti}`) is checked here directly against the same Redis
+instance — **fail-open** on a Redis error, matching auth-service's own
+documented tradeoff: a Redis blip must not 401 every admin request in
+this service either.
+
+### RS256 readiness
+
+`core/jwt_verify.py` verifies both HS256 (today's production default) and
+RS256 (auth-service's `/.well-known/jwks.json`, once
+`JWT_ALGORITHM=RS256` is enabled there), dispatched by each token's own
+`alg` header — never by local configuration. An RS256 token's `kid` is
+resolved against a cached, auto-refreshing JWKS client; any signature or
+JWKS-fetch failure fails closed. No production deployment has switched
+issuance to RS256 yet — see [omnibioai-auth's README](../omnibioai-auth#jwt)
+and the ecosystem root README's Deployment Notes.
+
+### Authentication sequence
+
+```
+Browser
+   │
+   ▼
+Control Center            (routes_auth_proxy.py — same-origin relay)
+   │
+   ▼
+Auth Service               (omnibioai-auth — authenticates, issues tokens)
+   │
+   ▼
+JWT                        access_token in JSON body (Authorization: Bearer, 15 min)
+   │
+   ▼
+Refresh Cookie              omnibioai_session (HttpOnly, Secure, SameSite=Lax) —
+                             relayed browser ↔ Control Center ↔ Auth Service,
+                             drives the silent-refresh flow above
+```
+
+---
+
 ## Repository Structure
 
 ```text
@@ -283,6 +411,8 @@ uvicorn control_center.main:app --host 0.0.0.0 --port 7070 --reload
 | `REPORT_SCHEDULE_HOURS` | `6`                           | Auto-regenerate report every N hours |
 | `WORK_DIR`              | `/workspace/omnibioai-work`   | Path to work/output directory, **container-internal** (same `/workspace` mount as `WORKSPACE_ROOT` above) — on the host this resolves to `${MACHINE_DIR}/omnibioai-work` |
 | `JWT_SECRET`            | `change-me`                   | Shared HS256 secret for validating admin JWTs locally (`require_admin`) — same value as `AUTH_SECRET_KEY` used by omnibioai-auth/workbench/api-gateway/model-registry |
+| `JWKS_URL`               | `https://auth.omnibioai.org/.well-known/jwks.json` | RS256 verification (not yet enabled in production) — see [Authentication](#authentication) |
+| `JWKS_TIMEOUT_SECONDS` / `JWKS_CACHE_TTL_SECONDS` | `5` / `300`  | JWKS fetch timeout and key-set cache lifetime |
 | `CRONTAB_SPOOL_PATH`    | `/var/spool/cron/crontabs/manish` | Host crontab spool file, bind-mounted in so `/cron/jobs/{id}/pause\|resume\|schedule` can read/write it directly |
 | `DISCORD_ALERT_WEBHOOK_URL` | *(empty)*                 | Discord webhook for new high-severity known-issue alerts — empty disables alerting gracefully, same pattern as `SENTRY_DSN` |
 
@@ -334,7 +464,18 @@ The report is a single interactive HTML file with a left sidebar-nav layout (not
 
 ### Admin access
 
-The Admin tab shares its session with the omnibioai-studio SPA: it reads the same `omnibioai_access_token` from `localStorage`, so an existing Studio login is recognized automatically (same origin, no separate sign-in needed). If no token is present, the tab shows a login form that posts directly to `/auth/login`; if a token is present but lacks the `admin` role, the tab renders everything read-only with an explicit "admin access required" message instead of showing controls that would just fail. A 401 on any admin action (e.g. the 15-minute access-token expiry) clears the stored token and re-prompts for login rather than failing silently.
+See [Authentication](#authentication) above for the full login/refresh/logout
+flow. In short: when embedded as an iframe under omnibioai-studio's web
+build (same origin, `/_svc/control`), the Admin tab reads the same
+`omnibioai_access_token` `localStorage` entry Studio already wrote, so an
+existing Studio login is recognized automatically with no separate
+sign-in. If no token is present, the tab shows a login form that posts
+directly to `/auth/login`; if a token is present but lacks the `admin`
+role, the tab renders everything read-only with an explicit "admin access
+required" message instead of showing controls that would just fail. The
+scheduled silent refresh (see Authentication) keeps the session alive
+across the 15-minute access-token TTL; only an unrecoverable 401 (refresh
+itself failed) clears the stored token and re-prompts for login.
 
 ### Known-issue Discord alerts
 
@@ -481,6 +622,8 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 | Prometheus metrics (/metrics) | ✓ Stable |
 | Scheduled report generation | ✓ Stable |
 | JWT authentication (via nginx) | ✓ Stable |
+| Browser session cookie + silent refresh | ✓ Stable |
+| RS256/JWKS verification (local `jwt_verify.py`) | ✓ Ready — HS256 still the production default |
 | Admin-role gating (app-level, defense-in-depth) | ✓ Stable |
 | Admin tab — Actions (report/coverage regen) | ✓ Stable |
 | Admin tab — Scheduled Jobs (7 cron jobs, pause/resume/reschedule) | ✓ Stable |
