@@ -1,23 +1,144 @@
 // Admin-login flow for cc-ui's own gated endpoints (/summary, /config,
 // /docker/*, /services -- see main.py's require_admin gate).
 // Same localStorage key name as workbench's lib/web/session.js so a
-// future shared-cookie SSO pass can line the two up; this flow itself
-// stays local-only (no cookie mirroring) since cc-ui is served standalone
-// at control.omnibioai.org, not just under webstudio's /_svc/control.
+// future shared-cookie SSO pass can line the two up.
 const TOKEN_KEY = 'omnibioai_access_token'
 
+// SSO Phase 2 PR13: the refresh token is deliberately NEVER stored here
+// (or anywhere else in JS-reachable storage). PR10 made auth-service set
+// it as a second, server-set, HttpOnly `omnibioai_session` cookie
+// (Domain=.omnibioai.org) on every /auth/login and /auth/refresh
+// response; PR13's own hardening (routes_auth_proxy.py::_proxy_to_auth,
+// backend repo) makes that cookie actually reach the browser through
+// this app's own login/refresh proxy calls too. A browser holding that
+// cookie sends it automatically on every same-origin request -- no JS
+// needs to read, store, or forward it, and per the security requirement
+// this PR was given, none does. PR5 (this file's previous version) did
+// store it in localStorage, matching the ecosystem's pre-cookie
+// convention at the time; that duplication is exactly what this PR
+// removes now that the cookie exists.
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY)
 }
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY)
+  cancelScheduledRefresh()
   cachedUser = null
 }
 
 export function authHeaders(): Record<string, string> {
   const token = getToken()
   return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+// ── Silent refresh ───────────────────────────────────────────────────────
+//
+// workbench's lib/web/session.js already has a working refresh() (POSTs
+// /auth/refresh, rotates the stored tokens) but nothing in that app's own
+// UI ever calls it proactively -- no timer, no interceptor (confirmed by
+// grep across src/ui; only its logout() is actually wired to a button).
+// This service does schedule it: the access token's own `exp` claim is
+// decoded client-side (no signature verification needed for scheduling
+// purposes -- the token is opaque to us either way until the server
+// re-validates it) and a refresh is scheduled a little before it expires.
+const REFRESH_BUFFER_MS = 60_000 // refresh 60s before actual expiry
+
+let refreshTimer: ReturnType<typeof setTimeout> | null = null
+
+function cancelScheduledRefresh(): void {
+  if (refreshTimer) {
+    clearTimeout(refreshTimer)
+    refreshTimer = null
+  }
+}
+
+function decodeExpiry(token: string): number | null {
+  try {
+    const payloadSegment = token.split('.')[1]
+    if (!payloadSegment) return null
+    const base64 = payloadSegment.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4)
+    const payload = JSON.parse(atob(padded))
+    return typeof payload.exp === 'number' ? payload.exp : null
+  } catch {
+    return null
+  }
+}
+
+function scheduleRefresh(accessToken: string): void {
+  cancelScheduledRefresh()
+  const exp = decodeExpiry(accessToken)
+  if (exp == null) return // no usable exp claim -- nothing to schedule against
+  const msUntilExpiry = exp * 1000 - Date.now()
+  const delay = Math.max(msUntilExpiry - REFRESH_BUFFER_MS, 0)
+  refreshTimer = setTimeout(() => {
+    void refreshAccessToken()
+  }, delay)
+}
+
+function persistAccessToken(accessToken: string): void {
+  localStorage.setItem(TOKEN_KEY, accessToken)
+  scheduleRefresh(accessToken)
+}
+
+// Attempts to rotate the access token. SSO Phase 2 PR13: no refresh_token
+// in the request body at all -- the browser attaches the omnibioai_session
+// cookie automatically (same-origin request), and the backend proxy
+// (routes_auth_proxy.py) forwards it to auth-service, whose own
+// /auth/refresh already has a body-or-cookie fallback (PR10). A non-ok
+// server response means there's no usable session (missing/expired/
+// revoked) -- forces logout (reportUnauthorized), matching workbench's
+// refresh()'s own "!res.ok -> clearSession()" behavior. A network/parse
+// failure fails open (no forced logout, mirrors validateSession's own
+// "don't punish an offline blip") -- no retry is scheduled for that case;
+// the next mount (ensureSession) or the token's natural expiry
+// re-establishes scheduling or forces a real login.
+async function refreshAccessToken(): Promise<void> {
+  try {
+    const r = await fetch('/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    if (!r.ok) {
+      reportUnauthorized()
+      return
+    }
+    const data = await r.json().catch(() => ({}))
+    if (!data.access_token) {
+      reportUnauthorized()
+      return
+    }
+    persistAccessToken(data.access_token)
+  } catch {
+    // network/parse failure -- fail open, see comment above
+  }
+}
+
+// Explicit, user-initiated sign-out. POSTs /auth/logout with the access
+// token only -- no refresh_token in the body (never stored client-side,
+// per this PR's security requirement); the backend proxy fills it in
+// server-side from the omnibioai_session cookie the browser already
+// attached to this request. Revokes the refresh token server-side and
+// blacklists the access token's jti for its remaining lifetime
+// (routes_auth.py's LogoutRequest/_blacklist_access_token), and the
+// backend proxy also relays auth-service's clearing Set-Cookie back to
+// this browser -- see routes_auth_proxy.py. Fails open on any network/
+// server error -- never let a logout attempt get stuck; clearToken()
+// below always runs regardless.
+export async function logout(): Promise<void> {
+  const accessToken = getToken()
+  try {
+    await fetch('/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ access_token: accessToken }),
+    })
+  } catch {
+    // fail open -- clearToken() below still runs
+  }
+  clearToken()
 }
 
 // ── Session (omnibioai-auth Phase 1 PR3: org-aware JWT) ─────────────────────
@@ -130,6 +251,11 @@ async function validateSession(token: string): Promise<SessionUser | null> {
       orgRoles: data.org_role ?? [],
       schemaVersion: data.schema_version ?? 1,
     }
+    // SSO Phase 2 PR5: (re)schedule silent refresh here rather than only
+    // after login -- validateSession also runs on every app mount
+    // (ensureSession), so a token restored from localStorage after a
+    // browser restart gets scheduling too, not just a freshly issued one.
+    scheduleRefresh(token)
     return cachedUser
   } catch {
     // Network/parse failure -- leave the token in place (don't punish an
@@ -156,6 +282,13 @@ export async function login(email: string, password: string): Promise<SessionUse
   if (!body.access_token) {
     throw new Error('Login response missing access_token')
   }
-  localStorage.setItem(TOKEN_KEY, body.access_token)
+  // SSO Phase 2 PR13: the response still includes refresh_token (auth-
+  // service's response contract is unchanged -- routes_auth.py's
+  // LoginResponse), but it's deliberately not read/stored here. The
+  // browser already received it as the omnibioai_session HttpOnly cookie
+  // via this same response (PR10 sets it server-side; PR13's backend
+  // proxy fix relays it through) -- storing it again in localStorage
+  // would duplicate a secret this app has no need to ever see in JS.
+  persistAccessToken(body.access_token)
   return validateSession(body.access_token)
 }

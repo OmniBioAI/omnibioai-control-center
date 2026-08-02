@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { fetchSummary, fetchReportStatus, triggerGenerate } from './api'
 import {
-  getToken, clearToken, ensureSession, hasAdminAccess, hasOrganizationsAccess,
+  getToken, logout, ensureSession, hasAdminAccess, hasOrganizationsAccess,
   hasPlatformAdminAccess, UNAUTHORIZED_EVENT,
 } from './auth'
 import type { SessionUser } from './auth'
@@ -88,7 +88,11 @@ export default function App() {
       <AccessDenied
         user={user}
         onSignOut={() => {
-          clearToken()
+          // SSO Phase 2 PR5: logout() now also revokes the refresh token
+          // and blacklists the access token server-side (POST
+          // /auth/logout) before doing the same local clear this already
+          // did -- fire-and-forget, matches workbench's own sign-out.
+          void logout()
           setUser(null)
           setState('anonymous')
         }}

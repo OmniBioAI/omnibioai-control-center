@@ -15,7 +15,7 @@ from pathlib import Path
 import jwt
 from fastapi.testclient import TestClient
 
-from control_center.core.auth import JWT_SECRET
+from control_center.core.jwt_verify import JWT_SECRET
 from control_center.main import app
 
 client = TestClient(app)

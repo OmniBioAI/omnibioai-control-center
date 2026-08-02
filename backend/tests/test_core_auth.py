@@ -14,6 +14,7 @@ import jwt
 from fastapi import HTTPException
 
 from control_center.core import auth as auth_module
+from control_center.core import jwt_verify as jwt_verify_module
 
 SECRET = "test-secret"
 
@@ -25,7 +26,9 @@ def _token(**claims) -> str:
 class TestRequireAdmin(unittest.TestCase):
 
     def setUp(self) -> None:
-        patcher = patch.object(auth_module, "JWT_SECRET", SECRET)
+        # SSO Phase 2 PR3: decoding now happens in core.jwt_verify, not
+        # core.auth -- auth_module no longer has its own JWT_SECRET.
+        patcher = patch.object(jwt_verify_module, "JWT_SECRET", SECRET)
         patcher.start()
         self.addCleanup(patcher.stop)
 

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import jwt
 from fastapi.testclient import TestClient
 import control_center.main as main_module
-from control_center.core.auth import JWT_SECRET
+from control_center.core.jwt_verify import JWT_SECRET
 from control_center.main import _JobState, _workspace_root, app
 
 client = TestClient(app)
