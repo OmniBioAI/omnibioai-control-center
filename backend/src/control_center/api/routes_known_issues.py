@@ -16,7 +16,7 @@ from control_center.checks.known_issues import (
     list_known_issues,
     update_known_issue,
 )
-from control_center.core.auth import require_admin
+from control_center.core.auth import require_permission
 
 router = APIRouter()
 
@@ -56,8 +56,12 @@ def known_issues_list() -> JSONResponse:
 
 @router.post("/known-issues")
 def known_issues_create(
-    body: KnownIssueCreate, _admin: dict = Depends(require_admin),
+    body: KnownIssueCreate, _admin: dict = Depends(require_permission("platform.manage_content")),
 ) -> JSONResponse:
+    # AUDIT_EVENT integration point: PR3D leaves this a comment, not a
+    # call -- IAM's persistent audit ledger (PR9) has no client library
+    # this repo can import yet. Once one exists, emit here with
+    # actor=_admin["sub"], action="known_issue.create".
     try:
         issue = create_known_issue(_issues_path(), body.model_dump())
     except KnownIssueError as e:
@@ -67,8 +71,10 @@ def known_issues_create(
 
 @router.put("/known-issues/{issue_id}")
 def known_issues_update(
-    issue_id: str, body: KnownIssueUpdate, _admin: dict = Depends(require_admin),
+    issue_id: str, body: KnownIssueUpdate, _admin: dict = Depends(require_permission("platform.manage_content")),
 ) -> JSONResponse:
+    # AUDIT_EVENT integration point: see known_issues_create above --
+    # actor=_admin["sub"], action="known_issue.update", target=issue_id.
     try:
         issue = update_known_issue(_issues_path(), issue_id, body.model_dump())
     except KnownIssueError as e:
@@ -77,7 +83,9 @@ def known_issues_update(
 
 
 @router.delete("/known-issues/{issue_id}")
-def known_issues_delete(issue_id: str, _admin: dict = Depends(require_admin)):
+def known_issues_delete(issue_id: str, _admin: dict = Depends(require_permission("platform.manage_content"))):
+    # AUDIT_EVENT integration point: see known_issues_create above --
+    # actor=_admin["sub"], action="known_issue.delete", target=issue_id.
     try:
         delete_known_issue(_issues_path(), issue_id)
     except KnownIssueError as e:

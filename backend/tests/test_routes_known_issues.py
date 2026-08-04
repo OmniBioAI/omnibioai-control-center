@@ -23,12 +23,44 @@ client = TestClient(app)
 
 
 def _admin_headers() -> dict:
-    token = jwt.encode({"sub": "1", "roles": ["admin"]}, JWT_SECRET, algorithm="HS256")
+    token = jwt.encode(
+        {
+            "sub": "1",
+            "roles": ["admin"],
+            "permissions": [
+                "platform.manage_infra",
+                "platform.manage_cron",
+                "platform.manage_content",
+            ],
+        },
+        JWT_SECRET, algorithm="HS256",
+    )
     return {"Authorization": f"Bearer {token}"}
 
 
 def _user_headers() -> dict:
-    token = jwt.encode({"sub": "2", "roles": ["user"]}, JWT_SECRET, algorithm="HS256")
+    token = jwt.encode({"sub": "2", "roles": ["user"], "permissions": []}, JWT_SECRET, algorithm="HS256")
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _admin_role_without_content_permission_headers() -> dict:
+    """PR3D regression fixture: an "admin"-role token that lacks the
+    platform.manage_content permission specifically -- proves the route no
+    longer falls back to a role-string check."""
+    token = jwt.encode(
+        {"sub": "3", "roles": ["admin"], "permissions": ["platform.manage_infra"]},
+        JWT_SECRET, algorithm="HS256",
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _cron_only_headers() -> dict:
+    """PR3D isolation fixture: holds platform.manage_cron but not
+    platform.manage_content -- must not be able to mutate known issues."""
+    token = jwt.encode(
+        {"sub": "4", "permissions": ["platform.manage_cron"]},
+        JWT_SECRET, algorithm="HS256",
+    )
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -72,6 +104,20 @@ class TestKnownIssuesRoutes(unittest.TestCase):
     def test_post_requires_admin_403_for_non_admin(self) -> None:
         self._write([])
         resp = client.post("/known-issues", json={"title": "x"}, headers=_user_headers())
+        self.assertEqual(resp.status_code, 403)
+
+    def test_post_403_for_admin_role_without_content_permission(self) -> None:
+        self._write([])
+        resp = client.post(
+            "/known-issues", json={"title": "x"}, headers=_admin_role_without_content_permission_headers(),
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_post_403_for_cron_permission_only(self) -> None:
+        """Isolation: platform.manage_cron must not satisfy the
+        platform.manage_content check this route requires."""
+        self._write([])
+        resp = client.post("/known-issues", json={"title": "x"}, headers=_cron_only_headers())
         self.assertEqual(resp.status_code, 403)
 
     def test_post_creates_issue_as_admin(self) -> None:

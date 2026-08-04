@@ -15,7 +15,7 @@ from control_center.checks.cron_jobs import (
     resume_job,
     update_schedule,
 )
-from control_center.core.auth import require_admin
+from control_center.core.auth import require_permission
 
 router = APIRouter()
 
@@ -48,7 +48,11 @@ def cron_job_log(job_id: str, lines: int = 100) -> JSONResponse:
     return JSONResponse(result)
 
 @router.post("/cron/jobs/{job_id}/pause")
-def cron_job_pause(job_id: str, _admin: dict = Depends(require_admin)) -> JSONResponse:
+def cron_job_pause(job_id: str, _admin: dict = Depends(require_permission("platform.manage_cron"))) -> JSONResponse:
+    # AUDIT_EVENT integration point: PR3D leaves this a comment, not a call
+    # -- IAM's persistent audit ledger (PR9) has no client library this
+    # repo can import yet. Once one exists, emit here with actor=_admin["sub"],
+    # action="cron.pause", target=job_id.
     try:
         result = pause_job(_spool_path(), job_id)
     except CronMutationError as e:
@@ -57,7 +61,9 @@ def cron_job_pause(job_id: str, _admin: dict = Depends(require_admin)) -> JSONRe
 
 
 @router.post("/cron/jobs/{job_id}/resume")
-def cron_job_resume(job_id: str, _admin: dict = Depends(require_admin)) -> JSONResponse:
+def cron_job_resume(job_id: str, _admin: dict = Depends(require_permission("platform.manage_cron"))) -> JSONResponse:
+    # AUDIT_EVENT integration point: see cron_job_pause above --
+    # actor=_admin["sub"], action="cron.resume", target=job_id.
     try:
         result = resume_job(_spool_path(), job_id)
     except CronMutationError as e:
@@ -67,8 +73,11 @@ def cron_job_resume(job_id: str, _admin: dict = Depends(require_admin)) -> JSONR
 
 @router.put("/cron/jobs/{job_id}/schedule")
 def cron_job_schedule(
-    job_id: str, body: ScheduleUpdate, _admin: dict = Depends(require_admin),
+    job_id: str, body: ScheduleUpdate, _admin: dict = Depends(require_permission("platform.manage_cron")),
 ) -> JSONResponse:
+    # AUDIT_EVENT integration point: see cron_job_pause above --
+    # actor=_admin["sub"], action="cron.schedule_update", target=job_id,
+    # detail=body.schedule.
     try:
         result = update_schedule(_spool_path(), job_id, body.schedule)
     except CronMutationError as e:
