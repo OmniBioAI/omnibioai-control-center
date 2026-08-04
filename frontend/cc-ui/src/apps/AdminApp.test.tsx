@@ -1,11 +1,17 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import App from './App'
-import * as auth from './auth'
-import type { SessionUser } from './auth'
+import AdminApp from './AdminApp'
+import * as auth from '../auth'
+import type { SessionUser } from '../auth'
 
-vi.mock('./auth', async () => {
-  const actual = await vi.importActual<typeof import('./auth')>('./auth')
+// Admin Console dual build architecture: this file is the pre-split
+// App.test.tsx, relocated unchanged (import paths adjusted for the new
+// src/apps/ location only) -- AdminApp.tsx is App.tsx's exact prior
+// behavior, so its test coverage transfers directly. See
+// ControlApp.test.tsx for the new build's own coverage.
+
+vi.mock('../auth', async () => {
+  const actual = await vi.importActual<typeof import('../auth')>('../auth')
   return {
     ...actual,
     getToken: vi.fn(),
@@ -26,7 +32,7 @@ vi.mock('./auth', async () => {
   }
 })
 
-vi.mock('./api', () => ({
+vi.mock('../api', () => ({
   fetchSummary: vi.fn().mockResolvedValue({ overall_status: 'UP' }),
   fetchReportStatus: vi.fn().mockResolvedValue({ report_exists: false, status: 'idle' }),
   triggerGenerate: vi.fn(),
@@ -38,18 +44,18 @@ vi.mock('./api', () => ({
 // Dashboard, not Dashboard's contents. vi.mock calls are hoisted above
 // this module's own code, so each target must be a static string literal
 // (no loop over a runtime array of names).
-vi.mock('./pages/HealthPage', () => ({ default: () => <div data-testid="HealthPage" /> }))
-vi.mock('./pages/DockerPage', () => ({ default: () => <div data-testid="DockerPage" /> }))
-vi.mock('./pages/EcosystemPage', () => ({ default: () => <div data-testid="EcosystemPage" /> }))
-vi.mock('./pages/ConfigPage', () => ({ default: () => <div data-testid="ConfigPage" /> }))
-vi.mock('./pages/LlmPage', () => ({ default: () => <div data-testid="LlmPage" /> }))
-vi.mock('./pages/CloudPage', () => ({ default: () => <div data-testid="CloudPage" /> }))
-vi.mock('./pages/OrganizationsPage', () => ({ default: () => <div data-testid="OrganizationsPage" /> }))
-vi.mock('./pages/OrganizationDetailPage', () => ({
+vi.mock('../pages/HealthPage', () => ({ default: () => <div data-testid="HealthPage" /> }))
+vi.mock('../pages/DockerPage', () => ({ default: () => <div data-testid="DockerPage" /> }))
+vi.mock('../pages/EcosystemPage', () => ({ default: () => <div data-testid="EcosystemPage" /> }))
+vi.mock('../pages/ConfigPage', () => ({ default: () => <div data-testid="ConfigPage" /> }))
+vi.mock('../pages/LlmPage', () => ({ default: () => <div data-testid="LlmPage" /> }))
+vi.mock('../pages/CloudPage', () => ({ default: () => <div data-testid="CloudPage" /> }))
+vi.mock('../pages/OrganizationsPage', () => ({ default: () => <div data-testid="OrganizationsPage" /> }))
+vi.mock('../pages/OrganizationDetailPage', () => ({
   default: ({ orgId }: { orgId: number }) => <div data-testid="OrganizationDetailPage" data-org-id={orgId} />,
 }))
-vi.mock('./pages/UsersPage', () => ({ default: () => <div data-testid="UsersPage" /> }))
-vi.mock('./pages/UserDetailPage', () => ({
+vi.mock('../pages/UsersPage', () => ({ default: () => <div data-testid="UsersPage" /> }))
+vi.mock('../pages/UserDetailPage', () => ({
   default: ({ userId }: { userId: number }) => <div data-testid="UserDetailPage" data-user-id={userId} />,
 }))
 
@@ -62,7 +68,7 @@ const nonAdmin: SessionUser = {
   permissions: [], orgId: null, orgRoles: [], schemaVersion: 2,
 }
 
-describe('App auth gate', () => {
+describe('AdminApp auth gate', () => {
   beforeEach(() => {
     vi.mocked(auth.getToken).mockReset()
     vi.mocked(auth.ensureSession).mockReset()
@@ -74,7 +80,7 @@ describe('App auth gate', () => {
 
   it('shows the login screen when there is no token', async () => {
     vi.mocked(auth.getToken).mockReturnValue(null)
-    render(<App />)
+    render(<AdminApp />)
     expect(await screen.findByText(/Ecosystem Management Console/)).toBeInTheDocument()
   })
 
@@ -83,7 +89,7 @@ describe('App auth gate', () => {
     vi.mocked(auth.ensureSession).mockResolvedValue(nonAdmin)
     vi.mocked(auth.hasAdminAccess).mockReturnValue(false)
 
-    render(<App />)
+    render(<AdminApp />)
     expect(
       await screen.findByText('Your account does not have permission to access the Admin Portal.')
     ).toBeInTheDocument()
@@ -95,7 +101,7 @@ describe('App auth gate', () => {
     vi.mocked(auth.ensureSession).mockResolvedValue(admin)
     vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
 
-    render(<App />)
+    render(<AdminApp />)
     await waitFor(() => expect(screen.getByTestId('HealthPage')).toBeInTheDocument())
     expect(screen.queryByText('Access Denied')).not.toBeInTheDocument()
   })
@@ -105,7 +111,7 @@ describe('App auth gate', () => {
     vi.mocked(auth.ensureSession).mockResolvedValue(admin)
     vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
 
-    render(<App />)
+    render(<AdminApp />)
     await waitFor(() => expect(screen.getByTestId('HealthPage')).toBeInTheDocument())
 
     act(() => {
@@ -128,7 +134,7 @@ describe('App auth gate', () => {
     vi.mocked(auth.hasAdminAccess).mockReturnValue(false)
     vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
 
-    render(<App />)
+    render(<AdminApp />)
 
     expect(await screen.findByTestId('OrganizationsPage')).toBeInTheDocument()
     expect(screen.queryByText('Access Denied')).not.toBeInTheDocument()
@@ -143,7 +149,7 @@ describe('App auth gate', () => {
     vi.mocked(auth.hasAdminAccess).mockReturnValue(false)
     vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(false)
 
-    render(<App />)
+    render(<AdminApp />)
 
     expect(
       await screen.findByText('Your account does not have permission to access the Admin Portal.')
@@ -157,7 +163,7 @@ describe('App auth gate', () => {
     vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
     vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
 
-    render(<App />)
+    render(<AdminApp />)
 
     const detail = await screen.findByTestId('OrganizationDetailPage')
     expect(detail.getAttribute('data-org-id')).toBe('42')
@@ -172,7 +178,7 @@ describe('App auth gate', () => {
     vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
     vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
 
-    render(<App />)
+    render(<AdminApp />)
 
     expect(await screen.findByTestId('OrganizationsPage')).toBeInTheDocument()
     expect(screen.queryByTestId('OrganizationDetailPage')).not.toBeInTheDocument()
@@ -187,7 +193,7 @@ describe('App auth gate', () => {
     vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
     vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(true)
 
-    render(<App />)
+    render(<AdminApp />)
 
     expect(await screen.findByText('Users')).toBeInTheDocument()
   })
@@ -199,7 +205,7 @@ describe('App auth gate', () => {
     vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
     vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(false)
 
-    render(<App />)
+    render(<AdminApp />)
 
     await screen.findByTestId('OrganizationsPage')
     expect(screen.queryByText('Users')).not.toBeInTheDocument()
@@ -213,7 +219,7 @@ describe('App auth gate', () => {
     vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
     vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(true)
 
-    render(<App />)
+    render(<AdminApp />)
 
     const detail = await screen.findByTestId('UserDetailPage')
     expect(detail.getAttribute('data-user-id')).toBe('17')
@@ -229,7 +235,7 @@ describe('App auth gate', () => {
     vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
     vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(true)
 
-    render(<App />)
+    render(<AdminApp />)
 
     expect(await screen.findByTestId('UsersPage')).toBeInTheDocument()
     expect(screen.queryByTestId('UserDetailPage')).not.toBeInTheDocument()

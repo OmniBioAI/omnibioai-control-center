@@ -1,10 +1,21 @@
-# ── Stage 1: Build React frontend ─────────────────────────────────────────────
+# ── Stage 1: Build React frontend (dual build: admin + control) ───────────────
+# Admin Console dual build architecture: produces two separate build
+# outputs from the same source -- dist-admin/ (admin.omnibioai.org,
+# enterprise console: Organizations/Users/Roles/Teams + ops pages) and
+# dist-control/ (control.omnibioai.org, ops pages only -- Organizations/
+# Users/Roles/Teams code is genuinely absent via dead-code elimination,
+# not just hidden; see docs/admin-console-build.md for how this is
+# verified). `npm run build` (the pre-existing single `dist/` output) is
+# also still run, unchanged, so Stage 3 below -- which already only
+# consumes `dist/` and was not deployed by this build target even before
+# this PR (see docs/admin-console-build.md) -- keeps working exactly as
+# it did before this change.
 FROM --platform=$BUILDPLATFORM node:20-bookworm-slim AS frontend-builder
 WORKDIR /frontend
 COPY frontend/cc-ui/package*.json ./
 RUN npm ci
 COPY frontend/cc-ui/ ./
-RUN npm run build
+RUN npm run build && npm run build:admin && npm run build:control
 
 # ── Stage 2: Python backend ────────────────────────────────────────────────────
 FROM ghcr.io/omnibioai/omnibioai-base:latest AS backend

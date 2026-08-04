@@ -1,0 +1,8 @@
+# Admin Console dual build architecture: build:admin/build:control output.
+# Not committed -- generated fresh by the Dockerfile's frontend-builder
+# stage (or locally via `npm run build:admin` / `npm run build:control`).
+# Deliberately does NOT ignore the pre-existing `dist/` directory, which
+# this repo already tracks in git (a pre-existing convention, unrelated
+# to this PR -- see docs/admin-console-build.md).
+dist-admin/
+dist-control/
