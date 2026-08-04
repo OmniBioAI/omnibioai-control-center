@@ -1,11 +1,18 @@
 import { useEffect, useState } from 'react'
-import { fetchPlatformUserDetail, type PlatformUserDetail } from '../users'
+import { authMethodLabel, fetchPlatformUserDetail, type PlatformUserDetail } from '../users'
 import { assignUserRole, fetchPlatformRoles, removeUserRole, type RoleSummary } from '../roles'
 import StatusBadge from '../components/StatusBadge'
 import UserOrgMembershipList from '../components/users/UserOrgMembershipList'
 import UserStatusAction from '../components/users/UserStatusAction'
 import RoleAssignmentList from '../components/roles/RoleAssignmentList'
 import RoleSelector from '../components/roles/RoleSelector'
+
+function formatDateTime(iso: string | null): string {
+  if (!iso) return 'Not available'
+  return new Date(iso).toLocaleString(undefined, {
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+  })
+}
 
 const card: React.CSSProperties = {
   background: 'var(--surface)', border: '1px solid var(--border)',
@@ -123,6 +130,8 @@ export default function UserDetailPage({ userId, onBack }: Props) {
           <Field title="User ID">{user.id}</Field>
           <Field title="Email">{user.email}</Field>
           <Field title="Created">{user.created_at ? new Date(user.created_at).toLocaleString() : '—'}</Field>
+          <Field title="Last Login">{formatDateTime(user.last_login_at)}</Field>
+          <Field title="Authentication Method">{authMethodLabel(user.authentication_method)}</Field>
         </div>
         {user.status_changed_at && (
           <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--muted)' }}>
@@ -153,6 +162,19 @@ export default function UserDetailPage({ userId, onBack }: Props) {
       <div style={{ ...card, marginTop: 16 }}>
         <div style={{ ...label, marginBottom: 12 }}>Organization Memberships</div>
         <UserOrgMembershipList memberships={user.memberships} />
+      </div>
+
+      {/* PR11.1: read-only security summary -- no MFA controls in this
+          PR (omnibioai-auth has no MFA of any kind to control yet; see
+          docs/admin-console-pr11-identity-findings.md). Just the same
+          two fields already shown above, presented as their own
+          security-focused card per this PR's spec. */}
+      <div style={{ ...card, marginTop: 16 }}>
+        <div style={{ ...label, marginBottom: 12 }}>Authentication</div>
+        <div style={grid}>
+          <Field title="Method">{authMethodLabel(user.authentication_method)}</Field>
+          <Field title="Last Login">{formatDateTime(user.last_login_at)}</Field>
+        </div>
       </div>
     </div>
   )

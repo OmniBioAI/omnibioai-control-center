@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { fetchPlatformUsers, type PlatformUserListResponse, type UserSortField, type SortOrder } from '../users'
+import {
+  authMethodLabel, fetchPlatformUsers,
+  type PlatformUserListResponse, type UserSortField, type SortOrder,
+} from '../users'
+import { fetchPlatformOrgs, type PlatformOrgSummary } from '../organizations'
+import { fetchPlatformRoles, type RoleSummary } from '../roles'
 import StatusBadge from '../components/StatusBadge'
+import { LoadingState, ErrorState, EmptyState } from '../components/ui'
 
 /* ── Shared visual language (matches OrganizationsPage.tsx/DockerPage.tsx) ── */
 const card: React.CSSProperties = {
@@ -23,21 +29,16 @@ const td: React.CSSProperties = {
   fontSize: 12, color: 'var(--text2)', padding: '10px 14px',
   borderBottom: '1px solid var(--border)', verticalAlign: 'middle',
 }
-
-function Loading({ msg }: { msg: string }) {
-  return <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted)', fontSize: 13 }}>{msg}</div>
+const selectStyle: React.CSSProperties = {
+  fontSize: 12, padding: '7px 10px', borderRadius: 8,
+  border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)',
 }
 
-function ErrBox({ msg }: { msg: string }) {
-  return (
-    <div role="alert" style={{
-      padding: '10px 14px', marginBottom: 14, borderRadius: 8,
-      background: 'var(--red-bg)', border: '1px solid var(--red-border, var(--red))',
-      color: 'var(--red)', fontSize: 12,
-    }}>
-      {msg}
-    </div>
-  )
+function formatDateTime(iso: string | null): string {
+  if (!iso) return 'Not available'
+  return new Date(iso).toLocaleString(undefined, {
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+  })
 }
 
 function Pagination({ page, totalPages, onPage }: { page: number; totalPages: number; onPage: (p: number) => void }) {
@@ -81,6 +82,7 @@ function SortHeader({
 }
 
 const PAGE_SIZE = 20
+const ALL_STATUSES = ['active', 'suspended']
 
 interface Props {
   onSelect: (userId: number) => void
@@ -100,13 +102,34 @@ export default function UsersPage({ onSelect }: Props) {
   const [sortBy, setSortBy] = useState<UserSortField>('created_at')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
 
+  // PR11.1: filter toolbar state. Each is `''` when "All" is selected --
+  // fetchPlatformUsers only sets the corresponding query param when
+  // truthy, so this stays backward compatible with the unfiltered call.
+  const [orgFilter, setOrgFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [roleFilter, setRoleFilter] = useState('')
+  const [orgOptions, setOrgOptions] = useState<PlatformOrgSummary[] | null>(null)
+  const [roleOptions, setRoleOptions] = useState<RoleSummary[] | null>(null)
+
+  useEffect(() => {
+    // Best-effort: if either catalog fails to load, its filter dropdown
+    // just doesn't render (see below) -- the page itself still works.
+    fetchPlatformOrgs({ pageSize: 100 }).then(r => setOrgOptions(r.items)).catch(() => setOrgOptions(null))
+    fetchPlatformRoles().then(setRoleOptions).catch(() => setRoleOptions(null))
+  }, [])
+
   const load = useCallback(() => {
     setLoading(true)
-    fetchPlatformUsers({ page, pageSize: PAGE_SIZE, search, sortBy, sortOrder })
+    fetchPlatformUsers({
+      page, pageSize: PAGE_SIZE, search, sortBy, sortOrder,
+      organizationId: orgFilter ? Number(orgFilter) : undefined,
+      status: statusFilter || undefined,
+      role: roleFilter || undefined,
+    })
       .then(d => { setData(d); setErr(null) })
       .catch(e => setErr(String(e)))
       .finally(() => setLoading(false))
-  }, [page, search, sortBy, sortOrder])
+  }, [page, search, sortBy, sortOrder, orgFilter, statusFilter, roleFilter])
 
   useEffect(() => { load() }, [load])
 
@@ -126,6 +149,8 @@ export default function UsersPage({ onSelect }: Props) {
     setSearch(searchInput.trim())
   }
 
+  const hasActiveFilters = !!(search || orgFilter || statusFilter || roleFilter)
+
   return (
     <div>
       <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Users</h2>
@@ -134,14 +159,17 @@ export default function UsersPage({ onSelect }: Props) {
         enforced by the backend on every request.
       </p>
 
-      <form onSubmit={submitSearch} style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+      <form
+        onSubmit={submitSearch}
+        style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}
+      >
         <input
           value={searchInput}
           onChange={e => setSearchInput(e.target.value)}
           placeholder="Search by email…"
           aria-label="Search users"
           style={{
-            flex: 1, maxWidth: 420, fontSize: 13, padding: '8px 12px',
+            flex: 1, minWidth: 200, maxWidth: 420, fontSize: 13, padding: '8px 12px',
             borderRadius: 8, border: '1px solid var(--border)',
             background: 'var(--surface)', color: 'var(--text)',
           }}
@@ -152,20 +180,55 @@ export default function UsersPage({ onSelect }: Props) {
         }}>
           Search
         </button>
+
+        {orgOptions && (
+          <select
+            aria-label="Filter by organization"
+            value={orgFilter}
+            onChange={e => { setOrgFilter(e.target.value); setPage(1) }}
+            style={selectStyle}
+          >
+            <option value="">All organizations</option>
+            {orgOptions.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        )}
+
+        <select
+          aria-label="Filter by status"
+          value={statusFilter}
+          onChange={e => { setStatusFilter(e.target.value); setPage(1) }}
+          style={selectStyle}
+        >
+          <option value="">All statuses</option>
+          {ALL_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+
+        {roleOptions && (
+          <select
+            aria-label="Filter by role"
+            value={roleFilter}
+            onChange={e => { setRoleFilter(e.target.value); setPage(1) }}
+            style={selectStyle}
+          >
+            <option value="">All roles</option>
+            {roleOptions.map(r => <option key={r.id} value={r.name}>{r.name}</option>)}
+          </select>
+        )}
       </form>
 
-      {err && <ErrBox msg={err} />}
+      {err && <div role="alert" style={{ marginBottom: 14 }}><ErrorState message={err} onRetry={load} /></div>}
 
-      {loading ? <Loading msg="Loading users…" /> : (
+      {loading ? <LoadingState label="Loading users…" /> : (
         <div style={card}>
           <div style={cardHead}>
             <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>All Users</span>
             {data && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{data.total} total</span>}
           </div>
           {!data?.items.length ? (
-            <div style={{ padding: 24, textAlign: 'center', color: 'var(--muted)', fontSize: 12 }}>
-              {search ? `No users match "${search}"` : 'No users exist yet.'}
-            </div>
+            <EmptyState
+              title={hasActiveFilters ? 'No users match these filters' : 'No users exist yet.'}
+              description={hasActiveFilters ? 'Try clearing the search or filters above.' : undefined}
+            />
           ) : (
             <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
@@ -174,6 +237,8 @@ export default function UsersPage({ onSelect }: Props) {
                   <SortHeader field="status" label="Status" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
                   <th style={th}>Global Roles</th>
                   <th style={th}>Organizations</th>
+                  <th style={th}>Last Login</th>
+                  <th style={th}>Auth Method</th>
                   <SortHeader field="created_at" label="Created" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
                   <th style={th}>Actions</th>
                 </tr>
@@ -185,6 +250,8 @@ export default function UsersPage({ onSelect }: Props) {
                     <td style={td}><StatusBadge status={u.status} /></td>
                     <td style={td}>{u.global_roles.length ? u.global_roles.join(', ') : '—'}</td>
                     <td style={td}>{u.org_count}</td>
+                    <td style={td}>{formatDateTime(u.last_login_at)}</td>
+                    <td style={td}>{authMethodLabel(u.authentication_method)}</td>
                     <td style={td}>{u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}</td>
                     <td style={td}>
                       <button

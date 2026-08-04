@@ -26,6 +26,12 @@ export interface PlatformUserSummary {
   created_at: string | null
   global_roles: string[]
   org_count: number
+  // PR11.1: null means no live source (never logged in since the
+  // backend migration that added these, or predates it) -- rendered as
+  // "Not available", never fabricated. See routes_dashboard.py's own
+  // convention, reused here.
+  last_login_at: string | null
+  authentication_method: string | null
 }
 
 export interface PlatformUserListResponse {
@@ -45,6 +51,12 @@ export interface PlatformUserListParams {
   search?: string
   sortBy?: UserSortField
   sortOrder?: SortOrder
+  // PR11.1: all three optional and independent, matching
+  // GET /platform/users' own backward-compatible query params
+  // (routes_platform_users.py) -- omitted means unfiltered, same as before.
+  organizationId?: number
+  status?: string
+  role?: string
 }
 
 export async function fetchPlatformUsers(params: PlatformUserListParams = {}): Promise<PlatformUserListResponse> {
@@ -52,6 +64,9 @@ export async function fetchPlatformUsers(params: PlatformUserListParams = {}): P
   qs.set('page', String(params.page ?? 1))
   qs.set('page_size', String(params.pageSize ?? 20))
   if (params.search) qs.set('search', params.search)
+  if (params.organizationId != null) qs.set('organization_id', String(params.organizationId))
+  if (params.status) qs.set('status', params.status)
+  if (params.role) qs.set('role', params.role)
   qs.set('sort_by', params.sortBy ?? 'created_at')
   qs.set('sort_order', params.sortOrder ?? 'desc')
 
@@ -79,6 +94,25 @@ export interface PlatformUserDetail {
   status_changed_at: string | null
   status_changed_reason: string | null
   status_changed_by_email: string | null
+  last_login_at: string | null
+  authentication_method: string | null
+}
+
+// PR11.1: display labels for the persisted authentication_method
+// vocabulary (password/oauth/oidc/unknown -- see omnibioai-auth's
+// auth_service._persisted_auth_method for where these values come from).
+// A value outside this map (shouldn't happen, but this is API data, not
+// a closed TS union) falls back to the raw string rather than hiding it.
+const AUTH_METHOD_LABELS: Record<string, string> = {
+  password: 'Password',
+  oauth: 'OAuth',
+  oidc: 'OIDC',
+  unknown: 'Unknown',
+}
+
+export function authMethodLabel(method: string | null): string {
+  if (method == null) return 'Not available'
+  return AUTH_METHOD_LABELS[method] ?? method
 }
 
 export async function fetchPlatformUserDetail(userId: number): Promise<PlatformUserDetail> {
