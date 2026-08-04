@@ -16,13 +16,21 @@ import textwrap
 import unittest
 from unittest.mock import patch
 
+import jwt
 from fastapi.testclient import TestClient
 
+from control_center.core.jwt_verify import JWT_SECRET
 from control_center.core.runner import run_all_checks
 from control_center.core.settings import Settings, load_settings
 from control_center.main import app
 
-client = TestClient(app)
+# services_router and summary_router are gated at router-inclusion time
+# (main.py) behind platform.manage_infra -- these tests exercise the
+# routes' own logic, not authorization (see test_main.py for the 401/403
+# permission checks), so the client carries a fixed, always-sufficient
+# token by default.
+_INFRA_TOKEN = jwt.encode({"sub": "1", "permissions": ["platform.manage_infra"]}, JWT_SECRET, algorithm="HS256")
+client = TestClient(app, headers={"Authorization": f"Bearer {_INFRA_TOKEN}"})
 
 
 # ==============================================================================

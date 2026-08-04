@@ -14,7 +14,26 @@ client = TestClient(app)
 
 
 def _admin_headers():
-    token = jwt.encode({"sub": "1", "roles": ["admin"]}, JWT_SECRET, algorithm="HS256")
+    token = jwt.encode(
+        {
+            "sub": "1",
+            "roles": ["admin"],
+            "permissions": [
+                "platform.manage_infra",
+                "platform.manage_cron",
+                "platform.manage_content",
+            ],
+        },
+        JWT_SECRET, algorithm="HS256",
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _cron_only_headers():
+    """PR3D isolation fixture: holds platform.manage_cron only -- proves it
+    does not satisfy report/coverage generation's platform.manage_content
+    requirement."""
+    token = jwt.encode({"sub": "3", "permissions": ["platform.manage_cron"]}, JWT_SECRET, algorithm="HS256")
     return {"Authorization": f"Bearer {token}"}
 
 def _reset_job():
@@ -171,6 +190,11 @@ class TestReportGenerate(unittest.TestCase):
         token = jwt.encode({"sub": "2", "roles": ["user"]}, JWT_SECRET, algorithm="HS256")
         resp = client.post("/report/generate", headers={"Authorization": f"Bearer {token}"})
         self.assertEqual(resp.status_code, 403)
+    def test_403_for_cron_permission_only(self):
+        """Isolation: platform.manage_cron must not satisfy the
+        platform.manage_content check this route requires."""
+        resp = client.post("/report/generate", headers=_cron_only_headers())
+        self.assertEqual(resp.status_code, 403)
 
 class TestReportStatus(unittest.TestCase):
     def setUp(self): _reset_job()
@@ -254,6 +278,11 @@ class TestCoverageGenerate(unittest.TestCase):
     def test_403_when_not_admin(self):
         token = jwt.encode({"sub": "2", "roles": ["user"]}, JWT_SECRET, algorithm="HS256")
         resp = client.post("/coverage/generate", headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(resp.status_code, 403)
+    def test_403_for_cron_permission_only(self):
+        """Isolation: platform.manage_cron must not satisfy the
+        platform.manage_content check this route requires."""
+        resp = client.post("/coverage/generate", headers=_cron_only_headers())
         self.assertEqual(resp.status_code, 403)
 
 
@@ -510,6 +539,44 @@ class TestOnStartup(unittest.TestCase):
         mock_thread.assert_called_once()
         self.assertEqual(mock_thread.call_args.kwargs.get("target"), main_module._scheduler_loop)
         mock_thread.return_value.start.assert_called_once()
+
+
+class TestPlatformManageInfraAuth(unittest.TestCase):
+    """PR3D: docker_router/services_router/summary_router/config_router are
+    gated at router-inclusion time (main.py) behind
+    platform.manage_infra, not per-route -- test_routes_docker.py,
+    test_runner.py, and test_routes_config.py cover each route's own
+    logic with an always-sufficient token, so these regression tests
+    cover only the authorization layer itself: missing token, wrong
+    permission, and correct permission, once per gated router."""
+
+    def _cases(self):
+        return (
+            ("GET", "/docker/containers"),
+            ("GET", "/services"),
+            ("GET", "/summary"),
+            ("GET", "/config"),
+        )
+
+    def test_401_when_no_token(self):
+        for method, path in self._cases():
+            with self.subTest(path=path):
+                resp = client.request(method, path)
+                self.assertEqual(resp.status_code, 401)
+
+    def test_403_for_cron_permission_only(self):
+        """Isolation: platform.manage_cron must not satisfy the
+        platform.manage_infra check these routers require."""
+        for method, path in self._cases():
+            with self.subTest(path=path):
+                resp = client.request(method, path, headers=_cron_only_headers())
+                self.assertEqual(resp.status_code, 403)
+
+    def test_not_401_or_403_with_infra_permission(self):
+        for method, path in self._cases():
+            with self.subTest(path=path):
+                resp = client.request(method, path, headers=_admin_headers())
+                self.assertNotIn(resp.status_code, (401, 403))
 
 
 if __name__ == "__main__":

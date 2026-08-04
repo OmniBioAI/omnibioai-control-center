@@ -21,6 +21,13 @@ def get_config() -> PlainTextResponse:
 
 @router.post("/config/service")
 async def add_service(payload: dict) -> JSONResponse:
+    # AUDIT_EVENT integration point: PR3D leaves this a comment, not a
+    # call -- IAM's persistent audit ledger (PR9) has no client library
+    # this repo can import yet, and this handler doesn't currently
+    # receive the decoded token (config_router is gated at
+    # router-inclusion time in main.py, not per-route), so actor identity
+    # would need plumbing through before an audit call could be added
+    # here. Once both exist, emit with action="config.add_service".
     name = (payload.get("name") or "").strip()
     svc_type = (payload.get("type") or "http").strip()
     url = (payload.get("url") or "").strip()

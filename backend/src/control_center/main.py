@@ -38,7 +38,7 @@ from control_center.api.routes_user_proxy import router as user_proxy_router
 from control_center.api.routes_role_proxy import router as role_proxy_router
 from control_center.api.routes_team_proxy import router as team_proxy_router
 from control_center.api.routes_cloud import router as cloud_router
-from control_center.core.auth import require_admin
+from control_center.core.auth import require_permission
 from control_center.api.routes_config import router as config_router
 from control_center.api.routes_cron import router as cron_router
 from control_center.api.routes_docker import router as docker_router
@@ -100,12 +100,12 @@ app.include_router(health_router)
 # /etc/cloudflared/config.yml), so these were reachable with no auth at
 # all. Gate them the same way report_generate/coverage_generate already
 # are below.
-app.include_router(services_router, dependencies=[Depends(require_admin)])
-app.include_router(summary_router, dependencies=[Depends(require_admin)])
+app.include_router(services_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
+app.include_router(summary_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(report_router)
-app.include_router(config_router, dependencies=[Depends(require_admin)])
+app.include_router(config_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(cron_router)
-app.include_router(docker_router, dependencies=[Depends(require_admin)])
+app.include_router(docker_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(known_issues_router)
 app.include_router(llm_router)
 app.include_router(infra_router)
@@ -211,8 +211,9 @@ _DOCKER_INJECT_JS = r"""<style>
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
-  // /docker/* now requires require_admin (core/auth.py) -- same
-  // omnibioai_access_token localStorage key the Admin tab's login sets.
+  // /docker/* now requires require_permission("platform.manage_infra")
+  // (core/auth.py) -- same omnibioai_access_token localStorage key the
+  // Admin tab's login sets.
   function omniAuthHeader() {
     var t = localStorage.getItem('omnibioai_access_token');
     return t ? {'Authorization': 'Bearer ' + t} : {};
@@ -578,13 +579,17 @@ def _run_report_job() -> None:
 
 
 @app.post("/report/generate")
-def report_generate(_admin: dict = Depends(require_admin)) -> JSONResponse:
+def report_generate(_admin: dict = Depends(require_permission("platform.manage_content"))) -> JSONResponse:
     """Trigger background report generation. Returns 409 if already running.
 
     Admin-gated at the application level -- nginx's auth_request already
     requires a valid JWT for this path, but only checks authentication, not
     role. This is the independent, defense-in-depth check that still holds
     even if nginx is misconfigured or bypassed."""
+    # AUDIT_EVENT integration point: PR3D leaves this a comment, not a
+    # call -- IAM's persistent audit ledger (PR9) has no client library
+    # this repo can import yet. Once one exists, emit here with
+    # actor=_admin["sub"], action="report.generate".
     log.info("report_generate_requested")
     if _job.as_dict()["status"] == "running":
         return JSONResponse({"error": "Report generation already in progress"}, status_code=409)
@@ -672,10 +677,12 @@ def _run_coverage_job() -> None:
 
 
 @app.post("/coverage/generate")
-def coverage_generate(_admin: dict = Depends(require_admin)) -> JSONResponse:
+def coverage_generate(_admin: dict = Depends(require_permission("platform.manage_content"))) -> JSONResponse:
     """Trigger background coverage collection for omnibioai-control-center
     only (see module comment above for why the other repos aren't included).
     Returns 409 if already running. Admin-gated, same as /report/generate."""
+    # AUDIT_EVENT integration point: see report_generate above --
+    # actor=_admin["sub"], action="coverage.generate".
     log.info("coverage_generate_requested")
     if _coverage_job.as_dict()["status"] == "running":
         return JSONResponse({"error": "Coverage collection already in progress"}, status_code=409)
@@ -811,8 +818,9 @@ def root() -> HTMLResponse:
   // Regenerate/coverage-refresh controls now live in the Admin tab
   // (admin-gated there, both client-side and server-side) rather than
   // this always-visible header -- this script now only drives the live
-  // service-status chip. /summary itself moved behind require_admin
-  // (it leaks internal hostnames/LAN IPs, not just up/down counts) --
+  // service-status chip. /summary itself moved behind
+  // require_permission("platform.manage_infra") (it leaks internal
+  // hostnames/LAN IPs, not just up/down counts) --
   // attach the token if the visitor happens to already be signed in via
   // the Admin tab; anonymous visitors just see no chip (badge stays
   // hidden), same as any other unreachable-state failure below.

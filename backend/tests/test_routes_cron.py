@@ -22,12 +22,44 @@ client = TestClient(app)
 
 
 def _admin_headers() -> dict:
-    token = jwt.encode({"sub": "1", "roles": ["admin"]}, JWT_SECRET, algorithm="HS256")
+    token = jwt.encode(
+        {
+            "sub": "1",
+            "roles": ["admin"],
+            "permissions": [
+                "platform.manage_infra",
+                "platform.manage_cron",
+                "platform.manage_content",
+            ],
+        },
+        JWT_SECRET, algorithm="HS256",
+    )
     return {"Authorization": f"Bearer {token}"}
 
 
 def _user_headers() -> dict:
-    token = jwt.encode({"sub": "2", "roles": ["user"]}, JWT_SECRET, algorithm="HS256")
+    token = jwt.encode({"sub": "2", "roles": ["user"], "permissions": []}, JWT_SECRET, algorithm="HS256")
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _admin_role_without_cron_permission_headers() -> dict:
+    """PR3D regression fixture: an "admin"-role token that lacks the
+    platform.manage_cron permission specifically -- proves the route no
+    longer falls back to a role-string check."""
+    token = jwt.encode(
+        {"sub": "3", "roles": ["admin"], "permissions": ["platform.manage_infra"]},
+        JWT_SECRET, algorithm="HS256",
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _content_only_headers() -> dict:
+    """PR3D isolation fixture: holds platform.manage_content but not
+    platform.manage_cron -- must not be able to mutate cron jobs."""
+    token = jwt.encode(
+        {"sub": "4", "permissions": ["platform.manage_content"]},
+        JWT_SECRET, algorithm="HS256",
+    )
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -125,6 +157,20 @@ class TestCronMutationRoutes(unittest.TestCase):
     def test_pause_requires_admin_403_for_non_admin(self) -> None:
         self._set_spool("0 4 * * * /a/omnibioai-studio/scripts/backup-mysql.sh\n")
         resp = client.post("/cron/jobs/mysql-backup/pause", headers=_user_headers())
+        self.assertEqual(resp.status_code, 403)
+
+    def test_pause_403_for_admin_role_without_cron_permission(self) -> None:
+        self._set_spool("0 4 * * * /a/omnibioai-studio/scripts/backup-mysql.sh\n")
+        resp = client.post(
+            "/cron/jobs/mysql-backup/pause", headers=_admin_role_without_cron_permission_headers(),
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_pause_403_for_content_permission_only(self) -> None:
+        """Isolation: platform.manage_content must not satisfy the
+        platform.manage_cron check this route requires."""
+        self._set_spool("0 4 * * * /a/omnibioai-studio/scripts/backup-mysql.sh\n")
+        resp = client.post("/cron/jobs/mysql-backup/pause", headers=_content_only_headers())
         self.assertEqual(resp.status_code, 403)
 
     def test_pause_success_as_admin(self) -> None:
