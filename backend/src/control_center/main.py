@@ -41,6 +41,7 @@ from control_center.api.routes_cloud import router as cloud_router
 from control_center.core.auth import require_permission
 from control_center.api.routes_config import router as config_router
 from control_center.api.routes_cron import router as cron_router
+from control_center.api.routes_dashboard import router as dashboard_router
 from control_center.api.routes_docker import router as docker_router
 from control_center.api.routes_health import router as health_router
 from control_center.api.routes_infra import router as infra_router
@@ -117,6 +118,13 @@ app.include_router(org_proxy_router)
 app.include_router(user_proxy_router)
 app.include_router(role_proxy_router)
 app.include_router(team_proxy_router)
+# No blanket permission dependency here, unlike summary/docker/config/
+# services above -- routes_dashboard.py's own docstring explains why:
+# each section of its one response is authorized independently, either
+# by forwarding the caller's token to the upstream service that owns
+# that data, or (Infrastructure/Operations only) via its own in-process
+# platform.manage_infra check.
+app.include_router(dashboard_router)
 
 
 # ==============================================================================
