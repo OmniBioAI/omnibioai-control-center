@@ -51,8 +51,11 @@ def _normalize_sif_stem(stem: str) -> str:
     return _ARCH_RE.sub("", stem)
 
 
-@router.get("/docker/containers")
-def get_containers() -> JSONResponse:
+def get_containers_status() -> dict:
+    """Shared by GET /docker/containers and the dashboard aggregator
+    (routes_dashboard.py) -- factored out so the latter can reuse this
+    exact subprocess logic in-process instead of duplicating it or making
+    a self-referential HTTP call."""
     try:
         result = subprocess.run(
             ["docker", "ps", "--format", "{{json .}}"],
@@ -73,11 +76,21 @@ def get_containers() -> JSONResponse:
             capture_output=True, text=True, timeout=30,
         )
         stopped = len([l for l in stopped_result.stdout.strip().splitlines() if l.strip()])
-        return JSONResponse({"containers": containers, "running": len(containers), "stopped": stopped})
+        return {"containers": containers, "running": len(containers), "stopped": stopped}
     except FileNotFoundError:
-        return JSONResponse({"error": "docker not found", "containers": [], "running": 0, "stopped": 0}, status_code=503)
+        return {"error": "docker not found", "containers": [], "running": 0, "stopped": 0}
     except Exception as e:
-        return JSONResponse({"error": str(e), "containers": [], "running": 0, "stopped": 0}, status_code=500)
+        return {"error": str(e), "containers": [], "running": 0, "stopped": 0}
+
+
+@router.get("/docker/containers")
+def get_containers() -> JSONResponse:
+    status = get_containers_status()
+    if status.get("error") == "docker not found":
+        return JSONResponse(status, status_code=503)
+    if "error" in status:
+        return JSONResponse(status, status_code=500)
+    return JSONResponse(status)
 
 
 @router.get("/docker/sif-images")

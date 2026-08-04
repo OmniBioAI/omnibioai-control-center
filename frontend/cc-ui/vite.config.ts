@@ -32,6 +32,10 @@ export default defineConfig({
       '/orgs': { target: 'http://localhost:7070', changeOrigin: true },
       '/platform': { target: 'http://localhost:7070', changeOrigin: true },
       '/auth': { target: 'http://localhost:7070', changeOrigin: true },
+      // PR10 -- Live Platform Dashboard, proxied through control-center's
+      // own backend (routes_dashboard.py), same reasoning as every entry
+      // above.
+      '/dashboard': { target: 'http://localhost:7070', changeOrigin: true },
     },
   },
 })
