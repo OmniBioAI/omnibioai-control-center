@@ -2,17 +2,22 @@
 
 :root {
   --bg:      #0f1117;
+  --bg2:     #14161f;
+  --bg3:     #191c29;
   --surface: #1a1d2e;
   --border:  #2a2d3e;
   --text:    #ffffff;
   --text2:   #e2e8f0;
+  --text3:   #94a3b8;
   --muted:   #6b7280;
+  --color-text-muted: var(--muted);
   --accent:  #00e5a0;
   --accent-light: rgba(0,229,160,0.12);
   --accent-dim:   rgba(0,229,160,0.08);
   --accent-dim2:  rgba(0,229,160,0.15);
 
   --color-success:        #22c55e;
+  --green:        #22c55e;
   --green-bg:     rgba(34,197,94,0.12);
   --green-border: rgba(34,197,94,0.3);
   --green-dim:    rgba(34,197,94,0.08);
@@ -39,7 +44,34 @@
   --sans: 'Inter', system-ui, -apple-system, sans-serif;
 }
 
+/* Admin Console Phase 2: light theme. Opt-in via a `data-theme="light"`
+   attribute on <html> (see components/shell/ThemeToggle.tsx), not
+   prefers-color-scheme -- this app has always shipped dark-only, so an
+   OS-level light preference must not silently change anything for
+   existing users; the toggle is the only way in. Same token names as
+   :root above, so every existing component (which already reads these
+   tokens, never hardcoded colors) re-themes for free -- nothing about
+   this section is a redesign of any component. */
+:root[data-theme='light'] {
+  --bg:      #f8fafc;
+  --bg2:     #f1f5f9;
+  --bg3:     #e2e8f0;
+  --surface: #ffffff;
+  --border:  #e2e8f0;
+  --text:    #0f172a;
+  --text2:   #334155;
+  --text3:   #64748b;
+  --muted:   #64748b;
+  --accent:  #00b382;
+  --accent-light: rgba(0,179,130,0.10);
+  --accent-dim:   rgba(0,179,130,0.06);
+  --accent-dim2:  rgba(0,179,130,0.12);
+  --shadow-header: 0 2px 8px rgba(15,23,42,0.06);
+  --shadow-card:   0 4px 24px rgba(15,23,42,0.08);
+}
+
 html, body, #root {
+  transition: background-color 0.15s ease, color 0.15s ease;
   min-height: 100%;
   font-family: var(--sans);
   font-size: 13px;
@@ -87,6 +119,42 @@ select option { background: var(--surface); color: var(--text); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #3d4155; }
 
+/* ── Admin Console Phase 2: shell responsive behavior ────────────
+   No @media queries existed anywhere in this codebase before this PR --
+   fixed pixel widths throughout. This is the one new breakpoint set,
+   scoped to the new shell components only (components/shell/*) so it
+   can't affect any existing page's layout. */
+.shell-sidebar-backdrop { display: none; }
+@media (max-width: 1024px) {
+  .shell-sidebar { width: 64px; }
+  .shell-sidebar .shell-nav-label,
+  .shell-sidebar .shell-section-label,
+  .shell-sidebar .shell-org-selector-label { display: none; }
+}
+@media (max-width: 768px) {
+  .shell-sidebar { position: fixed; top: 0; bottom: 0; left: 0; z-index: 200; width: 240px; transform: translateX(-100%); transition: transform 0.18s ease; }
+  .shell-sidebar[data-open='true'] { transform: translateX(0); }
+  .shell-sidebar .shell-nav-label,
+  .shell-sidebar .shell-section-label,
+  .shell-sidebar .shell-org-selector-label { display: block; }
+  .shell-sidebar-backdrop[data-open='true'] { display: block; }
+  .shell-topbar-search { display: none !important; }
+  .shell-menu-toggle { display: flex !important; }
+  /* Page-contextual controls (status chip, Refresh/Generate Report) and
+     the org-context label are the first things to give up space below
+     the nav breakpoint -- without this the topbar's fixed-width right
+     group (these + search + org selector + theme + notifications +
+     profile) overflows the viewport instead of wrapping, since none of
+     it is designed to reflow onto a second line. */
+  .shell-topbar-extra { display: none !important; }
+  .shell-org-selector-label { display: none; }
+  .shell-profile-label { display: none; }
+}
+@media (max-width: 560px) {
+  .shell-content { padding: 16px !important; }
+  .shell-stat-grid { grid-template-columns: 1fr 1fr !important; }
+}
+
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.5; transform: scale(0.85); }
@@ -107,4 +175,3 @@ select option { background: var(--surface); color: var(--text); }
   vertical-align: middle;
 }
 .data-table tr:last-child td { border-bottom: none; }
---color-text-muted: var(--muted);

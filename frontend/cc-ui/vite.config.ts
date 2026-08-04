@@ -31,6 +31,7 @@ export default defineConfig({
       // reasoning as every entry above.
       '/orgs': { target: 'http://localhost:7070', changeOrigin: true },
       '/platform': { target: 'http://localhost:7070', changeOrigin: true },
+      '/auth': { target: 'http://localhost:7070', changeOrigin: true },
     },
   },
 })
