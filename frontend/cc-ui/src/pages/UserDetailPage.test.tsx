@@ -36,6 +36,7 @@ const detail: PlatformUserDetail = {
     { organization_id: 2, organization_name: 'Beta Inc', organization_slug: 'beta', roles: ['org_member'], status: 'invited', joined_at: null },
   ],
   status_changed_at: null, status_changed_reason: null, status_changed_by_email: null,
+  last_login_at: '2026-08-01T14:20:00Z', authentication_method: 'oidc',
 }
 
 describe('UserDetailPage', () => {
@@ -137,6 +138,33 @@ describe('UserDetailPage', () => {
     await user.click(adminCheckbox)
 
     expect(await screen.findByRole('alert')).toHaveTextContent('403')
+  })
+
+  // ── PR11.1: login metadata (Identity Information + Security Summary) ──
+
+  it('shows last login and authentication method, mapped to a display label', async () => {
+    vi.mocked(users.fetchPlatformUserDetail).mockResolvedValue(detail)
+    render(<UserDetailPage userId={42} onBack={vi.fn()} />)
+    await screen.findByRole('heading', { name: 'someone@acme.test' })
+
+    const expectedLastLogin = new Date(detail.last_login_at!).toLocaleString(undefined, {
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    })
+    // Rendered twice: once in General Information, once in the
+    // Authentication (Security Summary) card.
+    expect(screen.getAllByText('OIDC')).toHaveLength(2)
+    expect(screen.getAllByText(expectedLastLogin)).toHaveLength(2)
+  })
+
+  it('shows "Not available" for a user who has never logged in since the migration', async () => {
+    vi.mocked(users.fetchPlatformUserDetail).mockResolvedValue({
+      ...detail, last_login_at: null, authentication_method: null,
+    })
+    render(<UserDetailPage userId={42} onBack={vi.fn()} />)
+    await screen.findByRole('heading', { name: 'someone@acme.test' })
+
+    // Rendered twice each: General Information + the Authentication card.
+    expect(screen.getAllByText('Not available')).toHaveLength(4)
   })
 
   it('falls back to a read-only role list when the role catalog fails to load', async () => {
