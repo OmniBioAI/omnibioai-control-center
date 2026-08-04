@@ -1,114 +1,51 @@
 import { useState, useEffect, useCallback } from 'react'
-import { fetchSummary, fetchReportStatus, triggerGenerate } from './api'
+import { fetchSummary, fetchReportStatus, triggerGenerate } from '../api'
 import {
-  getToken, logout, ensureSession, hasAdminAccess, hasOrganizationsAccess,
-  hasPlatformAdminAccess, UNAUTHORIZED_EVENT,
-} from './auth'
-import type { SessionUser } from './auth'
-import Header from './components/Header'
-import type { Tab } from './components/Header'
-import LoginScreen from './components/LoginScreen'
-import AccessDenied from './components/AccessDenied'
-import HealthPage from './pages/HealthPage'
-import DockerPage from './pages/DockerPage'
-import EcosystemPage from './pages/EcosystemPage'
-import ConfigPage from './pages/ConfigPage'
-import LlmPage from './pages/LlmPage'
-import CloudPage from './pages/CloudPage'
-import OrganizationsPage from './pages/OrganizationsPage'
-import OrganizationDetailPage from './pages/OrganizationDetailPage'
-import UsersPage from './pages/UsersPage'
-import UserDetailPage from './pages/UserDetailPage'
+  hasAdminAccess, hasOrganizationsAccess, hasPlatformAdminAccess,
+} from '../auth'
+import Header from '../components/Header'
+import type { Tab } from '../components/Header'
+import HealthPage from '../pages/HealthPage'
+import DockerPage from '../pages/DockerPage'
+import EcosystemPage from '../pages/EcosystemPage'
+import ConfigPage from '../pages/ConfigPage'
+import LlmPage from '../pages/LlmPage'
+import CloudPage from '../pages/CloudPage'
+import OrganizationsPage from '../pages/OrganizationsPage'
+import OrganizationDetailPage from '../pages/OrganizationDetailPage'
+import UsersPage from '../pages/UsersPage'
+import UserDetailPage from '../pages/UserDetailPage'
+import AuthGate from './AuthGate'
 
-type AuthState = 'resolving' | 'anonymous' | 'denied' | 'admin'
-
-// Phase 3 PR2: the gate below widened from hasAdminAccess() alone to also
-// admit hasOrganizationsAccess() -- an org_admin or platform_admin with no
-// global "admin" role must still reach the Organizations page. This is a
-// deliberate, minimal widening of the one existing App-level gate, not the
-// full admin.omnibioai.org/control.omnibioai.org build split the original
-// Phase 3 blueprint envisioned (that split is not implemented in this
-// repository as of this PR -- verified directly). See auth.ts's
-// hasOrganizationsAccess() and this PR's implementation report.
+/**
+ * Admin Console dual build architecture -- built with VITE_APP_MODE=admin,
+ * served at admin.omnibioai.org. Contains everything the pre-split
+ * App.tsx did: the ops pages (Health/Docker/Ecosystem/Config/LLMs/Cloud)
+ * AND the enterprise console (Organizations, Organization Details, Users,
+ * User Details -- Roles/Permissions/Teams are components rendered inside
+ * OrganizationDetailPage, not separate pages, so they come along
+ * automatically). This is a relocation of the pre-split App.tsx's
+ * behavior, not a rewrite -- see git history for the byte-for-byte
+ * equivalent prior version.
+ */
 function hasConsoleAccess(): boolean {
   return hasAdminAccess() || hasOrganizationsAccess()
 }
 
-export default function App() {
-  const [state, setState] = useState<AuthState>('resolving')
-  const [user, setUser] = useState<SessionUser | null>(null)
-
-  const resolve = useCallback(async () => {
-    if (!getToken()) {
-      setState('anonymous')
-      return
-    }
-    const resolved = await ensureSession()
-    setUser(resolved)
-    setState(resolved && hasConsoleAccess() ? 'admin' : resolved ? 'denied' : 'anonymous')
-  }, [])
-
-  useEffect(() => {
-    resolve()
-  }, [resolve])
-
-  useEffect(() => {
-    const onUnauthorized = () => {
-      setUser(null)
-      setState('anonymous')
-    }
-    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
-    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
-  }, [])
-
-  if (state === 'resolving') {
-    return (
-      <div style={{
-        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'var(--bg)', color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: 13,
-      }}>
-        Authenticating…
-      </div>
-    )
-  }
-
-  if (state === 'anonymous') {
-    return (
-      <LoginScreen
-        onSuccess={(loggedInUser) => {
-          setUser(loggedInUser)
-          setState(loggedInUser && hasConsoleAccess() ? 'admin' : loggedInUser ? 'denied' : 'anonymous')
-        }}
-      />
-    )
-  }
-
-  if (state === 'denied') {
-    return (
-      <AccessDenied
-        user={user}
-        onSignOut={() => {
-          // SSO Phase 2 PR5: logout() now also revokes the refresh token
-          // and blacklists the access token server-side (POST
-          // /auth/logout) before doing the same local clear this already
-          // did -- fire-and-forget, matches workbench's own sign-out.
-          void logout()
-          setUser(null)
-          setState('anonymous')
-        }}
-      />
-    )
-  }
-
-  return <Dashboard />
+export default function AdminApp() {
+  return (
+    <AuthGate hasAccess={hasConsoleAccess}>
+      <AdminDashboard />
+    </AuthGate>
+  )
 }
 
-// Phase 3 PR2: minimal deep-link support for /organizations and
+// Phase 3 PR2: deep-link support for /organizations and
 // /organizations/{id}, using the browser's native History API directly
-// rather than adding a router dependency -- this app has none today (a
+// rather than adding a router dependency -- this app still has none (a
 // deliberate choice worth revisiting once the admin console grows past a
-// couple of deep-linkable pages, per this PR's implementation report),
-// and every other tab still has no distinct URL, unchanged.
+// couple of deep-linkable pages -- not this PR's scope, which is the
+// build split itself, not a router migration).
 function orgIdFromPath(): number | null {
   const m = window.location.pathname.match(/^\/organizations\/(\d+)$/)
   return m ? Number(m[1]) : null
@@ -120,7 +57,7 @@ function userIdFromPath(): number | null {
   return m ? Number(m[1]) : null
 }
 
-function Dashboard() {
+function AdminDashboard() {
   const canSeeOps = hasAdminAccess()
   const canSeeOrganizations = hasOrganizationsAccess()
   const canSeeUsers = hasPlatformAdminAccess()
