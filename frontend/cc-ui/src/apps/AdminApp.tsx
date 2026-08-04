@@ -1,10 +1,14 @@
 import { useState, useEffect, useCallback } from 'react'
 import { fetchSummary, fetchReportStatus, triggerGenerate } from '../api'
 import {
-  hasAdminAccess, hasOrganizationsAccess, hasPlatformAdminAccess,
+  getSessionUser, hasAdminAccess, hasOrganizationsAccess, hasPlatformAdminAccess,
+  UNAUTHORIZED_EVENT,
 } from '../auth'
-import Header from '../components/Header'
-import type { Tab } from '../components/Header'
+import { findNavItem } from '../navigation'
+import type { PageKey } from '../navigation'
+import { AppShell } from '../components/shell'
+import { ComingSoon } from '../components/ui'
+import DashboardPage from '../pages/DashboardPage'
 import HealthPage from '../pages/HealthPage'
 import DockerPage from '../pages/DockerPage'
 import EcosystemPage from '../pages/EcosystemPage'
@@ -18,15 +22,27 @@ import UserDetailPage from '../pages/UserDetailPage'
 import AuthGate from './AuthGate'
 
 /**
- * Admin Console dual build architecture -- built with VITE_APP_MODE=admin,
- * served at admin.omnibioai.org. Contains everything the pre-split
- * App.tsx did: the ops pages (Health/Docker/Ecosystem/Config/LLMs/Cloud)
- * AND the enterprise console (Organizations, Organization Details, Users,
- * User Details -- Roles/Permissions/Teams are components rendered inside
- * OrganizationDetailPage, not separate pages, so they come along
- * automatically). This is a relocation of the pre-split App.tsx's
- * behavior, not a rewrite -- see git history for the byte-for-byte
- * equivalent prior version.
+ * Admin Console Phase 2 -- Enterprise Admin Console Foundation.
+ *
+ * AdminApp now renders inside AppShell (persistent sectioned left nav +
+ * top app bar) instead of the old flat Header.tsx tab strip -- Header.tsx
+ * itself is untouched and still used by ControlApp, which is out of
+ * scope for this redesign.
+ *
+ * Every existing page (Organizations, Organization Details, Users, User
+ * Details, and the 6 ops pages, now grouped under Operations >
+ * Infrastructure) is reused unmodified, with the exact same permission
+ * gates (hasAdminAccess/hasOrganizationsAccess/hasPlatformAdminAccess)
+ * as before -- see navigation.ts, the single source of truth both
+ * SidebarNav and this render switch read from. Every nav destination
+ * with no existing page renders the shared <ComingSoon /> primitive,
+ * per this phase's explicit "future pages appear as disabled/Coming
+ * Soon, do not implement those modules" scope.
+ *
+ * Intentional behavior change from the pre-Phase-2 App.tsx: the default
+ * landing page is now Overview (the new Dashboard), not Health -- this
+ * is the point of "redesign the landing dashboard", not an oversight.
+ * AdminApp.test.tsx is updated accordingly.
  */
 function hasConsoleAccess(): boolean {
   return hasAdminAccess() || hasOrganizationsAccess()
@@ -40,18 +56,15 @@ export default function AdminApp() {
   )
 }
 
-// Phase 3 PR2: deep-link support for /organizations and
-// /organizations/{id}, using the browser's native History API directly
-// rather than adding a router dependency -- this app still has none (a
-// deliberate choice worth revisiting once the admin console grows past a
-// couple of deep-linkable pages -- not this PR's scope, which is the
-// build split itself, not a router migration).
+// Phase 3 PR2/PR3A: deep-link support for /organizations(/{id}) and
+// /users(/{id}), using the browser's native History API directly --
+// unchanged by Phase 2. No other page gained a distinct URL in the
+// original design either, so Overview/Infrastructure/Coming-Soon pages
+// don't get one now.
 function orgIdFromPath(): number | null {
   const m = window.location.pathname.match(/^\/organizations\/(\d+)$/)
   return m ? Number(m[1]) : null
 }
-
-// Phase 3 PR3A: same pattern, extended to /users and /users/{id}.
 function userIdFromPath(): number | null {
   const m = window.location.pathname.match(/^\/users\/(\d+)$/)
   return m ? Number(m[1]) : null
@@ -62,29 +75,29 @@ function AdminDashboard() {
   const canSeeOrganizations = hasOrganizationsAccess()
   const canSeeUsers = hasPlatformAdminAccess()
 
-  const [tab, setTab] = useState<Tab>(() => {
+  const [active, setActive] = useState<PageKey>(() => {
     if (window.location.pathname.startsWith('/organizations')) return 'organizations'
     if (window.location.pathname.startsWith('/users')) return 'users'
-    return canSeeOps ? 'health' : canSeeOrganizations ? 'organizations' : 'users'
+    return 'overview'
   })
   const [selectedOrgId, setSelectedOrgId] = useState<number | null>(() => orgIdFromPath())
   const [selectedUserId, setSelectedUserId] = useState<number | null>(() => userIdFromPath())
+  // AuthGate has already resolved the session (and populated auth.ts's
+  // module-level cache) by the time this component ever renders -- no
+  // separate fetch or local "logged in as" state needed here.
+  const user = getSessionUser()
   const [overallStatus, setOverallStatus] = useState<'UP' | 'WARN' | 'DOWN' | null>(null)
   const [reportExists, setReportExists] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
 
-  // Ops-only polling: skipped entirely for a caller who can't see the ops
-  // tabs at all (org_admin/platform_admin with no global "admin" role) --
-  // otherwise this silently fires a doomed-to-403 request every 15s for
-  // an audience this page was never shown to.
   useEffect(() => {
     if (!canSeeOps) return
     const poll = async () => {
       try {
         const d = await fetchSummary()
         setOverallStatus(d.overall_status)
-      } catch { /* sidebar stays stale */ }
+      } catch { /* status chip stays stale */ }
     }
     poll()
     const t = setInterval(poll, 15_000)
@@ -115,78 +128,177 @@ function AdminDashboard() {
     } catch { /* ignore */ }
   }
 
-  // Keep the URL in sync with the Organizations/Users tab+detail state --
-  // every other tab is left exactly as before (no distinct URL).
+  // Keep the URL in sync with the Organizations/Users nav+detail state --
+  // unchanged from the pre-Phase-2 behavior.
   useEffect(() => {
     const path =
-      tab === 'organizations' ? (selectedOrgId != null ? `/organizations/${selectedOrgId}` : '/organizations')
-      : tab === 'users' ? (selectedUserId != null ? `/users/${selectedUserId}` : '/users')
+      active === 'organizations' ? (selectedOrgId != null ? `/organizations/${selectedOrgId}` : '/organizations')
+      : active === 'users' ? (selectedUserId != null ? `/users/${selectedUserId}` : '/users')
       : '/'
     if (window.location.pathname !== path) {
       window.history.pushState(null, '', path)
     }
-  }, [tab, selectedOrgId, selectedUserId])
+  }, [active, selectedOrgId, selectedUserId])
 
-  // Browser back/forward.
   useEffect(() => {
     const onPopState = () => {
       if (window.location.pathname.startsWith('/organizations')) {
-        setTab('organizations')
+        setActive('organizations')
         setSelectedOrgId(orgIdFromPath())
       } else if (window.location.pathname.startsWith('/users')) {
-        setTab('users')
+        setActive('users')
         setSelectedUserId(userIdFromPath())
       } else {
-        setTab(canSeeOps ? 'health' : canSeeOrganizations ? 'organizations' : 'users')
+        setActive('overview')
         setSelectedOrgId(null)
         setSelectedUserId(null)
       }
     }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
-  }, [canSeeOps, canSeeOrganizations])
+  }, [])
 
-  const handleTab = (t: Tab) => {
-    setTab(t)
-    if (t !== 'organizations') setSelectedOrgId(null)
-    if (t !== 'users') setSelectedUserId(null)
+  const handleNavigate = (key: PageKey) => {
+    setActive(key)
+    if (key !== 'organizations') setSelectedOrgId(null)
+    if (key !== 'users') setSelectedUserId(null)
+  }
+
+  const handleSignOut = () => {
+    // ProfileMenu already called auth.ts's logout() (server-side revoke)
+    // before invoking this callback -- this just tells AuthGate to reset
+    // to the anonymous state, the same event it already listens for.
+    window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', fontFamily: 'var(--sans)' }}>
-      <Header
-        tab={tab}
-        onTab={handleTab}
-        status={overallStatus}
-        generating={generating}
-        reportExists={reportExists}
-        onRefresh={() => setRefreshKey(k => k + 1)}
-        onGenerate={handleGenerate}
-        showOpsTabs={canSeeOps}
-        showOrganizationsTab={canSeeOrganizations}
-        showUsersTab={canSeeUsers}
-      />
-      {/* 56px header + 44px tab bar = 100px offset */}
-      <div style={{ paddingTop: 100 }}>
-        <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 48px' }}>
-          {tab === 'health'    && canSeeOps && <HealthPage    refreshKey={refreshKey} />}
-          {tab === 'docker'    && canSeeOps && <DockerPage    refreshKey={refreshKey} />}
-          {tab === 'ecosystem' && canSeeOps && <EcosystemPage refreshKey={refreshKey} />}
-          {tab === 'config'    && canSeeOps && <ConfigPage    refreshKey={refreshKey} />}
-          {tab === 'llms'      && canSeeOps && <LlmPage       refreshKey={refreshKey} />}
-          {tab === 'cloud'     && canSeeOps && <CloudPage     refreshKey={refreshKey} />}
-          {tab === 'organizations' && canSeeOrganizations && (
-            selectedOrgId != null
-              ? <OrganizationDetailPage orgId={selectedOrgId} onBack={() => setSelectedOrgId(null)} />
-              : <OrganizationsPage onSelect={setSelectedOrgId} />
-          )}
-          {tab === 'users' && canSeeUsers && (
-            selectedUserId != null
-              ? <UserDetailPage userId={selectedUserId} onBack={() => setSelectedUserId(null)} />
-              : <UsersPage onSelect={setSelectedUserId} />
-          )}
-        </div>
-      </div>
-    </div>
+    <AppShell
+      active={active}
+      onNavigate={handleNavigate}
+      user={user}
+      onSignOut={handleSignOut}
+      extraActions={canSeeOps ? (
+        <StatusAndReportActions
+          status={overallStatus}
+          generating={generating}
+          reportExists={reportExists}
+          onRefresh={() => setRefreshKey(k => k + 1)}
+          onGenerate={handleGenerate}
+        />
+      ) : undefined}
+    >
+      {renderPage(active, {
+        canSeeOps, canSeeOrganizations, canSeeUsers, refreshKey,
+        selectedOrgId, setSelectedOrgId, selectedUserId, setSelectedUserId,
+      })}
+    </AppShell>
+  )
+}
+
+interface RenderCtx {
+  canSeeOps: boolean
+  canSeeOrganizations: boolean
+  canSeeUsers: boolean
+  refreshKey: number
+  selectedOrgId: number | null
+  setSelectedOrgId: (id: number | null) => void
+  selectedUserId: number | null
+  setSelectedUserId: (id: number | null) => void
+}
+
+function renderPage(active: PageKey, ctx: RenderCtx) {
+  switch (active) {
+    case 'overview':
+      return <DashboardPage />
+
+    case 'health':    return ctx.canSeeOps ? <HealthPage    refreshKey={ctx.refreshKey} /> : null
+    case 'docker':    return ctx.canSeeOps ? <DockerPage    refreshKey={ctx.refreshKey} /> : null
+    case 'ecosystem': return ctx.canSeeOps ? <EcosystemPage refreshKey={ctx.refreshKey} /> : null
+    case 'config':    return ctx.canSeeOps ? <ConfigPage    refreshKey={ctx.refreshKey} /> : null
+    case 'llms':      return ctx.canSeeOps ? <LlmPage       refreshKey={ctx.refreshKey} /> : null
+    case 'cloud':     return ctx.canSeeOps ? <CloudPage     refreshKey={ctx.refreshKey} /> : null
+
+    case 'organizations':
+      if (!ctx.canSeeOrganizations) return null
+      return ctx.selectedOrgId != null
+        ? <OrganizationDetailPage orgId={ctx.selectedOrgId} onBack={() => ctx.setSelectedOrgId(null)} />
+        : <OrganizationsPage onSelect={ctx.setSelectedOrgId} />
+
+    case 'users':
+      if (!ctx.canSeeUsers) return null
+      return ctx.selectedUserId != null
+        ? <UserDetailPage userId={ctx.selectedUserId} onBack={() => ctx.setSelectedUserId(null)} />
+        : <UsersPage onSelect={ctx.setSelectedUserId} />
+
+    default: {
+      const item = findNavItem(active)
+      return <ComingSoon title={item?.label ?? 'Coming soon'} />
+    }
+  }
+}
+
+/** The pre-existing status chip + Refresh/Generate Report controls,
+ * relocated unchanged in behavior (same state/handlers) from the old
+ * Header.tsx into AppShell's extraActions slot -- clicking Refresh still
+ * bumps the same refreshKey every ops page's own fetch effect already
+ * depended on before Phase 2. */
+function StatusAndReportActions({
+  status, generating, reportExists, onRefresh, onGenerate,
+}: {
+  status: 'UP' | 'WARN' | 'DOWN' | null
+  generating: boolean
+  reportExists: boolean
+  onRefresh: () => void
+  onGenerate: () => void
+}) {
+  const cfg = status === 'UP'
+    ? { label: 'All systems operational', color: '#22c55e' }
+    : status === 'WARN'
+      ? { label: 'Services degraded', color: '#f59e0b' }
+      : status === 'DOWN'
+        ? { label: 'One or more systems down', color: '#ef4444' }
+        : null
+
+  return (
+    <>
+      {cfg && (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: cfg.color }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: cfg.color }} />
+          {cfg.label}
+        </span>
+      )}
+      <button
+        onClick={onRefresh}
+        style={{
+          fontSize: 12, fontWeight: 600, padding: '6px 12px',
+          border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+          background: 'var(--bg2)', color: 'var(--text2)',
+        }}
+      >
+        ↺ Refresh
+      </button>
+      <button
+        onClick={onGenerate}
+        disabled={generating}
+        style={{
+          fontSize: 12, fontWeight: 600, padding: '6px 12px',
+          border: 'none', borderRadius: 'var(--radius-sm)',
+          background: generating ? 'rgba(0,229,160,0.4)' : 'var(--accent)',
+          color: '#000', cursor: generating ? 'not-allowed' : 'pointer',
+        }}
+      >
+        {generating ? 'Generating…' : '⊕ Generate Report'}
+      </button>
+      {reportExists && (
+        <a
+          href="/"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)' }}
+        >
+          View Report ↗
+        </a>
+      )}
+    </>
   )
 }
