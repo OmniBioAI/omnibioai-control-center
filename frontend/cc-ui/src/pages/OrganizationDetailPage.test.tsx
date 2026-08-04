@@ -294,6 +294,43 @@ describe('OrganizationDetailPage -- platform admin', () => {
     expect(await screen.findByText('User #7')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Edit Members' })).not.toBeInTheDocument()
   })
+
+  // ── PR11.2 Phase 4: Security summary + quick links ──────────────────────
+
+  it('shows the Security summary with real SSO status and explicit MFA/domain placeholders', async () => {
+    vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} />)
+    await screen.findByText('Acme Corp')
+
+    expect(screen.getByText('Security')).toBeInTheDocument()
+    expect(screen.getByText('Configured')).toBeInTheDocument() // sso.configured === true
+    expect(screen.getByText('Not configured')).toBeInTheDocument() // MFA placeholder
+    expect(screen.getByText('Pending verification')).toBeInTheDocument() // Domain placeholder
+  })
+
+  it('renders "View all teams" / "View roles & permissions" links when the callbacks are provided, and calls them with this org', async () => {
+    const user = userEvent.setup()
+    const onViewTeams = vi.fn()
+    const onViewRoles = vi.fn()
+    vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onViewTeams={onViewTeams} onViewRoles={onViewRoles} />)
+    await screen.findByText('Acme Corp')
+
+    await user.click(screen.getByRole('button', { name: /View all teams/ }))
+    expect(onViewTeams).toHaveBeenCalledWith(42)
+
+    await user.click(screen.getByRole('button', { name: /View roles & permissions/ }))
+    expect(onViewRoles).toHaveBeenCalledWith(42)
+  })
+
+  it('renders no quick links when onViewTeams/onViewRoles are omitted', async () => {
+    vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} />)
+    await screen.findByText('Acme Corp')
+
+    expect(screen.queryByRole('button', { name: /View all teams/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /View roles & permissions/ })).not.toBeInTheDocument()
+  })
 })
 
 describe('OrganizationDetailPage -- organization admin', () => {
@@ -350,5 +387,16 @@ describe('OrganizationDetailPage -- organization admin', () => {
 
     expect(await screen.findByText('Genomics')).toBeInTheDocument()
     expect(teams.listTeams).toHaveBeenCalledWith(5)
+  })
+
+  it('shows the Security summary with SSO marked not available (OrganizationOut has no SSO field)', async () => {
+    vi.mocked(organizations.fetchMyOrg).mockResolvedValue(myOrg)
+    render(<OrganizationDetailPage orgId={5} onBack={vi.fn()} />)
+    await screen.findByText('My Org')
+
+    expect(screen.getByText('Security')).toBeInTheDocument()
+    expect(screen.getByText('Not available in this view')).toBeInTheDocument()
+    expect(screen.getByText('Not configured')).toBeInTheDocument() // MFA placeholder
+    expect(screen.getByText('Pending verification')).toBeInTheDocument() // Domain placeholder
   })
 })

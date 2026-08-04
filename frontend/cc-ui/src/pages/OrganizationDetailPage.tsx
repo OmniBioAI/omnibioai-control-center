@@ -12,6 +12,7 @@ import { assignOrgMemberRole, fetchOrgRoles, removeOrgMemberRole, type RoleSumma
 import { hasPlatformAdminAccess } from '../auth'
 import OrganizationStatusBadge from '../components/organizations/OrganizationStatusBadge'
 import OrganizationSummaryCard from '../components/organizations/OrganizationSummaryCard'
+import SecuritySummaryCard from '../components/organizations/SecuritySummaryCard'
 import RoleAssignmentList from '../components/roles/RoleAssignmentList'
 import RoleSelector from '../components/roles/RoleSelector'
 import TeamsCard from '../components/teams/TeamsCard'
@@ -55,6 +56,43 @@ function ErrBox({ msg }: { msg: string }) {
 interface Props {
   orgId: number
   onBack: () => void
+  // PR11.2 (Phase 4): navigate to the standalone Teams / Roles &
+  // Permissions pages (navigation.ts), pre-scoped to this organization.
+  // Optional -- callers that don't pass these (existing tests, any future
+  // embedding of this page) just don't get the quick-link row; the
+  // embedded TeamsCard/MembersRolesCard below are unaffected either way.
+  onViewTeams?: (orgId: number) => void
+  onViewRoles?: (orgId: number) => void
+}
+
+/** Phase 4: "View all teams" / "View roles & permissions" -- links out to
+ * the new standalone pages instead of duplicating what TeamsCard/
+ * MembersRolesCard already render inline on this page. Renders nothing
+ * if neither callback was passed. */
+function QuickLinks({ orgId, onViewTeams, onViewRoles }: {
+  orgId: number
+  onViewTeams?: (orgId: number) => void
+  onViewRoles?: (orgId: number) => void
+}) {
+  if (!onViewTeams && !onViewRoles) return null
+  const linkButton: React.CSSProperties = {
+    fontSize: 12, fontWeight: 600, color: 'var(--accent)',
+    background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+  }
+  return (
+    <div style={{ display: 'flex', gap: 20, marginTop: 12 }}>
+      {onViewRoles && (
+        <button onClick={() => onViewRoles(orgId)} style={linkButton}>
+          View roles & permissions →
+        </button>
+      )}
+      {onViewTeams && (
+        <button onClick={() => onViewTeams(orgId)} style={linkButton}>
+          View all teams →
+        </button>
+      )}
+    </div>
+  )
 }
 
 /* ── Suspend/reactivate: platform-admin only, backend-enforced. This
@@ -214,7 +252,7 @@ function MembersRolesCard({ orgId }: { orgId: number }) {
 }
 
 /* ── Platform-admin view: GET /platform/orgs/{id} -- full detail. ────── */
-function PlatformDetailView({ orgId, onBack }: Props) {
+function PlatformDetailView({ orgId, onBack, onViewTeams, onViewRoles }: Props) {
   const [org, setOrg] = useState<PlatformOrgDetail | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -280,6 +318,10 @@ function PlatformDetailView({ orgId, onBack }: Props) {
         <OrganizationSummaryCard title="Licenses" summary={org.license_summary} />
       </div>
 
+      <SecuritySummaryCard ssoConfigured={org.sso.configured} />
+
+      <QuickLinks orgId={org.id} onViewTeams={onViewTeams} onViewRoles={onViewRoles} />
+
       <MembersRolesCard orgId={org.id} />
 
       <TeamsCard orgId={org.id} />
@@ -332,7 +374,7 @@ function PlatformDetailView({ orgId, onBack }: Props) {
    API call to fill the gap in (no members/teams/SSO/API-key/license
    pages exist yet, and building the data-fetching for their summaries
    here would be exactly that). ──────────────────────────────────────── */
-function MyOrgDetailView({ orgId, onBack }: Props) {
+function MyOrgDetailView({ orgId, onBack, onViewTeams, onViewRoles }: Props) {
   const [org, setOrg] = useState<MyOrg | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -382,6 +424,10 @@ function MyOrgDetailView({ orgId, onBack }: Props) {
         )}
       </div>
 
+      <SecuritySummaryCard ssoConfigured={null} />
+
+      <QuickLinks orgId={org.id} onViewTeams={onViewTeams} onViewRoles={onViewRoles} />
+
       <MembersRolesCard orgId={org.id} />
 
       <TeamsCard orgId={org.id} />
@@ -411,9 +457,9 @@ function BackLink({ onBack }: { onBack: () => void }) {
   )
 }
 
-export default function OrganizationDetailPage({ orgId, onBack }: Props) {
+export default function OrganizationDetailPage({ orgId, onBack, onViewTeams, onViewRoles }: Props) {
   const [isPlatformAdmin] = useState(() => hasPlatformAdminAccess())
   return isPlatformAdmin
-    ? <PlatformDetailView orgId={orgId} onBack={onBack} />
-    : <MyOrgDetailView orgId={orgId} onBack={onBack} />
+    ? <PlatformDetailView orgId={orgId} onBack={onBack} onViewTeams={onViewTeams} onViewRoles={onViewRoles} />
+    : <MyOrgDetailView orgId={orgId} onBack={onBack} onViewTeams={onViewTeams} onViewRoles={onViewRoles} />
 }

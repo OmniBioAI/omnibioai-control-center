@@ -19,6 +19,8 @@ import OrganizationsPage from '../pages/OrganizationsPage'
 import OrganizationDetailPage from '../pages/OrganizationDetailPage'
 import UsersPage from '../pages/UsersPage'
 import UserDetailPage from '../pages/UserDetailPage'
+import TeamsPage from '../pages/identity/TeamsPage'
+import RolesPage from '../pages/identity/RolesPage'
 import AuthGate from './AuthGate'
 
 /**
@@ -82,6 +84,13 @@ function AdminDashboard() {
   })
   const [selectedOrgId, setSelectedOrgId] = useState<number | null>(() => orgIdFromPath())
   const [selectedUserId, setSelectedUserId] = useState<number | null>(() => userIdFromPath())
+  // PR11.2: "View all teams" / "View roles & permissions" on
+  // OrganizationDetailPage land here pre-scoped to the org the admin was
+  // already looking at -- a hint only, not a route of its own (there's no
+  // /teams/{org_id} URL, unlike /organizations/{id}); TeamsPage/RolesPage
+  // fall back to their own first-organization default if this is null.
+  const [teamsOrgHint, setTeamsOrgHint] = useState<number | null>(null)
+  const [rolesOrgHint, setRolesOrgHint] = useState<number | null>(null)
   // AuthGate has already resolved the session (and populated auth.ts's
   // module-level cache) by the time this component ever renders -- no
   // separate fetch or local "logged in as" state needed here.
@@ -162,6 +171,20 @@ function AdminDashboard() {
     setActive(key)
     if (key !== 'organizations') setSelectedOrgId(null)
     if (key !== 'users') setSelectedUserId(null)
+    // A plain sidebar click (not a "View teams/roles" link) always starts
+    // from TeamsPage/RolesPage's own default, not a stale hint left over
+    // from a previous organization's detail page.
+    if (key !== 'teams') setTeamsOrgHint(null)
+    if (key !== 'roles') setRolesOrgHint(null)
+  }
+
+  const handleViewTeams = (orgId: number) => {
+    setTeamsOrgHint(orgId)
+    setActive('teams')
+  }
+  const handleViewRoles = (orgId: number) => {
+    setRolesOrgHint(orgId)
+    setActive('roles')
   }
 
   const handleSignOut = () => {
@@ -190,6 +213,7 @@ function AdminDashboard() {
       {renderPage(active, {
         canSeeOps, canSeeOrganizations, canSeeUsers, refreshKey,
         selectedOrgId, setSelectedOrgId, selectedUserId, setSelectedUserId,
+        teamsOrgHint, rolesOrgHint, onViewTeams: handleViewTeams, onViewRoles: handleViewRoles,
       })}
     </AppShell>
   )
@@ -204,6 +228,10 @@ interface RenderCtx {
   setSelectedOrgId: (id: number | null) => void
   selectedUserId: number | null
   setSelectedUserId: (id: number | null) => void
+  teamsOrgHint: number | null
+  rolesOrgHint: number | null
+  onViewTeams: (orgId: number) => void
+  onViewRoles: (orgId: number) => void
 }
 
 function renderPage(active: PageKey, ctx: RenderCtx) {
@@ -221,7 +249,14 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
     case 'organizations':
       if (!ctx.canSeeOrganizations) return null
       return ctx.selectedOrgId != null
-        ? <OrganizationDetailPage orgId={ctx.selectedOrgId} onBack={() => ctx.setSelectedOrgId(null)} />
+        ? (
+          <OrganizationDetailPage
+            orgId={ctx.selectedOrgId}
+            onBack={() => ctx.setSelectedOrgId(null)}
+            onViewTeams={ctx.onViewTeams}
+            onViewRoles={ctx.onViewRoles}
+          />
+        )
         : <OrganizationsPage onSelect={ctx.setSelectedOrgId} />
 
     case 'users':
@@ -229,6 +264,15 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
       return ctx.selectedUserId != null
         ? <UserDetailPage userId={ctx.selectedUserId} onBack={() => ctx.setSelectedUserId(null)} />
         : <UsersPage onSelect={ctx.setSelectedUserId} />
+
+    // PR11.2: same gate as 'organizations' -- see navigation.ts.
+    case 'teams':
+      if (!ctx.canSeeOrganizations) return null
+      return <TeamsPage initialOrgId={ctx.teamsOrgHint} />
+
+    case 'roles':
+      if (!ctx.canSeeOrganizations) return null
+      return <RolesPage initialOrgId={ctx.rolesOrgHint} />
 
     default: {
       const item = findNavItem(active)
