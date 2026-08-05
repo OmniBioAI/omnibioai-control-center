@@ -18,7 +18,7 @@ vi.mock('../../organizations', async () => {
 })
 
 const orgOptions: PlatformOrgSummary[] = [
-  { id: 3, name: 'Acme Corp', status: 'active', owner_email: null, member_count: 1, team_count: 0, api_key_count: 0, oauth_client_count: 0, license_count: 0, sso_enabled: false, created_at: '2026-07-01T00:00:00' },
+  { id: 3, name: 'Acme Corp', status: 'active', owner_email: null, member_count: 1, team_count: 0, api_key_count: 0, oauth_client_count: 0, license_count: 0, sso_enabled: false, mfa_policy_required: false, mfa_policy_configured: false, created_at: '2026-07-01T00:00:00' },
 ]
 
 const apiKeyCreatedEvent: AuditEvent = {

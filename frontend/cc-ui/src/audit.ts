@@ -95,7 +95,24 @@ export const KNOWN_EVENT_TYPES = [
   'sso_configuration_created', 'sso_configuration_updated', 'sso_enforcement_changed',
   // PR11.4c (Break-Glass Audit Completion).
   'sso_override_created', 'sso_override_removed',
+  // PR11.5.6 (Admin Console Security UI): the full, verified MFA event
+  // registry from omnibioai-auth's AuditEventType (PR11.5.1-PR11.5.5) --
+  // see docs/pr11-5-6-security-ui-discovery.md SS9 for why this is 16
+  // entries, not a smaller "relevant subset."
+  'mfa_device_enrollment_started', 'mfa_device_added', 'mfa_device_removed',
+  'mfa_enabled', 'mfa_disabled',
+  'mfa_challenge_required', 'mfa_verified', 'mfa_verification_failed',
+  'mfa_recovery_codes_generated', 'mfa_recovery_codes_regenerated',
+  'mfa_recovery_code_used', 'mfa_reset_by_admin',
+  'mfa_policy_enabled', 'mfa_policy_disabled',
+  'mfa_policy_override_created', 'mfa_policy_override_removed',
 ] as const
+
+// PR11.5.6: the subset of KNOWN_EVENT_TYPES the Security Dashboard
+// treats as a "security event" worth surfacing in its Recent Security
+// Events tile -- every MFA-domain event, nothing else (login_success/
+// role_created/etc. stay in the general Audit Logs page only).
+export const MFA_EVENT_TYPES: readonly string[] = KNOWN_EVENT_TYPES.filter(t => t.startsWith('mfa_'))
 
 /** "api_key_created" -> "API Key Created" -- display only. */
 // PR11.4c: explicit, friendlier wording for the two break-glass event

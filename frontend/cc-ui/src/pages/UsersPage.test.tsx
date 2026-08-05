@@ -24,6 +24,7 @@ vi.mock('../roles', async () => {
 const userRow = (overrides: Partial<users.PlatformUserSummary> = {}): users.PlatformUserSummary => ({
   id: 1, email: 'someone@acme.test', status: 'active', created_at: '2026-07-15T10:00:00',
   global_roles: [], org_count: 2, last_login_at: '2026-08-01T14:20:00Z', authentication_method: 'password',
+  mfa_enabled: false,
   ...overrides,
 })
 
@@ -37,7 +38,7 @@ describe('UsersPage', () => {
     // render without every test needing to mock this itself. Tests that
     // DO care about the dropdowns override these explicitly.
     vi.mocked(organizations.fetchPlatformOrgs).mockResolvedValue({
-      items: [{ id: 9, name: 'Acme Corp', status: 'active', created_at: '2026-01-01T00:00:00', owner_email: null, member_count: 1, team_count: 0, api_key_count: 0, oauth_client_count: 0, license_count: 0, sso_enabled: false }],
+      items: [{ id: 9, name: 'Acme Corp', status: 'active', created_at: '2026-01-01T00:00:00', owner_email: null, member_count: 1, team_count: 0, api_key_count: 0, oauth_client_count: 0, license_count: 0, sso_enabled: false, mfa_policy_required: false, mfa_policy_configured: false }],
       total: 1, page: 1, page_size: 100, total_pages: 1,
     })
     vi.mocked(roles.fetchPlatformRoles).mockResolvedValue([

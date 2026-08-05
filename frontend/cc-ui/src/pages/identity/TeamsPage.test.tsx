@@ -27,8 +27,8 @@ vi.mock('../../components/teams/TeamsCard', () => ({
 
 const platformOrgs = (): PlatformOrgListResponse => ({
   items: [
-    { id: 1, name: 'Acme Corp', status: 'active', created_at: '2026-07-15T10:00:00', owner_email: null, member_count: 1, team_count: 1, api_key_count: 0, oauth_client_count: 0, license_count: 0, sso_enabled: false },
-    { id: 2, name: 'Beta Labs', status: 'active', created_at: '2026-07-16T10:00:00', owner_email: null, member_count: 1, team_count: 0, api_key_count: 0, oauth_client_count: 0, license_count: 0, sso_enabled: false },
+    { id: 1, name: 'Acme Corp', status: 'active', created_at: '2026-07-15T10:00:00', owner_email: null, member_count: 1, team_count: 1, api_key_count: 0, oauth_client_count: 0, license_count: 0, sso_enabled: false, mfa_policy_required: false, mfa_policy_configured: false },
+    { id: 2, name: 'Beta Labs', status: 'active', created_at: '2026-07-16T10:00:00', owner_email: null, member_count: 1, team_count: 0, api_key_count: 0, oauth_client_count: 0, license_count: 0, sso_enabled: false, mfa_policy_required: false, mfa_policy_configured: false },
   ],
   total: 2, page: 1, page_size: 100, total_pages: 1,
 })

@@ -18,7 +18,7 @@ vi.mock('../organizations', async () => {
 const platformRow = (overrides: Partial<organizations.PlatformOrgSummary> = {}): organizations.PlatformOrgSummary => ({
   id: 1, name: 'Acme Corp', status: 'active', created_at: '2026-07-15T10:00:00',
   owner_email: 'owner@acme.test', member_count: 8, team_count: 3, api_key_count: 2,
-  oauth_client_count: 1, license_count: 5, sso_enabled: true, ...overrides,
+  oauth_client_count: 1, license_count: 5, sso_enabled: true, mfa_policy_required: false, mfa_policy_configured: false, ...overrides,
 })
 
 describe('OrganizationsPage -- platform admin', () => {

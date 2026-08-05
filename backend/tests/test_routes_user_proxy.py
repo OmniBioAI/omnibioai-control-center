@@ -3,7 +3,8 @@ tests/test_routes_user_proxy.py
 
 Unit tests for:
   - control_center.api.routes_user_proxy
-    (GET /platform/users, GET/PATCH /platform/users/{user_id})
+    (GET /platform/users, GET/PATCH /platform/users/{user_id},
+    POST /platform/users/{user_id}/mfa/reset)
 
 Mirrors test_routes_org_proxy.py's exact conventions (Phase 3 PR2) --
 these routes are a thin relay, no authorization decision is made here.
@@ -145,6 +146,36 @@ class TestUpdatePlatformUserProxy(unittest.TestCase):
                 "/platform/users/1", json={"status": "deleted"}, headers={"Authorization": "Bearer tok"}
             )
         self.assertEqual(resp.status_code, 400)
+
+
+class TestResetPlatformUserMFAProxy(unittest.TestCase):
+    """PR11.5.6. Same reasoning as TestUpdatePlatformUserProxy above --
+    omnibioai-auth's own require_permission(MANAGE_ALL_ORGS)
+    (routes_platform_users.py, PR11.5.4, unmodified) is what actually
+    decides every request."""
+
+    def test_forwards_post_and_status(self) -> None:
+        upstream = _mock_response(200, {"user_id": 1, "mfa_enabled": False, "mfa_status": "disabled"})
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_user_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.post("/platform/users/1/mfa/reset", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.json()["mfa_enabled"])
+        call_args = mock_ctx.__aenter__.return_value.request.call_args
+        self.assertEqual(call_args.args[0], "POST")
+        self.assertTrue(call_args.args[1].endswith("/platform/users/1/mfa/reset"))
+
+    def test_forwards_403_for_non_platform_admin(self) -> None:
+        upstream = _mock_response(403, {"detail": "Forbidden"})
+        with patch("control_center.api.routes_user_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.post("/platform/users/1/mfa/reset", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_forwards_404_for_nonexistent_user(self) -> None:
+        upstream = _mock_response(404, {"detail": "User not found"})
+        with patch("control_center.api.routes_user_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.post("/platform/users/999999/mfa/reset", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 404)
 
 
 if __name__ == "__main__":

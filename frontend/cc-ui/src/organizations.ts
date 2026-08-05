@@ -65,6 +65,13 @@ export interface PlatformOrgSummary {
   oauth_client_count: number
   license_count: number
   sso_enabled: boolean
+  // PR11.5.6: same computed-boolean shape as sso_enabled -- true iff
+  // this org has an OrganizationMFAPolicy row with required=true. See
+  // security.ts / docs/pr11-5-6-security-ui-discovery.md.
+  mfa_policy_required: boolean
+  // PR11.5.6: distinct from mfa_policy_required -- true iff any
+  // OrganizationMFAPolicy row exists (configured, whether on or off).
+  mfa_policy_configured: boolean
 }
 
 export interface PlatformOrgListResponse {

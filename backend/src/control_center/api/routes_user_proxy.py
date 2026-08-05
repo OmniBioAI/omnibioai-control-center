@@ -64,3 +64,13 @@ async def get_platform_user_proxy(user_id: int, request: Request) -> JSONRespons
 @router.patch("/platform/users/{user_id}")
 async def update_platform_user_proxy(user_id: int, request: Request) -> JSONResponse:
     return await _proxy("PATCH", f"/platform/users/{user_id}", request)
+
+
+# PR11.5.6 (Admin Console Security UI). omnibioai-auth's
+# POST /platform/users/{user_id}/mfa/reset (PR11.5.4, require_permission
+# (MANAGE_ALL_ORGS), unmodified) had no proxy route in this file until
+# now -- same pure-relay shape as the three routes above, no
+# authorization decision made here either.
+@router.post("/platform/users/{user_id}/mfa/reset")
+async def reset_platform_user_mfa_proxy(user_id: int, request: Request) -> JSONResponse:
+    return await _proxy("POST", f"/platform/users/{user_id}/mfa/reset", request)
