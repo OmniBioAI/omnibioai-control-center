@@ -31,6 +31,10 @@ const grid: React.CSSProperties = {
 const cardsGrid: React.CSSProperties = {
   display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginTop: 20,
 }
+const manageLinkButton: React.CSSProperties = {
+  fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 8,
+  border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text2)', cursor: 'pointer',
+}
 
 function Field({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -55,6 +59,11 @@ function ErrBox({ msg }: { msg: string }) {
 interface Props {
   orgId: number
   onBack: () => void
+  // PR11.4: navigates to ServiceAccountsPage (the 'api-keys' nav
+  // destination, deep-linked to this org, landing on the given tab) --
+  // AdminApp owns that page-routing state, this component never does,
+  // same division as onBack/onSelect everywhere else in this file.
+  onManageServiceAccounts: (orgId: number, tab: 'oauth-clients' | 'api-keys') => void
 }
 
 /* ── Suspend/reactivate: platform-admin only, backend-enforced. This
@@ -214,7 +223,7 @@ function MembersRolesCard({ orgId }: { orgId: number }) {
 }
 
 /* ── Platform-admin view: GET /platform/orgs/{id} -- full detail. ────── */
-function PlatformDetailView({ orgId, onBack }: Props) {
+function PlatformDetailView({ orgId, onBack, onManageServiceAccounts }: Props) {
   const [org, setOrg] = useState<PlatformOrgDetail | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -277,7 +286,21 @@ function PlatformDetailView({ orgId, onBack }: Props) {
         <OrganizationSummaryCard title="Teams" summary={org.team_summary} />
         <OrganizationSummaryCard title="API Keys" summary={org.api_key_summary} />
         <OrganizationSummaryCard title="OAuth Clients" summary={org.oauth_client_summary} />
+        {/* PR11.4: same total/active data api_key_summary/oauth_client_
+            summary already carried before this PR (real counts, from
+            platform_admin_service.py -- see discovery doc §5), just with
+            the two links this page was missing. No new fetch, no
+            duplicate management UI -- ServiceAccountsPage owns that. */}
         <OrganizationSummaryCard title="Licenses" summary={org.license_summary} />
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <button onClick={() => onManageServiceAccounts(org.id, 'oauth-clients')} style={manageLinkButton}>
+          Manage Service Accounts →
+        </button>
+        <button onClick={() => onManageServiceAccounts(org.id, 'api-keys')} style={manageLinkButton}>
+          Manage API Keys →
+        </button>
       </div>
 
       <MembersRolesCard orgId={org.id} />
@@ -411,9 +434,9 @@ function BackLink({ onBack }: { onBack: () => void }) {
   )
 }
 
-export default function OrganizationDetailPage({ orgId, onBack }: Props) {
+export default function OrganizationDetailPage({ orgId, onBack, onManageServiceAccounts }: Props) {
   const [isPlatformAdmin] = useState(() => hasPlatformAdminAccess())
   return isPlatformAdmin
-    ? <PlatformDetailView orgId={orgId} onBack={onBack} />
-    : <MyOrgDetailView orgId={orgId} onBack={onBack} />
+    ? <PlatformDetailView orgId={orgId} onBack={onBack} onManageServiceAccounts={onManageServiceAccounts} />
+    : <MyOrgDetailView orgId={orgId} onBack={onBack} onManageServiceAccounts={onManageServiceAccounts} />
 }

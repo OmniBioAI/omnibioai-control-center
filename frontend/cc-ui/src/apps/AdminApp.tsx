@@ -19,6 +19,7 @@ import OrganizationsPage from '../pages/OrganizationsPage'
 import OrganizationDetailPage from '../pages/OrganizationDetailPage'
 import UsersPage from '../pages/UsersPage'
 import UserDetailPage from '../pages/UserDetailPage'
+import ServiceAccountsPage from '../pages/identity/ServiceAccountsPage'
 import AuthGate from './AuthGate'
 
 /**
@@ -69,6 +70,15 @@ function userIdFromPath(): number | null {
   const m = window.location.pathname.match(/^\/users\/(\d+)$/)
   return m ? Number(m[1]) : null
 }
+// PR11.4: /iam/service-accounts(/{orgId}) deep-links into
+// ServiceAccountsPage, same convention as /organizations/{id} and
+// /users/{id} above -- the task's own required route, distinct from the
+// 'api-keys' PageKey (nav item key stays stable; only the URL groups it
+// under /iam/).
+function serviceAccountsOrgIdFromPath(): number | null {
+  const m = window.location.pathname.match(/^\/iam\/service-accounts\/(\d+)$/)
+  return m ? Number(m[1]) : null
+}
 
 function AdminDashboard() {
   const canSeeOps = hasAdminAccess()
@@ -78,10 +88,17 @@ function AdminDashboard() {
   const [active, setActive] = useState<PageKey>(() => {
     if (window.location.pathname.startsWith('/organizations')) return 'organizations'
     if (window.location.pathname.startsWith('/users')) return 'users'
+    if (window.location.pathname.startsWith('/iam/service-accounts')) return 'api-keys'
     return 'overview'
   })
   const [selectedOrgId, setSelectedOrgId] = useState<number | null>(() => orgIdFromPath())
   const [selectedUserId, setSelectedUserId] = useState<number | null>(() => userIdFromPath())
+  const [selectedServiceAccountsOrgId, setSelectedServiceAccountsOrgId] = useState<number | null>(() => serviceAccountsOrgIdFromPath())
+  // Not URL-persisted -- a lighter-weight UX detail than the deep-linked
+  // org id itself, same "keep it simple" precedent the rest of this
+  // routing already follows. Reset to the default whenever a fresh org
+  // is selected via the picker (no tab preference to carry there).
+  const [serviceAccountsInitialTab, setServiceAccountsInitialTab] = useState<'oauth-clients' | 'api-keys'>('oauth-clients')
   // AuthGate has already resolved the session (and populated auth.ts's
   // module-level cache) by the time this component ever renders -- no
   // separate fetch or local "logged in as" state needed here.
@@ -134,11 +151,12 @@ function AdminDashboard() {
     const path =
       active === 'organizations' ? (selectedOrgId != null ? `/organizations/${selectedOrgId}` : '/organizations')
       : active === 'users' ? (selectedUserId != null ? `/users/${selectedUserId}` : '/users')
+      : active === 'api-keys' ? (selectedServiceAccountsOrgId != null ? `/iam/service-accounts/${selectedServiceAccountsOrgId}` : '/iam/service-accounts')
       : '/'
     if (window.location.pathname !== path) {
       window.history.pushState(null, '', path)
     }
-  }, [active, selectedOrgId, selectedUserId])
+  }, [active, selectedOrgId, selectedUserId, selectedServiceAccountsOrgId])
 
   useEffect(() => {
     const onPopState = () => {
@@ -148,10 +166,14 @@ function AdminDashboard() {
       } else if (window.location.pathname.startsWith('/users')) {
         setActive('users')
         setSelectedUserId(userIdFromPath())
+      } else if (window.location.pathname.startsWith('/iam/service-accounts')) {
+        setActive('api-keys')
+        setSelectedServiceAccountsOrgId(serviceAccountsOrgIdFromPath())
       } else {
         setActive('overview')
         setSelectedOrgId(null)
         setSelectedUserId(null)
+        setSelectedServiceAccountsOrgId(null)
       }
     }
     window.addEventListener('popstate', onPopState)
@@ -162,6 +184,19 @@ function AdminDashboard() {
     setActive(key)
     if (key !== 'organizations') setSelectedOrgId(null)
     if (key !== 'users') setSelectedUserId(null)
+    if (key !== 'api-keys') setSelectedServiceAccountsOrgId(null)
+  }
+
+  // PR11.4: cross-page navigation for OrganizationDetailPage's "Manage
+  // Service Accounts"/"Manage API Keys" links -- unlike handleNavigate
+  // (a sidebar click, always starts that destination at its list root),
+  // this jumps straight to the 'api-keys' destination already
+  // deep-linked to one specific org, the same one the link was clicked
+  // from.
+  const navigateToServiceAccounts = (orgId: number, tab: 'oauth-clients' | 'api-keys' = 'oauth-clients') => {
+    setActive('api-keys')
+    setSelectedServiceAccountsOrgId(orgId)
+    setServiceAccountsInitialTab(tab)
   }
 
   const handleSignOut = () => {
@@ -190,6 +225,8 @@ function AdminDashboard() {
       {renderPage(active, {
         canSeeOps, canSeeOrganizations, canSeeUsers, refreshKey,
         selectedOrgId, setSelectedOrgId, selectedUserId, setSelectedUserId,
+        selectedServiceAccountsOrgId, setSelectedServiceAccountsOrgId, navigateToServiceAccounts,
+        serviceAccountsInitialTab,
       })}
     </AppShell>
   )
@@ -204,6 +241,10 @@ interface RenderCtx {
   setSelectedOrgId: (id: number | null) => void
   selectedUserId: number | null
   setSelectedUserId: (id: number | null) => void
+  selectedServiceAccountsOrgId: number | null
+  setSelectedServiceAccountsOrgId: (id: number | null) => void
+  navigateToServiceAccounts: (orgId: number, tab?: 'oauth-clients' | 'api-keys') => void
+  serviceAccountsInitialTab: 'oauth-clients' | 'api-keys'
 }
 
 function renderPage(active: PageKey, ctx: RenderCtx) {
@@ -221,7 +262,13 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
     case 'organizations':
       if (!ctx.canSeeOrganizations) return null
       return ctx.selectedOrgId != null
-        ? <OrganizationDetailPage orgId={ctx.selectedOrgId} onBack={() => ctx.setSelectedOrgId(null)} />
+        ? (
+          <OrganizationDetailPage
+            orgId={ctx.selectedOrgId}
+            onBack={() => ctx.setSelectedOrgId(null)}
+            onManageServiceAccounts={(orgId, tab) => ctx.navigateToServiceAccounts(orgId, tab)}
+          />
+        )
         : <OrganizationsPage onSelect={ctx.setSelectedOrgId} />
 
     case 'users':
@@ -229,6 +276,27 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
       return ctx.selectedUserId != null
         ? <UserDetailPage userId={ctx.selectedUserId} onBack={() => ctx.setSelectedUserId(null)} />
         : <UsersPage onSelect={ctx.setSelectedUserId} />
+
+    // PR11.4: API keys/OAuth clients are per-org, so this destination is
+    // a "pick an org, then manage its service accounts" flow, same
+    // list -> detail shape as 'organizations' -- reusing
+    // OrganizationsPage as the picker rather than building a second org-
+    // list component (see docs/admin-console-pr11-service-accounts-
+    // discovery.md). Same hasOrganizationsAccess gate navigation.ts's
+    // own `visible` uses for this nav item; the actual
+    // manage_api_keys/manage_oauth_clients decisions happen entirely
+    // backend-side once a specific org is open.
+    case 'api-keys':
+      if (!ctx.canSeeOrganizations) return null
+      return ctx.selectedServiceAccountsOrgId != null
+        ? (
+          <ServiceAccountsPage
+            orgId={ctx.selectedServiceAccountsOrgId}
+            onBack={() => ctx.setSelectedServiceAccountsOrgId(null)}
+            initialTab={ctx.serviceAccountsInitialTab}
+          />
+        )
+        : <OrganizationsPage onSelect={ctx.setSelectedServiceAccountsOrgId} />
 
     default: {
       const item = findNavItem(active)
