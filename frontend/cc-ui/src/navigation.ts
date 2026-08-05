@@ -60,12 +60,15 @@ export const NAVIGATION: NavSection[] = [
     items: [
       { key: 'organizations', label: 'Organizations', functional: true, visible: hasOrganizationsAccess },
       { key: 'users', label: 'Users', functional: true, visible: hasPlatformAdminAccess },
-      // Team and role/permission management both already work today,
-      // but only reached via Organization Details -- there's no
-      // standalone page for either yet, so per "only existing PAGES are
-      // functional" these are Coming Soon as their own nav destination.
-      { key: 'teams', label: 'Teams', functional: false },
-      { key: 'roles', label: 'Roles & Permissions', functional: false },
+      // PR11.2: promoted from Coming Soon to standalone pages
+      // (src/pages/identity/TeamsPage.tsx, RolesPage.tsx). Both reuse the
+      // exact same components and endpoints OrganizationDetailPage's
+      // embedded Teams/Members & Roles sections already used -- this PR
+      // adds an organization picker in front of them, nothing else -- so
+      // the visibility gate is unchanged from 'organizations' above:
+      // anyone who can see an org's detail page can see its teams/roles.
+      { key: 'teams', label: 'Teams', functional: true, visible: hasOrganizationsAccess },
+      { key: 'roles', label: 'Roles & Permissions', functional: true, visible: hasOrganizationsAccess },
     ],
   },
   {
@@ -99,7 +102,19 @@ export const NAVIGATION: NavSection[] = [
     key: 'security',
     label: 'Security',
     items: [
-      { key: 'iam', label: 'IAM', functional: false },
+      // PR11.3: Enterprise SSO Management UI. functional: true because a
+      // real page now exists (SSOSettingsPage, reached via an
+      // organization picker -- SSO config is per-org, so this
+      // destination lands on an org-selection step before the settings
+      // page itself, the same "list -> detail" shape 'organizations'
+      // already uses). No new permission: `visible` reuses
+      // hasOrganizationsAccess, the same gate 'organizations' already
+      // has -- this only decides whether the nav entry (and the org
+      // picker) renders at all; the actual manage_sso /
+      // override_sso_enforcement checks happen entirely backend-side,
+      // per-org, once a specific org's SSO settings are opened (see
+      // docs/admin-console-pr11-sso-discovery.md).
+      { key: 'iam', label: 'IAM / SSO Management', functional: true, visible: hasOrganizationsAccess },
       { key: 'audit-logs', label: 'Audit Logs', functional: false },
       { key: 'sessions', label: 'Sessions', functional: false },
       // PR11.4: Service Accounts & API Keys Management UI. functional:
