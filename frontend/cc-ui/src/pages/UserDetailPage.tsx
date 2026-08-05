@@ -4,6 +4,7 @@ import { assignUserRole, fetchPlatformRoles, removeUserRole, type RoleSummary } 
 import StatusBadge from '../components/StatusBadge'
 import UserOrgMembershipList from '../components/users/UserOrgMembershipList'
 import UserStatusAction from '../components/users/UserStatusAction'
+import UserMFASecurityCard from '../components/users/UserMFASecurityCard'
 import RoleAssignmentList from '../components/roles/RoleAssignmentList'
 import RoleSelector from '../components/roles/RoleSelector'
 
@@ -164,17 +165,23 @@ export default function UserDetailPage({ userId, onBack }: Props) {
         <UserOrgMembershipList memberships={user.memberships} />
       </div>
 
-      {/* PR11.1: read-only security summary -- no MFA controls in this
-          PR (omnibioai-auth has no MFA of any kind to control yet; see
-          docs/admin-console-pr11-identity-findings.md). Just the same
-          two fields already shown above, presented as their own
-          security-focused card per this PR's spec. */}
       <div style={{ ...card, marginTop: 16 }}>
         <div style={{ ...label, marginBottom: 12 }}>Authentication</div>
         <div style={grid}>
           <Field title="Method">{authMethodLabel(user.authentication_method)}</Field>
           <Field title="Last Login">{formatDateTime(user.last_login_at)}</Field>
         </div>
+      </div>
+
+      {/* PR11.5.6 (Admin Console Security UI): promoted from PR11.1's
+          read-only placeholder above (which only ever showed method/
+          last-login, unchanged) into a real MFA status card + admin
+          Reset MFA action, now that omnibioai-auth has MFA
+          (PR11.5.1-PR11.5.5). See
+          docs/pr11-5-6-security-ui-discovery.md. */}
+      <div style={{ ...card, marginTop: 16 }}>
+        <div style={{ ...label, marginBottom: 12 }}>Security Information — MFA Status</div>
+        <UserMFASecurityCard user={user} onChanged={load} />
       </div>
     </div>
   )

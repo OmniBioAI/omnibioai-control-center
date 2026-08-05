@@ -32,6 +32,11 @@ export interface PlatformUserSummary {
   // convention, reused here.
   last_login_at: string | null
   authentication_method: string | null
+  // PR11.5.6 (Admin Console Security UI): live User.mfa_enabled column
+  // (PR11.5.1), same null-means-no-data convention this file already
+  // uses for last_login_at above -- see security.ts /
+  // docs/pr11-5-6-security-ui-discovery.md.
+  mfa_enabled: boolean
 }
 
 export interface PlatformUserListResponse {
@@ -84,6 +89,16 @@ export interface OrgMembershipSummary {
   joined_at: string | null
 }
 
+// PR11.5.6: mirrors omnibioai-auth's PlatformMFADeviceSummary
+// (app/schemas/user_admin.py) exactly -- no id, no encrypted_secret,
+// see that schema's own docstring for why.
+export interface PlatformMFADeviceSummary {
+  device_type: string
+  label: string | null
+  created_at: string
+  last_used_at: string | null
+}
+
 export interface PlatformUserDetail {
   id: number
   email: string
@@ -96,6 +111,17 @@ export interface PlatformUserDetail {
   status_changed_by_email: string | null
   last_login_at: string | null
   authentication_method: string | null
+  // PR11.5.6: live User.mfa_* columns (PR11.5.1) plus two small,
+  // already-scoped queries against MFADevice/MFARecoveryCode -- never a
+  // TOTP secret or a recovery code. See security.ts /
+  // docs/pr11-5-6-security-ui-discovery.md.
+  mfa_enabled: boolean
+  mfa_status: string
+  mfa_primary_method: string | null
+  mfa_enabled_at: string | null
+  mfa_last_verified_at: string | null
+  mfa_devices: PlatformMFADeviceSummary[]
+  mfa_recovery_codes_remaining: number
 }
 
 // PR11.1: display labels for the persisted authentication_method

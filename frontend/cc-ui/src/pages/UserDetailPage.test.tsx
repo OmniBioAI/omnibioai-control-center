@@ -37,6 +37,8 @@ const detail: PlatformUserDetail = {
   ],
   status_changed_at: null, status_changed_reason: null, status_changed_by_email: null,
   last_login_at: '2026-08-01T14:20:00Z', authentication_method: 'oidc',
+  mfa_enabled: false, mfa_status: 'disabled', mfa_primary_method: null,
+  mfa_enabled_at: null, mfa_last_verified_at: null, mfa_devices: [], mfa_recovery_codes_remaining: 0,
 }
 
 describe('UserDetailPage', () => {
@@ -163,8 +165,10 @@ describe('UserDetailPage', () => {
     render(<UserDetailPage userId={42} onBack={vi.fn()} />)
     await screen.findByRole('heading', { name: 'someone@acme.test' })
 
-    // Rendered twice each: General Information + the Authentication card.
-    expect(screen.getAllByText('Not available')).toHaveLength(4)
+    // Rendered twice each: General Information + the Authentication card,
+    // plus 3 more from the MFA Status card (Primary Method/Enabled At/
+    // Last Verified, all null on the shared `detail` fixture -- PR11.5.6).
+    expect(screen.getAllByText('Not available')).toHaveLength(7)
   })
 
   it('falls back to a read-only role list when the role catalog fails to load', async () => {

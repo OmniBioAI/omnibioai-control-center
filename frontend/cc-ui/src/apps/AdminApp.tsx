@@ -24,6 +24,8 @@ import RolesPage from '../pages/identity/RolesPage'
 import SSOSettingsPage from '../pages/identity/SSOSettingsPage'
 import ServiceAccountsPage from '../pages/identity/ServiceAccountsPage'
 import AuditLogsPage from '../pages/audit/AuditLogsPage'
+import SecurityDashboardPage from '../pages/security/SecurityDashboardPage'
+import OrganizationMFAPolicyPage from '../pages/security/OrganizationMFAPolicyPage'
 import AuthGate from './AuthGate'
 
 /**
@@ -88,6 +90,13 @@ function serviceAccountsOrgIdFromPath(): number | null {
   const m = window.location.pathname.match(/^\/iam\/service-accounts\/(\d+)$/)
   return m ? Number(m[1]) : null
 }
+// PR11.5.6: /security/mfa-policy/{orgId} deep-links straight into that
+// org's MFA policy settings, same convention as /iam/{orgId}'s own SSO
+// deep-link above.
+function mfaPolicyOrgIdFromPath(): number | null {
+  const m = window.location.pathname.match(/^\/security\/mfa-policy\/(\d+)$/)
+  return m ? Number(m[1]) : null
+}
 
 function AdminDashboard() {
   const canSeeOps = hasAdminAccess()
@@ -97,6 +106,10 @@ function AdminDashboard() {
   // manage_all_orgs-gated, not org-scoped, so this is a flat platform-
   // wide page (no org-picker/deep-link, unlike 'iam'/'api-keys').
   const canSeeAuditLogs = hasPlatformAdminAccess()
+  // PR11.5.6: same reasoning as canSeeAuditLogs -- GET /platform/users,
+  // GET /platform/orgs, GET /platform/audit-events (everything the
+  // Security Dashboard reads) are all manage_all_orgs-gated.
+  const canSeeSecurityOverview = hasPlatformAdminAccess()
 
   const [active, setActive] = useState<PageKey>(() => {
     if (window.location.pathname.startsWith('/organizations')) return 'organizations'
@@ -105,12 +118,14 @@ function AdminDashboard() {
     // below, or it would always match the SSO branch first.
     if (window.location.pathname.startsWith('/iam/service-accounts')) return 'api-keys'
     if (window.location.pathname.startsWith('/iam')) return 'iam'
+    if (window.location.pathname.startsWith('/security/mfa-policy')) return 'mfa-policy'
     return 'overview'
   })
   const [selectedOrgId, setSelectedOrgId] = useState<number | null>(() => orgIdFromPath())
   const [selectedUserId, setSelectedUserId] = useState<number | null>(() => userIdFromPath())
   const [selectedSsoOrgId, setSelectedSsoOrgId] = useState<number | null>(() => ssoOrgIdFromPath())
   const [selectedServiceAccountsOrgId, setSelectedServiceAccountsOrgId] = useState<number | null>(() => serviceAccountsOrgIdFromPath())
+  const [selectedMfaPolicyOrgId, setSelectedMfaPolicyOrgId] = useState<number | null>(() => mfaPolicyOrgIdFromPath())
   // Not URL-persisted -- a lighter-weight UX detail than the deep-linked
   // org id itself, same "keep it simple" precedent the rest of this
   // routing already follows. Reset to the default whenever a fresh org
@@ -177,11 +192,12 @@ function AdminDashboard() {
       : active === 'users' ? (selectedUserId != null ? `/users/${selectedUserId}` : '/users')
       : active === 'iam' ? (selectedSsoOrgId != null ? `/iam/${selectedSsoOrgId}` : '/iam')
       : active === 'api-keys' ? (selectedServiceAccountsOrgId != null ? `/iam/service-accounts/${selectedServiceAccountsOrgId}` : '/iam/service-accounts')
+      : active === 'mfa-policy' ? (selectedMfaPolicyOrgId != null ? `/security/mfa-policy/${selectedMfaPolicyOrgId}` : '/security/mfa-policy')
       : '/'
     if (window.location.pathname !== path) {
       window.history.pushState(null, '', path)
     }
-  }, [active, selectedOrgId, selectedUserId, selectedSsoOrgId, selectedServiceAccountsOrgId])
+  }, [active, selectedOrgId, selectedUserId, selectedSsoOrgId, selectedServiceAccountsOrgId, selectedMfaPolicyOrgId])
 
   useEffect(() => {
     const onPopState = () => {
@@ -197,12 +213,16 @@ function AdminDashboard() {
       } else if (window.location.pathname.startsWith('/iam')) {
         setActive('iam')
         setSelectedSsoOrgId(ssoOrgIdFromPath())
+      } else if (window.location.pathname.startsWith('/security/mfa-policy')) {
+        setActive('mfa-policy')
+        setSelectedMfaPolicyOrgId(mfaPolicyOrgIdFromPath())
       } else {
         setActive('overview')
         setSelectedOrgId(null)
         setSelectedUserId(null)
         setSelectedSsoOrgId(null)
         setSelectedServiceAccountsOrgId(null)
+        setSelectedMfaPolicyOrgId(null)
       }
     }
     window.addEventListener('popstate', onPopState)
@@ -215,6 +235,7 @@ function AdminDashboard() {
     if (key !== 'users') setSelectedUserId(null)
     if (key !== 'iam') setSelectedSsoOrgId(null)
     if (key !== 'api-keys') setSelectedServiceAccountsOrgId(null)
+    if (key !== 'mfa-policy') setSelectedMfaPolicyOrgId(null)
     // A plain sidebar click (not a "View teams/roles" link) always starts
     // from TeamsPage/RolesPage's own default, not a stale hint left over
     // from a previous organization's detail page.
@@ -274,12 +295,13 @@ function AdminDashboard() {
       ) : undefined}
     >
       {renderPage(active, {
-        canSeeOps, canSeeOrganizations, canSeeUsers, canSeeAuditLogs, refreshKey,
+        canSeeOps, canSeeOrganizations, canSeeUsers, canSeeAuditLogs, canSeeSecurityOverview, refreshKey,
         selectedOrgId, setSelectedOrgId, selectedUserId, setSelectedUserId,
         teamsOrgHint, rolesOrgHint, onViewTeams: handleViewTeams, onViewRoles: handleViewRoles,
         selectedSsoOrgId, setSelectedSsoOrgId, navigateToSsoSettings,
         selectedServiceAccountsOrgId, setSelectedServiceAccountsOrgId, navigateToServiceAccounts,
         serviceAccountsInitialTab,
+        selectedMfaPolicyOrgId, setSelectedMfaPolicyOrgId,
       })}
     </AppShell>
   )
@@ -290,6 +312,7 @@ interface RenderCtx {
   canSeeOrganizations: boolean
   canSeeUsers: boolean
   canSeeAuditLogs: boolean
+  canSeeSecurityOverview: boolean
   refreshKey: number
   selectedOrgId: number | null
   setSelectedOrgId: (id: number | null) => void
@@ -306,6 +329,8 @@ interface RenderCtx {
   setSelectedServiceAccountsOrgId: (id: number | null) => void
   navigateToServiceAccounts: (orgId: number, tab?: 'oauth-clients' | 'api-keys') => void
   serviceAccountsInitialTab: 'oauth-clients' | 'api-keys'
+  selectedMfaPolicyOrgId: number | null
+  setSelectedMfaPolicyOrgId: (id: number | null) => void
 }
 
 function renderPage(active: PageKey, ctx: RenderCtx) {
@@ -372,6 +397,24 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
       return ctx.selectedSsoOrgId != null
         ? <SSOSettingsPage orgId={ctx.selectedSsoOrgId} onBack={() => ctx.setSelectedSsoOrgId(null)} />
         : <OrganizationsPage onSelect={ctx.setSelectedSsoOrgId} />
+
+    // PR11.5.6: flat, no org-picker/deep-link -- same shape as
+    // 'audit-logs' above, for the identical reason (every API this page
+    // reads is manage_all_orgs-gated, not org-scoped).
+    case 'security-overview':
+      if (!ctx.canSeeSecurityOverview) return null
+      return <SecurityDashboardPage />
+
+    // PR11.5.6: MFA policy is per-org, so this destination is a "pick
+    // an org, then manage its MFA policy" flow, same list -> detail
+    // shape as 'iam' immediately above (and the identical
+    // hasOrganizationsAccess gate) -- see
+    // docs/pr11-5-6-security-ui-discovery.md SS2.
+    case 'mfa-policy':
+      if (!ctx.canSeeOrganizations) return null
+      return ctx.selectedMfaPolicyOrgId != null
+        ? <OrganizationMFAPolicyPage orgId={ctx.selectedMfaPolicyOrgId} onBack={() => ctx.setSelectedMfaPolicyOrgId(null)} />
+        : <OrganizationsPage onSelect={ctx.setSelectedMfaPolicyOrgId} />
 
     // PR11.4: API keys/OAuth clients are per-org, so this destination is
     // a "pick an org, then manage its service accounts" flow, same

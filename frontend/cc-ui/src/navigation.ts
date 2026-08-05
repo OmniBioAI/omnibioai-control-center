@@ -25,7 +25,7 @@ export type PageKey =
   | 'health' | 'docker' | 'ecosystem' | 'config' | 'llms' | 'cloud'
   | 'organizations' | 'users' | 'teams' | 'roles'
   | 'infrastructure' | 'workflows' | 'tool-execution' | 'ai-models'
-  | 'iam' | 'audit-logs' | 'sessions' | 'api-keys'
+  | 'security-overview' | 'mfa-policy' | 'iam' | 'audit-logs' | 'sessions' | 'api-keys'
   | 'billing' | 'licenses' | 'usage'
   | 'rag' | 'pubmed' | 'plugins'
   | 'integrations' | 'settings'
@@ -102,6 +102,31 @@ export const NAVIGATION: NavSection[] = [
     key: 'security',
     label: 'Security',
     items: [
+      // PR11.5.6: Enterprise Admin Console Security UI. Neither of these
+      // two claims the pre-existing 'sessions' reservation below --
+      // that slot is for a future session-list/revoke feature (see
+      // docs/pr11-security-foundation-discovery.md §1.8), unrelated to
+      // MFA. Placed first: a dashboard overview is the natural entry
+      // point into this section, same reasoning 'overview' is first in
+      // the top-level nav. See
+      // docs/pr11-5-6-security-ui-discovery.md §1 for the full decision
+      // (the task's own "enable the reserved Security item" framing
+      // didn't match this file's actual current shape -- 'security' was
+      // already a section, not a leaf item).
+      //
+      // security-overview: cross-organization aggregate (MFA adoption,
+      // org policy counts, recent MFA/audit events) -- same
+      // hasPlatformAdminAccess gate 'audit-logs' below already uses,
+      // for the identical reason (GET /platform/users, GET /platform/
+      // orgs, GET /platform/audit-events are all manage_all_orgs-gated,
+      // not org-scoped).
+      { key: 'security-overview', label: 'Security Overview', functional: true, visible: hasPlatformAdminAccess },
+      // mfa-policy: per-organization MFA requirement management -- same
+      // hasOrganizationsAccess gate 'iam'/'api-keys' below already use,
+      // for the identical reason (GET/POST/PATCH /orgs/{org_id}/
+      // mfa-policy is manage_sso-gated, org-scoped, same permission
+      // 'iam' already reuses for SSO config).
+      { key: 'mfa-policy', label: 'MFA Policy', functional: true, visible: hasOrganizationsAccess },
       // PR11.3: Enterprise SSO Management UI. functional: true because a
       // real page now exists (SSOSettingsPage, reached via an
       // organization picker -- SSO config is per-org, so this
