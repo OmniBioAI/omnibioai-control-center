@@ -4,3 +4,4 @@ coverage.json
 backend/coverage.json
 **/*.egg-info/
 Log.out
+frontend/cc-ui/node_modules/
