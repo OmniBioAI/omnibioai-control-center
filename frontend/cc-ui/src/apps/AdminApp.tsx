@@ -22,6 +22,7 @@ import UserDetailPage from '../pages/UserDetailPage'
 import TeamsPage from '../pages/identity/TeamsPage'
 import RolesPage from '../pages/identity/RolesPage'
 import SSOSettingsPage from '../pages/identity/SSOSettingsPage'
+import ServiceAccountsPage from '../pages/identity/ServiceAccountsPage'
 import AuthGate from './AuthGate'
 
 /**
@@ -78,6 +79,14 @@ function ssoOrgIdFromPath(): number | null {
   const m = window.location.pathname.match(/^\/iam\/(\d+)$/)
   return m ? Number(m[1]) : null
 }
+// PR11.4: /iam/service-accounts(/{orgId}) deep-links into
+// ServiceAccountsPage -- distinct from /iam/{orgId} above (SSO) despite
+// the shared /iam/ prefix; the 'api-keys' PageKey (nav item key stays
+// stable) is only associated with this /iam/service-accounts/ path.
+function serviceAccountsOrgIdFromPath(): number | null {
+  const m = window.location.pathname.match(/^\/iam\/service-accounts\/(\d+)$/)
+  return m ? Number(m[1]) : null
+}
 
 function AdminDashboard() {
   const canSeeOps = hasAdminAccess()
@@ -87,12 +96,21 @@ function AdminDashboard() {
   const [active, setActive] = useState<PageKey>(() => {
     if (window.location.pathname.startsWith('/organizations')) return 'organizations'
     if (window.location.pathname.startsWith('/users')) return 'users'
+    // /iam/service-accounts must be checked before the bare /iam prefix
+    // below, or it would always match the SSO branch first.
+    if (window.location.pathname.startsWith('/iam/service-accounts')) return 'api-keys'
     if (window.location.pathname.startsWith('/iam')) return 'iam'
     return 'overview'
   })
   const [selectedOrgId, setSelectedOrgId] = useState<number | null>(() => orgIdFromPath())
   const [selectedUserId, setSelectedUserId] = useState<number | null>(() => userIdFromPath())
   const [selectedSsoOrgId, setSelectedSsoOrgId] = useState<number | null>(() => ssoOrgIdFromPath())
+  const [selectedServiceAccountsOrgId, setSelectedServiceAccountsOrgId] = useState<number | null>(() => serviceAccountsOrgIdFromPath())
+  // Not URL-persisted -- a lighter-weight UX detail than the deep-linked
+  // org id itself, same "keep it simple" precedent the rest of this
+  // routing already follows. Reset to the default whenever a fresh org
+  // is selected via the picker (no tab preference to carry there).
+  const [serviceAccountsInitialTab, setServiceAccountsInitialTab] = useState<'oauth-clients' | 'api-keys'>('oauth-clients')
   // PR11.2: "View all teams" / "View roles & permissions" on
   // OrganizationDetailPage land here pre-scoped to the org the admin was
   // already looking at -- a hint only, not a route of its own (there's no
@@ -153,11 +171,12 @@ function AdminDashboard() {
       active === 'organizations' ? (selectedOrgId != null ? `/organizations/${selectedOrgId}` : '/organizations')
       : active === 'users' ? (selectedUserId != null ? `/users/${selectedUserId}` : '/users')
       : active === 'iam' ? (selectedSsoOrgId != null ? `/iam/${selectedSsoOrgId}` : '/iam')
+      : active === 'api-keys' ? (selectedServiceAccountsOrgId != null ? `/iam/service-accounts/${selectedServiceAccountsOrgId}` : '/iam/service-accounts')
       : '/'
     if (window.location.pathname !== path) {
       window.history.pushState(null, '', path)
     }
-  }, [active, selectedOrgId, selectedUserId, selectedSsoOrgId])
+  }, [active, selectedOrgId, selectedUserId, selectedSsoOrgId, selectedServiceAccountsOrgId])
 
   useEffect(() => {
     const onPopState = () => {
@@ -167,6 +186,9 @@ function AdminDashboard() {
       } else if (window.location.pathname.startsWith('/users')) {
         setActive('users')
         setSelectedUserId(userIdFromPath())
+      } else if (window.location.pathname.startsWith('/iam/service-accounts')) {
+        setActive('api-keys')
+        setSelectedServiceAccountsOrgId(serviceAccountsOrgIdFromPath())
       } else if (window.location.pathname.startsWith('/iam')) {
         setActive('iam')
         setSelectedSsoOrgId(ssoOrgIdFromPath())
@@ -175,6 +197,7 @@ function AdminDashboard() {
         setSelectedOrgId(null)
         setSelectedUserId(null)
         setSelectedSsoOrgId(null)
+        setSelectedServiceAccountsOrgId(null)
       }
     }
     window.addEventListener('popstate', onPopState)
@@ -186,6 +209,7 @@ function AdminDashboard() {
     if (key !== 'organizations') setSelectedOrgId(null)
     if (key !== 'users') setSelectedUserId(null)
     if (key !== 'iam') setSelectedSsoOrgId(null)
+    if (key !== 'api-keys') setSelectedServiceAccountsOrgId(null)
     // A plain sidebar click (not a "View teams/roles" link) always starts
     // from TeamsPage/RolesPage's own default, not a stale hint left over
     // from a previous organization's detail page.
@@ -210,6 +234,15 @@ function AdminDashboard() {
   const navigateToSsoSettings = (orgId: number) => {
     setActive('iam')
     setSelectedSsoOrgId(orgId)
+  }
+
+  // PR11.4: same idea as navigateToSsoSettings, for OrganizationDetailPage's
+  // "Manage Service Accounts"/"Manage API Keys" links -- also carries
+  // which tab to land on.
+  const navigateToServiceAccounts = (orgId: number, tab: 'oauth-clients' | 'api-keys' = 'oauth-clients') => {
+    setActive('api-keys')
+    setSelectedServiceAccountsOrgId(orgId)
+    setServiceAccountsInitialTab(tab)
   }
 
   const handleSignOut = () => {
@@ -240,6 +273,8 @@ function AdminDashboard() {
         selectedOrgId, setSelectedOrgId, selectedUserId, setSelectedUserId,
         teamsOrgHint, rolesOrgHint, onViewTeams: handleViewTeams, onViewRoles: handleViewRoles,
         selectedSsoOrgId, setSelectedSsoOrgId, navigateToSsoSettings,
+        selectedServiceAccountsOrgId, setSelectedServiceAccountsOrgId, navigateToServiceAccounts,
+        serviceAccountsInitialTab,
       })}
     </AppShell>
   )
@@ -261,6 +296,10 @@ interface RenderCtx {
   selectedSsoOrgId: number | null
   setSelectedSsoOrgId: (id: number | null) => void
   navigateToSsoSettings: (orgId: number) => void
+  selectedServiceAccountsOrgId: number | null
+  setSelectedServiceAccountsOrgId: (id: number | null) => void
+  navigateToServiceAccounts: (orgId: number, tab?: 'oauth-clients' | 'api-keys') => void
+  serviceAccountsInitialTab: 'oauth-clients' | 'api-keys'
 }
 
 function renderPage(active: PageKey, ctx: RenderCtx) {
@@ -285,6 +324,7 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
             onViewTeams={ctx.onViewTeams}
             onViewRoles={ctx.onViewRoles}
             onManageSso={ctx.navigateToSsoSettings}
+            onManageServiceAccounts={ctx.navigateToServiceAccounts}
           />
         )
         : <OrganizationsPage onSelect={ctx.setSelectedOrgId} />
@@ -319,6 +359,27 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
       return ctx.selectedSsoOrgId != null
         ? <SSOSettingsPage orgId={ctx.selectedSsoOrgId} onBack={() => ctx.setSelectedSsoOrgId(null)} />
         : <OrganizationsPage onSelect={ctx.setSelectedSsoOrgId} />
+
+    // PR11.4: API keys/OAuth clients are per-org, so this destination is
+    // a "pick an org, then manage its service accounts" flow, same
+    // list -> detail shape as 'organizations' -- reusing
+    // OrganizationsPage as the picker rather than building a second org-
+    // list component (see docs/admin-console-pr11-service-accounts-
+    // discovery.md). Same hasOrganizationsAccess gate navigation.ts's
+    // own `visible` uses for this nav item; the actual
+    // manage_api_keys/manage_oauth_clients decisions happen entirely
+    // backend-side once a specific org is open.
+    case 'api-keys':
+      if (!ctx.canSeeOrganizations) return null
+      return ctx.selectedServiceAccountsOrgId != null
+        ? (
+          <ServiceAccountsPage
+            orgId={ctx.selectedServiceAccountsOrgId}
+            onBack={() => ctx.setSelectedServiceAccountsOrgId(null)}
+            initialTab={ctx.serviceAccountsInitialTab}
+          />
+        )
+        : <OrganizationsPage onSelect={ctx.setSelectedServiceAccountsOrgId} />
 
     default: {
       const item = findNavItem(active)

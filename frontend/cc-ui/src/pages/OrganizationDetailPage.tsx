@@ -33,6 +33,10 @@ const grid: React.CSSProperties = {
 const cardsGrid: React.CSSProperties = {
   display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginTop: 20,
 }
+const manageLinkButton: React.CSSProperties = {
+  fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 8,
+  border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text2)', cursor: 'pointer',
+}
 
 function Field({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -69,6 +73,10 @@ interface Props {
   // AdminApp owns that page-routing state, this component never does,
   // same division as onBack/onSelect everywhere else in this file.
   onManageSso: (orgId: number) => void
+  // PR11.4: navigates to ServiceAccountsPage (the 'api-keys' nav
+  // destination, deep-linked to this org, landing on the given tab) --
+  // same division as onManageSso above.
+  onManageServiceAccounts: (orgId: number, tab: 'oauth-clients' | 'api-keys') => void
 }
 
 /** Phase 4: "View all teams" / "View roles & permissions" -- links out to
@@ -300,7 +308,7 @@ function SSOSummaryCard({ sso, onManageSso }: { sso: SSOConfigSummary; onManageS
 }
 
 /* ── Platform-admin view: GET /platform/orgs/{id} -- full detail. ────── */
-function PlatformDetailView({ orgId, onBack, onViewTeams, onViewRoles, onManageSso }: Props) {
+function PlatformDetailView({ orgId, onBack, onViewTeams, onViewRoles, onManageSso, onManageServiceAccounts }: Props) {
   const [org, setOrg] = useState<PlatformOrgDetail | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -363,7 +371,21 @@ function PlatformDetailView({ orgId, onBack, onViewTeams, onViewRoles, onManageS
         <OrganizationSummaryCard title="Teams" summary={org.team_summary} />
         <OrganizationSummaryCard title="API Keys" summary={org.api_key_summary} />
         <OrganizationSummaryCard title="OAuth Clients" summary={org.oauth_client_summary} />
+        {/* PR11.4: same total/active data api_key_summary/oauth_client_
+            summary already carried before this PR (real counts, from
+            platform_admin_service.py -- see discovery doc §5), just with
+            the two links this page was missing. No new fetch, no
+            duplicate management UI -- ServiceAccountsPage owns that. */}
         <OrganizationSummaryCard title="Licenses" summary={org.license_summary} />
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <button onClick={() => onManageServiceAccounts(org.id, 'oauth-clients')} style={manageLinkButton}>
+          Manage Service Accounts →
+        </button>
+        <button onClick={() => onManageServiceAccounts(org.id, 'api-keys')} style={manageLinkButton}>
+          Manage API Keys →
+        </button>
       </div>
 
       <SecuritySummaryCard ssoConfigured={org.sso.configured} />
@@ -492,9 +514,19 @@ function BackLink({ onBack }: { onBack: () => void }) {
   )
 }
 
-export default function OrganizationDetailPage({ orgId, onBack, onViewTeams, onViewRoles, onManageSso }: Props) {
+export default function OrganizationDetailPage({ orgId, onBack, onViewTeams, onViewRoles, onManageSso, onManageServiceAccounts }: Props) {
   const [isPlatformAdmin] = useState(() => hasPlatformAdminAccess())
   return isPlatformAdmin
-    ? <PlatformDetailView orgId={orgId} onBack={onBack} onViewTeams={onViewTeams} onViewRoles={onViewRoles} onManageSso={onManageSso} />
-    : <MyOrgDetailView orgId={orgId} onBack={onBack} onViewTeams={onViewTeams} onViewRoles={onViewRoles} onManageSso={onManageSso} />
+    ? (
+      <PlatformDetailView
+        orgId={orgId} onBack={onBack} onViewTeams={onViewTeams} onViewRoles={onViewRoles}
+        onManageSso={onManageSso} onManageServiceAccounts={onManageServiceAccounts}
+      />
+    )
+    : (
+      <MyOrgDetailView
+        orgId={orgId} onBack={onBack} onViewTeams={onViewTeams} onViewRoles={onViewRoles}
+        onManageSso={onManageSso} onManageServiceAccounts={onManageServiceAccounts}
+      />
+    )
 }

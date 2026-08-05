@@ -109,7 +109,7 @@ describe('OrganizationDetailPage -- platform admin', () => {
 
   it('reuses the PR1 detail response directly -- no separate calls invented', async () => {
     vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
-    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
 
     expect(await screen.findByText('Acme Corp')).toBeInTheDocument()
     expect(screen.getByText('owner@acme.test')).toBeInTheDocument()
@@ -121,14 +121,14 @@ describe('OrganizationDetailPage -- platform admin', () => {
 
   it('shows an error state instead of crashing when the org cannot be loaded', async () => {
     vi.mocked(organizations.fetchPlatformOrgDetail).mockRejectedValue(new Error('/platform/orgs/999 404'))
-    render(<OrganizationDetailPage orgId={999} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={999} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('404')
   })
 
   it('shows the suspend action and confirms before calling the backend', async () => {
     vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
     vi.mocked(organizations.setOrganizationStatus).mockResolvedValue(myOrg)
-    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
     await screen.findByText('Acme Corp')
 
     expect(screen.getByRole('button', { name: 'Suspend Organization' })).toBeInTheDocument()
@@ -139,7 +139,7 @@ describe('OrganizationDetailPage -- platform admin', () => {
 
   it('renders the SSO summary card fed by the existing PlatformOrgDetail.sso field, with a Manage SSO Settings link', async () => {
     vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
-    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
     await screen.findByText('Acme Corp')
 
     expect(screen.getByText('SSO Configuration')).toBeInTheDocument()
@@ -155,7 +155,7 @@ describe('OrganizationDetailPage -- platform admin', () => {
       ...platformDetail,
       sso: { configured: false, provider_type: null, issuer: null, status: null, enforced: false, override_active: false },
     })
-    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
     await screen.findByText('Acme Corp')
 
     expect(screen.getByText(/No SSO configured for this organization/)).toBeInTheDocument()
@@ -166,11 +166,49 @@ describe('OrganizationDetailPage -- platform admin', () => {
     const user = userEvent.setup()
     const onManageSso = vi.fn()
     vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
-    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={onManageSso} />)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={onManageSso} onManageServiceAccounts={vi.fn()} />)
     await screen.findByText('Acme Corp')
 
     await user.click(screen.getByRole('button', { name: /Manage SSO Settings/ }))
     expect(onManageSso).toHaveBeenCalledWith(42)
+  })
+
+  // ── PR11.4: Service Accounts / API Keys summary links ──────────────────
+
+  it('renders the API Keys / OAuth Clients summary cards fed by the existing PlatformOrgDetail fields, with Manage links', async () => {
+    vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
+    await screen.findByText('Acme Corp')
+
+    expect(screen.getByText('API Keys')).toBeInTheDocument()
+    expect(screen.getByText('OAuth Clients')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Manage Service Accounts/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Manage API Keys/ })).toBeInTheDocument()
+    // No new fetch invented for these links -- still the one
+    // fetchPlatformOrgDetail call every other section on this page uses.
+    expect(organizations.fetchPlatformOrgDetail).toHaveBeenCalledTimes(1)
+  })
+
+  it('calls onManageServiceAccounts with this org\'s id and the oauth-clients tab from "Manage Service Accounts"', async () => {
+    const user = userEvent.setup()
+    const onManageServiceAccounts = vi.fn()
+    vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={onManageServiceAccounts} />)
+    await screen.findByText('Acme Corp')
+
+    await user.click(screen.getByRole('button', { name: /Manage Service Accounts/ }))
+    expect(onManageServiceAccounts).toHaveBeenCalledWith(42, 'oauth-clients')
+  })
+
+  it('calls onManageServiceAccounts with this org\'s id and the api-keys tab from "Manage API Keys"', async () => {
+    const user = userEvent.setup()
+    const onManageServiceAccounts = vi.fn()
+    vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={onManageServiceAccounts} />)
+    await screen.findByText('Acme Corp')
+
+    await user.click(screen.getByRole('button', { name: /Manage API Keys/ }))
+    expect(onManageServiceAccounts).toHaveBeenCalledWith(42, 'api-keys')
   })
 
   // ── Phase 3 PR3B: Members & Roles ─────────────────────────────────────
@@ -179,7 +217,7 @@ describe('OrganizationDetailPage -- platform admin', () => {
     vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
     vi.mocked(organizations.fetchOrgMembers).mockResolvedValue(orgMembers)
     vi.mocked(roles.fetchOrgRoles).mockResolvedValue(orgRoleCatalog)
-    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
     await screen.findByText('Acme Corp')
 
     expect(await screen.findByText('member-seven@acme.test')).toBeInTheDocument()
@@ -195,7 +233,7 @@ describe('OrganizationDetailPage -- platform admin', () => {
     vi.mocked(organizations.fetchOrgMembers).mockResolvedValue(orgMembers)
     vi.mocked(roles.fetchOrgRoles).mockResolvedValue(orgRoleCatalog)
     vi.mocked(roles.assignOrgMemberRole).mockResolvedValue({ organization_id: 42, user_id: 7, roles: ['org_admin', 'org_member'] })
-    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
     await screen.findByText('Acme Corp')
 
     const orgMemberCheckbox = await screen.findByRole('checkbox', { name: /^org_member\b/ })
@@ -219,7 +257,7 @@ describe('OrganizationDetailPage -- platform admin', () => {
     vi.mocked(organizations.fetchOrgMembers).mockResolvedValue(orgMembers)
     vi.mocked(roles.fetchOrgRoles).mockResolvedValue(orgRoleCatalog)
     vi.mocked(roles.removeOrgMemberRole).mockResolvedValue(undefined)
-    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
     await screen.findByText('Acme Corp')
 
     const orgAdminCheckbox = await screen.findByRole('checkbox', { name: /^org_admin\b/ })
@@ -231,7 +269,7 @@ describe('OrganizationDetailPage -- platform admin', () => {
   it('hides the Members & Roles section entirely when the members fetch is forbidden, instead of showing an error', async () => {
     vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
     vi.mocked(organizations.fetchOrgMembers).mockRejectedValue(new Error('/orgs/42/members 403'))
-    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
     await screen.findByText('Acme Corp')
 
     await waitFor(() => expect(organizations.fetchOrgMembers).toHaveBeenCalled())
@@ -245,7 +283,7 @@ describe('OrganizationDetailPage -- platform admin', () => {
     vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
     vi.mocked(organizations.fetchOrgMembers).mockResolvedValue(orgMembers)
     vi.mocked(teams.listTeams).mockResolvedValue(orgTeams)
-    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
     await screen.findByText('Acme Corp')
 
     expect(await screen.findByText('Genomics')).toBeInTheDocument()
@@ -261,7 +299,7 @@ describe('OrganizationDetailPage -- platform admin', () => {
     vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
     vi.mocked(teams.listTeams).mockResolvedValue([])
     vi.mocked(teams.createTeam).mockResolvedValue({ id: 2, organization_id: 42, name: 'Proteomics', member_user_ids: [] })
-    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
     await screen.findByText('Acme Corp')
     await screen.findByText('No teams yet.')
 
@@ -278,7 +316,7 @@ describe('OrganizationDetailPage -- platform admin', () => {
     vi.mocked(organizations.fetchOrgMembers).mockResolvedValue(orgMembers)
     vi.mocked(teams.listTeams).mockResolvedValue(orgTeams)
     vi.mocked(teams.deleteTeam).mockResolvedValue(undefined)
-    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
     await screen.findByText('Genomics')
 
     const deleteButtons = screen.getAllByRole('button', { name: 'Delete' })
@@ -298,7 +336,7 @@ describe('OrganizationDetailPage -- platform admin', () => {
     ])
     vi.mocked(teams.listTeams).mockResolvedValue(orgTeams)
     vi.mocked(teams.updateTeamMembers).mockResolvedValue({ ...orgTeams[0], member_user_ids: [7, 9] })
-    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
     await screen.findByText('Genomics')
 
     await user.click(screen.getByRole('button', { name: 'Edit Members' }))
@@ -310,7 +348,7 @@ describe('OrganizationDetailPage -- platform admin', () => {
   it('hides the Teams card entirely when the teams fetch itself is forbidden', async () => {
     vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
     vi.mocked(teams.listTeams).mockRejectedValue(new Error('/orgs/42/teams 403'))
-    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
     await screen.findByText('Acme Corp')
 
     await waitFor(() => expect(teams.listTeams).toHaveBeenCalled())
@@ -326,7 +364,7 @@ describe('OrganizationDetailPage -- platform admin', () => {
     vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
     vi.mocked(organizations.fetchOrgMembers).mockRejectedValue(new Error('/orgs/42/members 403'))
     vi.mocked(teams.listTeams).mockResolvedValue(orgTeams)
-    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
     await screen.findByText('Genomics')
 
     expect(await screen.findByText('User #7')).toBeInTheDocument()
@@ -337,7 +375,7 @@ describe('OrganizationDetailPage -- platform admin', () => {
 
   it('shows the Security summary with real SSO status and explicit MFA/domain placeholders', async () => {
     vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
-    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
     await screen.findByText('Acme Corp')
 
     expect(screen.getByText('Security')).toBeInTheDocument()
@@ -351,7 +389,7 @@ describe('OrganizationDetailPage -- platform admin', () => {
     const onViewTeams = vi.fn()
     const onViewRoles = vi.fn()
     vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
-    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onViewTeams={onViewTeams} onViewRoles={onViewRoles} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onViewTeams={onViewTeams} onViewRoles={onViewRoles} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
     await screen.findByText('Acme Corp')
 
     await user.click(screen.getByRole('button', { name: /View all teams/ }))
@@ -363,7 +401,7 @@ describe('OrganizationDetailPage -- platform admin', () => {
 
   it('renders no quick links when onViewTeams/onViewRoles are omitted', async () => {
     vi.mocked(organizations.fetchPlatformOrgDetail).mockResolvedValue(platformDetail)
-    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={42} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
     await screen.findByText('Acme Corp')
 
     expect(screen.queryByRole('button', { name: /View all teams/ })).not.toBeInTheDocument()
@@ -391,7 +429,7 @@ describe('OrganizationDetailPage -- organization admin', () => {
 
   it('uses GET /orgs/{id} and shows only what OrganizationOut provides -- no summaries invented', async () => {
     vi.mocked(organizations.fetchMyOrg).mockResolvedValue(myOrg)
-    render(<OrganizationDetailPage orgId={5} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={5} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
 
     expect(await screen.findByText('My Org')).toBeInTheDocument()
     expect(organizations.fetchMyOrg).toHaveBeenCalledWith(5)
@@ -408,7 +446,7 @@ describe('OrganizationDetailPage -- organization admin', () => {
     // stops them; this proves the page renders that rejection, not a
     // blank/wrong-org screen.
     vi.mocked(organizations.fetchMyOrg).mockRejectedValue(new Error('/orgs/777 404'))
-    render(<OrganizationDetailPage orgId={777} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={777} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('404')
     expect(screen.queryByText('My Org')).not.toBeInTheDocument()
   })
@@ -420,7 +458,7 @@ describe('OrganizationDetailPage -- organization admin', () => {
   it('shows the Teams card for an org-admin/member viewing their own org', async () => {
     vi.mocked(organizations.fetchMyOrg).mockResolvedValue(myOrg)
     vi.mocked(teams.listTeams).mockResolvedValue(orgTeams)
-    render(<OrganizationDetailPage orgId={5} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={5} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
     await screen.findByText('My Org')
 
     expect(await screen.findByText('Genomics')).toBeInTheDocument()
@@ -429,7 +467,7 @@ describe('OrganizationDetailPage -- organization admin', () => {
 
   it('shows the Security summary with SSO marked not available (OrganizationOut has no SSO field)', async () => {
     vi.mocked(organizations.fetchMyOrg).mockResolvedValue(myOrg)
-    render(<OrganizationDetailPage orgId={5} onBack={vi.fn()} onManageSso={vi.fn()} />)
+    render(<OrganizationDetailPage orgId={5} onBack={vi.fn()} onManageSso={vi.fn()} onManageServiceAccounts={vi.fn()} />)
     await screen.findByText('My Org')
 
     expect(screen.getByText('Security')).toBeInTheDocument()

@@ -47,8 +47,9 @@ vi.mock('../pages/LlmPage', () => ({ default: () => <div data-testid="LlmPage" /
 vi.mock('../pages/CloudPage', () => ({ default: () => <div data-testid="CloudPage" /> }))
 // OrganizationsPage's onSelect is exercised (not just its presence) --
 // PR11.3 reuses this exact component as the org picker for the 'iam'
-// destination too, so the mock exposes a button to drive that selection
-// from either the 'organizations' or 'iam' routing tests below.
+// destination, and PR11.4 for 'api-keys' too, so the mock exposes a
+// button to drive that selection from any of the 'organizations'/'iam'/
+// 'api-keys' routing tests below.
 vi.mock('../pages/OrganizationsPage', () => ({
   default: ({ onSelect }: { onSelect: (id: number) => void }) => (
     <div data-testid="OrganizationsPage">
@@ -57,16 +58,19 @@ vi.mock('../pages/OrganizationsPage', () => ({
   ),
 }))
 vi.mock('../pages/OrganizationDetailPage', () => ({
-  default: ({ orgId, onViewTeams, onViewRoles, onManageSso }: {
+  default: ({ orgId, onViewTeams, onViewRoles, onManageSso, onManageServiceAccounts }: {
     orgId: number
     onViewTeams?: (id: number) => void
     onViewRoles?: (id: number) => void
     onManageSso: (id: number) => void
+    onManageServiceAccounts: (id: number, tab: 'oauth-clients' | 'api-keys') => void
   }) => (
     <div data-testid="OrganizationDetailPage" data-org-id={orgId}>
       {onViewTeams && <button onClick={() => onViewTeams(orgId)}>View all teams</button>}
       {onViewRoles && <button onClick={() => onViewRoles(orgId)}>View roles & permissions</button>}
       <button onClick={() => onManageSso(orgId)}>manage-sso-link</button>
+      <button onClick={() => onManageServiceAccounts(orgId, 'oauth-clients')}>manage-service-accounts-link</button>
+      <button onClick={() => onManageServiceAccounts(orgId, 'api-keys')}>manage-api-keys-link</button>
     </div>
   ),
 }))
@@ -87,6 +91,12 @@ vi.mock('../pages/identity/RolesPage', () => ({
 // PR11.3.
 vi.mock('../pages/identity/SSOSettingsPage', () => ({
   default: ({ orgId }: { orgId: number }) => <div data-testid="SSOSettingsPage" data-org-id={orgId} />,
+}))
+// PR11.4.
+vi.mock('../pages/identity/ServiceAccountsPage', () => ({
+  default: ({ orgId, initialTab }: { orgId: number; initialTab?: 'oauth-clients' | 'api-keys' }) => (
+    <div data-testid="ServiceAccountsPage" data-org-id={orgId} data-initial-tab={initialTab ?? 'oauth-clients'} />
+  ),
 }))
 
 const admin: SessionUser = {
@@ -395,7 +405,7 @@ describe('AdminApp auth gate', () => {
     expect(screen.queryByTestId('OrganizationsPage')).not.toBeInTheDocument()
   })
 
-  it('deep-links to the org picker (no id) on initial load', async () => {
+  it('deep-links to the org picker (no id) on initial load for SSO', async () => {
     window.history.pushState(null, '', '/iam')
     vi.mocked(auth.getToken).mockReturnValue('token-iam5')
     vi.mocked(auth.ensureSession).mockResolvedValue(admin)
@@ -425,6 +435,106 @@ describe('AdminApp auth gate', () => {
 
     const settings = await screen.findByTestId('SSOSettingsPage')
     expect(settings.getAttribute('data-org-id')).toBe('42')
+    expect(screen.queryByTestId('OrganizationDetailPage')).not.toBeInTheDocument()
+  })
+
+  // ── PR11.4: API Keys / Service Accounts nav item + routing ─────────────
+
+  it('shows "API Keys / Service Accounts" as a real nav destination, not Coming Soon', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-sa1')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    clickNav('API Keys / Service Accounts')
+
+    expect(await screen.findByTestId('OrganizationsPage')).toBeInTheDocument()
+    expect(screen.queryByText('Coming soon')).not.toBeInTheDocument()
+  })
+
+  it('hides the API Keys / Service Accounts nav item for a user with no organizational access', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-sa2')
+    vi.mocked(auth.ensureSession).mockResolvedValue(nonAdmin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(nonAdmin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(false)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    expect(screen.queryByText('API Keys / Service Accounts')).not.toBeInTheDocument()
+  })
+
+  it('reuses the Organizations picker to select an org, then reaches ServiceAccountsPage for it', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-sa3')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    clickNav('API Keys / Service Accounts')
+    await screen.findByTestId('OrganizationsPage')
+    fireEvent.click(screen.getByText('pick-org-7'))
+
+    const page = await screen.findByTestId('ServiceAccountsPage')
+    expect(page.getAttribute('data-org-id')).toBe('7')
+    expect(page.getAttribute('data-initial-tab')).toBe('oauth-clients')
+    expect(screen.queryByTestId('OrganizationsPage')).not.toBeInTheDocument()
+  })
+
+  it('deep-links directly to a specific organization\'s service accounts on initial load', async () => {
+    window.history.pushState(null, '', '/iam/service-accounts/9')
+    vi.mocked(auth.getToken).mockReturnValue('token-sa4')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+
+    const page = await screen.findByTestId('ServiceAccountsPage')
+    expect(page.getAttribute('data-org-id')).toBe('9')
+    expect(screen.queryByTestId('OrganizationsPage')).not.toBeInTheDocument()
+  })
+
+  it('deep-links to the org picker (no id) on initial load for service accounts', async () => {
+    window.history.pushState(null, '', '/iam/service-accounts')
+    vi.mocked(auth.getToken).mockReturnValue('token-sa5')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+
+    expect(await screen.findByTestId('OrganizationsPage')).toBeInTheDocument()
+    expect(screen.queryByTestId('ServiceAccountsPage')).not.toBeInTheDocument()
+  })
+
+  it('navigates straight from an organization\'s detail page to its service accounts, landing on the right tab', async () => {
+    window.history.pushState(null, '', '/organizations/42')
+    vi.mocked(auth.getToken).mockReturnValue('token-sa6')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    const detail = await screen.findByTestId('OrganizationDetailPage')
+    expect(detail.getAttribute('data-org-id')).toBe('42')
+
+    fireEvent.click(screen.getByText('manage-api-keys-link'))
+
+    const page = await screen.findByTestId('ServiceAccountsPage')
+    expect(page.getAttribute('data-org-id')).toBe('42')
+    expect(page.getAttribute('data-initial-tab')).toBe('api-keys')
     expect(screen.queryByTestId('OrganizationDetailPage')).not.toBeInTheDocument()
   })
 

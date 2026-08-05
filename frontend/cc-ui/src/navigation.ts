@@ -117,7 +117,20 @@ export const NAVIGATION: NavSection[] = [
       { key: 'iam', label: 'IAM / SSO Management', functional: true, visible: hasOrganizationsAccess },
       { key: 'audit-logs', label: 'Audit Logs', functional: false },
       { key: 'sessions', label: 'Sessions', functional: false },
-      { key: 'api-keys', label: 'API Keys', functional: false },
+      // PR11.4: Service Accounts & API Keys Management UI. functional:
+      // true because a real page now exists (ServiceAccountsPage,
+      // reached via an organization picker -- API keys/OAuth clients
+      // are per-org, so this destination lands on an org-selection step
+      // first, same "list -> detail" shape 'organizations' and PR11.3's
+      // 'iam' (SSO) destination already use). No new permission:
+      // `visible` reuses hasOrganizationsAccess, the same gate
+      // 'organizations' already has -- this only decides whether the
+      // nav entry (and the org picker) renders at all; the actual
+      // manage_api_keys / manage_oauth_clients checks happen entirely
+      // backend-side, per-org, once a specific org's service accounts
+      // are opened (see docs/admin-console-pr11-service-accounts-
+      // discovery.md).
+      { key: 'api-keys', label: 'API Keys / Service Accounts', functional: true, visible: hasOrganizationsAccess },
     ],
   },
   {
