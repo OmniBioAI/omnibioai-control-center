@@ -135,6 +135,59 @@ There is no dedicated "audit" permission registered anywhere in
 own instructions, one would only be introduced if the existing model
 couldn't express the requirement, and it already does.
 
+## Break-glass audit coverage (PR11.4c)
+
+The gap this doc's original Limitations section flagged — SSO
+break-glass override wasn't audited — is closed. `org_sso_service.
+set_sso_override`/`clear_sso_override` (the platform-admin bypass
+introduced in Phase 2 PR5, gated by the global `override_sso_enforcement`
+permission specifically so it works even if the org's own admin is
+locked out) now emit `SSO_OVERRIDE_CREATED`/`SSO_OVERRIDE_REMOVED`,
+following the exact same pattern this PR's own SSO events already use:
+
+- **`SSO_OVERRIDE_CREATED`** — emitted on every call to
+  `set_sso_override`, including a re-trigger of an already-active
+  override (the function's own docstring frames re-triggering as
+  deliberate — "updates who/why/when" — so each is independently
+  audit-worthy). Metadata: `action`, `override_reason` (the admin's
+  stated reason, required by the API), `enforced_before`, `timestamp`.
+  `before_state`/`after_state` capture `sso_override_active` and
+  `enforced` (the setting the override is suspending the effect of,
+  unchanged by the action itself but relevant context for what it's
+  doing).
+- **`SSO_OVERRIDE_REMOVED`** — emitted only when an override was
+  actually active before clearing, mirroring `SSO_ENFORCEMENT_CHANGED`'s
+  own "don't log a no-op" convention: `DELETE /override` on a config
+  with no active override silently no-ops (pre-existing behavior,
+  unchanged), and this PR doesn't manufacture an event for that.
+  `before_state` captures the override's reason and who set it, so the
+  ledger keeps a record of *why* the override existed even after it's
+  cleared.
+- **Actor attribution fix**: `clear_sso_override` had no
+  `actor_user_id` parameter at all before this PR (the route already
+  resolved the caller's identity for the sibling `POST /override`
+  route, but never passed it to `clear_sso_override`) — the same kind
+  of gap PR11.4b already found and fixed for `revoke_api_key`/
+  `revoke_oauth_client`. Fixed the same way: a new, backward-compatible
+  `actor_user_id: int | None = None` keyword parameter.
+- **Never `client_secret`/tokens/credentials** — neither function
+  touches those fields at all, so exclusion is automatic by
+  construction, verified directly by
+  `tests/test_pr11_identity_audit.py`'s existing
+  `_assert_no_secret_leakage` helper against the new events too.
+- **Admin Console labels**: `AuditLogsPage` shows these as "SSO
+  Break-Glass Override Enabled"/"...Removed" (an explicit label
+  override in `audit.ts`, not the generic word-splitting transform
+  every other event type uses) plus a one-line description in the
+  detail modal explaining what the override does in plain language.
+  Existing sensitive-field masking applies to these events exactly as
+  it does to every other event type — verified by a dedicated test
+  that injects a `client_secret`-named key into a mock override
+  event's metadata to confirm the UI would still catch it.
+
+See `docs/pr11-breakglass-audit-discovery.md` for the full discovery
+pass this was built from.
+
 ## Limitations
 
 Explicitly out of scope, per this PR's own instructions:
@@ -149,17 +202,7 @@ Explicitly out of scope, per this PR's own instructions:
   events it extends.
 - **No alerting.** No notification (email, Slack, webhook) fires on
   any event type, including sensitive ones like `sso_enforcement_changed`
-  or `user_disabled`.
-- **SSO break-glass override is not audited.** `org_sso_service.
-  set_sso_override`/`clear_sso_override` — the platform-admin
-  break-glass bypass introduced in Phase 2 PR5 — emit no audit event.
-  This PR's required-events list (per its own task) covers SSO
-  configuration create/update and enforcement changes only, not the
-  override endpoints specifically. Flagged here explicitly as a real
-  gap for a follow-up PR, not silently left uncovered: a break-glass
-  action is exactly the kind of event an audit trail exists to catch,
-  and its absence here is a scoping decision worth revisiting, not an
-  oversight.
+  or `sso_override_created`.
 - **Actor filtering is by numeric user ID only**, not by searching an
   email — `GET /platform/audit-events` has no user-search parameter
   (only exact `actor_user_id`), so the Admin Console's filter is a

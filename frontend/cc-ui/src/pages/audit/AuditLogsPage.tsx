@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
 import {
-  fetchAuditEvents, formatEventType, maskSensitiveFields, KNOWN_EVENT_TYPES,
+  fetchAuditEvents, formatEventType, describeEventType, maskSensitiveFields, KNOWN_EVENT_TYPES,
   type AuditEvent, type AuditEventListResponse,
 } from '../../audit'
 import { fetchPlatformOrgs, type PlatformOrgSummary } from '../../organizations'
@@ -37,6 +37,12 @@ function EventDetailModal({ event, onClose }: { event: AuditEvent; onClose: () =
           <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>{formatEventType(event.event_type)}</span>
           <button onClick={onClose} aria-label="Close" style={{ fontSize: 18, color: 'var(--muted)', lineHeight: 1, cursor: 'pointer', background: 'none', border: 'none' }}>×</button>
         </div>
+
+        {describeEventType(event.event_type) && (
+          <p style={{ fontSize: 12, color: 'var(--text2)', marginTop: -8, marginBottom: 16 }}>
+            {describeEventType(event.event_type)}
+          </p>
+        )}
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14, marginBottom: 16 }}>
           <Field title="Timestamp">{formatDate(event.created_at)}</Field>
