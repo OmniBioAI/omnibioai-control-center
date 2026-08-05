@@ -7,6 +7,7 @@ import {
   type MyOrg,
   type OrgMember,
   type PlatformOrgDetail,
+  type SSOConfigSummary,
 } from '../organizations'
 import { assignOrgMemberRole, fetchOrgRoles, removeOrgMemberRole, type RoleSummary } from '../roles'
 import { hasPlatformAdminAccess } from '../auth'
@@ -63,6 +64,11 @@ interface Props {
   // embedded TeamsCard/MembersRolesCard below are unaffected either way.
   onViewTeams?: (orgId: number) => void
   onViewRoles?: (orgId: number) => void
+  // PR11.3: navigates to SSOSettingsPage (the 'iam' nav destination,
+  // deep-linked to this org) for the full SSO configuration UI --
+  // AdminApp owns that page-routing state, this component never does,
+  // same division as onBack/onSelect everywhere else in this file.
+  onManageSso: (orgId: number) => void
 }
 
 /** Phase 4: "View all teams" / "View roles & permissions" -- links out to
@@ -251,8 +257,50 @@ function MembersRolesCard({ orgId }: { orgId: number }) {
   )
 }
 
+/* ── PR11.3: SSO summary + link into SSOSettingsPage. Replaces the old
+   inline read-only field list -- still fed by the same
+   PlatformOrgDetail.sso this page already fetches (configured,
+   provider_type, issuer, status, enforced, override_active; never
+   client_id, secrets, or timestamps, which aren't in this summary
+   shape), no new API call added to this page. The full detail
+   (client_id, allowed_domains, created/updated) and every mutation
+   (configure, enforce, break-glass) live entirely in SSOSettingsPage,
+   reached via the button below -- this card never duplicates that
+   configuration UI. ────────────────────────────────────────────────── */
+function SSOSummaryCard({ sso, onManageSso }: { sso: SSOConfigSummary; onManageSso: () => void }) {
+  return (
+    <div style={{ ...card, marginTop: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 12 }}>
+        <div style={label}>SSO Configuration</div>
+        <button
+          onClick={onManageSso}
+          style={{
+            fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 8,
+            border: '1px solid var(--border)', background: 'var(--bg2)', color: 'var(--text2)', cursor: 'pointer',
+          }}
+        >
+          Manage SSO Settings →
+        </button>
+      </div>
+      {sso.configured ? (
+        <div style={grid}>
+          <Field title="Provider">{sso.provider_type ?? '—'}</Field>
+          <Field title="Issuer">{sso.issuer ?? '—'}</Field>
+          <Field title="Status">{sso.status ?? '—'}</Field>
+          <Field title="Enforced">{sso.enforced ? 'Yes' : 'No'}</Field>
+          <Field title="Break-glass override">{sso.override_active ? 'Active' : 'None'}</Field>
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+          No SSO configured for this organization. Use Manage SSO Settings to register an OIDC provider.
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ── Platform-admin view: GET /platform/orgs/{id} -- full detail. ────── */
-function PlatformDetailView({ orgId, onBack, onViewTeams, onViewRoles }: Props) {
+function PlatformDetailView({ orgId, onBack, onViewTeams, onViewRoles, onManageSso }: Props) {
   const [org, setOrg] = useState<PlatformOrgDetail | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -326,20 +374,7 @@ function PlatformDetailView({ orgId, onBack, onViewTeams, onViewRoles }: Props) 
 
       <TeamsCard orgId={org.id} />
 
-      <div style={{ ...card, marginTop: 16 }}>
-        <div style={{ ...label, marginBottom: 12 }}>SSO Configuration</div>
-        {org.sso.configured ? (
-          <div style={grid}>
-            <Field title="Provider">{org.sso.provider_type ?? '—'}</Field>
-            <Field title="Issuer">{org.sso.issuer ?? '—'}</Field>
-            <Field title="Status">{org.sso.status ?? '—'}</Field>
-            <Field title="Enforced">{org.sso.enforced ? 'Yes' : 'No'}</Field>
-            <Field title="Break-glass override">{org.sso.override_active ? 'Active' : 'None'}</Field>
-          </div>
-        ) : (
-          <div style={{ fontSize: 12, color: 'var(--muted)' }}>No SSO configured for this organization.</div>
-        )}
-      </div>
+      <SSOSummaryCard sso={org.sso} onManageSso={() => onManageSso(org.id)} />
 
       <div style={{ ...card, marginTop: 16 }}>
         <div style={{ ...label, marginBottom: 12 }}>Recent Activity</div>
@@ -457,9 +492,9 @@ function BackLink({ onBack }: { onBack: () => void }) {
   )
 }
 
-export default function OrganizationDetailPage({ orgId, onBack, onViewTeams, onViewRoles }: Props) {
+export default function OrganizationDetailPage({ orgId, onBack, onViewTeams, onViewRoles, onManageSso }: Props) {
   const [isPlatformAdmin] = useState(() => hasPlatformAdminAccess())
   return isPlatformAdmin
-    ? <PlatformDetailView orgId={orgId} onBack={onBack} onViewTeams={onViewTeams} onViewRoles={onViewRoles} />
-    : <MyOrgDetailView orgId={orgId} onBack={onBack} onViewTeams={onViewTeams} onViewRoles={onViewRoles} />
+    ? <PlatformDetailView orgId={orgId} onBack={onBack} onViewTeams={onViewTeams} onViewRoles={onViewRoles} onManageSso={onManageSso} />
+    : <MyOrgDetailView orgId={orgId} onBack={onBack} onViewTeams={onViewTeams} onViewRoles={onViewRoles} onManageSso={onManageSso} />
 }

@@ -37,6 +37,7 @@ from control_center.api.routes_org_proxy import router as org_proxy_router
 from control_center.api.routes_user_proxy import router as user_proxy_router
 from control_center.api.routes_role_proxy import router as role_proxy_router
 from control_center.api.routes_team_proxy import router as team_proxy_router
+from control_center.api.routes_org_sso_proxy import router as org_sso_proxy_router
 from control_center.api.routes_cloud import router as cloud_router
 from control_center.core.auth import require_permission
 from control_center.api.routes_config import router as config_router
@@ -118,6 +119,7 @@ app.include_router(org_proxy_router)
 app.include_router(user_proxy_router)
 app.include_router(role_proxy_router)
 app.include_router(team_proxy_router)
+app.include_router(org_sso_proxy_router)
 # No blanket permission dependency here, unlike summary/docker/config/
 # services above -- routes_dashboard.py's own docstring explains why:
 # each section of its one response is authorized independently, either

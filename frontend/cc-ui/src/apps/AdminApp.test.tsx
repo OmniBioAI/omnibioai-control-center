@@ -45,16 +45,28 @@ vi.mock('../pages/EcosystemPage', () => ({ default: () => <div data-testid="Ecos
 vi.mock('../pages/ConfigPage', () => ({ default: () => <div data-testid="ConfigPage" /> }))
 vi.mock('../pages/LlmPage', () => ({ default: () => <div data-testid="LlmPage" /> }))
 vi.mock('../pages/CloudPage', () => ({ default: () => <div data-testid="CloudPage" /> }))
-vi.mock('../pages/OrganizationsPage', () => ({ default: () => <div data-testid="OrganizationsPage" /> }))
+// OrganizationsPage's onSelect is exercised (not just its presence) --
+// PR11.3 reuses this exact component as the org picker for the 'iam'
+// destination too, so the mock exposes a button to drive that selection
+// from either the 'organizations' or 'iam' routing tests below.
+vi.mock('../pages/OrganizationsPage', () => ({
+  default: ({ onSelect }: { onSelect: (id: number) => void }) => (
+    <div data-testid="OrganizationsPage">
+      <button onClick={() => onSelect(7)}>pick-org-7</button>
+    </div>
+  ),
+}))
 vi.mock('../pages/OrganizationDetailPage', () => ({
-  default: ({ orgId, onViewTeams, onViewRoles }: {
+  default: ({ orgId, onViewTeams, onViewRoles, onManageSso }: {
     orgId: number
     onViewTeams?: (id: number) => void
     onViewRoles?: (id: number) => void
+    onManageSso: (id: number) => void
   }) => (
     <div data-testid="OrganizationDetailPage" data-org-id={orgId}>
       {onViewTeams && <button onClick={() => onViewTeams(orgId)}>View all teams</button>}
       {onViewRoles && <button onClick={() => onViewRoles(orgId)}>View roles & permissions</button>}
+      <button onClick={() => onManageSso(orgId)}>manage-sso-link</button>
     </div>
   ),
 }))
@@ -71,6 +83,10 @@ vi.mock('../pages/identity/TeamsPage', () => ({
 }))
 vi.mock('../pages/identity/RolesPage', () => ({
   default: ({ initialOrgId }: { initialOrgId: number | null }) => <div data-testid="RolesPage" data-initial-org-id={String(initialOrgId)} />,
+}))
+// PR11.3.
+vi.mock('../pages/identity/SSOSettingsPage', () => ({
+  default: ({ orgId }: { orgId: number }) => <div data-testid="SSOSettingsPage" data-org-id={orgId} />,
 }))
 
 const admin: SessionUser = {
@@ -312,6 +328,104 @@ describe('AdminApp auth gate', () => {
     clickNav('Billing')
 
     expect(await screen.findByText('Coming soon')).toBeInTheDocument()
+  })
+
+  // ── PR11.3: IAM / SSO Management nav item + routing ────────────────────
+
+  it('shows "IAM / SSO Management" as a real nav destination, not Coming Soon', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-iam1')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    clickNav('IAM / SSO Management')
+
+    expect(await screen.findByTestId('OrganizationsPage')).toBeInTheDocument()
+    expect(screen.queryByText('Coming soon')).not.toBeInTheDocument()
+  })
+
+  it('hides the IAM / SSO Management nav item for a user with no organizational access', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-iam2')
+    vi.mocked(auth.ensureSession).mockResolvedValue(nonAdmin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(nonAdmin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(false)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    expect(screen.queryByText('IAM / SSO Management')).not.toBeInTheDocument()
+  })
+
+  it('reuses the Organizations picker to select an org, then reaches SSOSettingsPage for it', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-iam3')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    clickNav('IAM / SSO Management')
+    await screen.findByTestId('OrganizationsPage')
+    fireEvent.click(screen.getByText('pick-org-7'))
+
+    const settings = await screen.findByTestId('SSOSettingsPage')
+    expect(settings.getAttribute('data-org-id')).toBe('7')
+    expect(screen.queryByTestId('OrganizationsPage')).not.toBeInTheDocument()
+  })
+
+  it('deep-links directly to a specific organization\'s SSO settings on initial load', async () => {
+    window.history.pushState(null, '', '/iam/9')
+    vi.mocked(auth.getToken).mockReturnValue('token-iam4')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+
+    const settings = await screen.findByTestId('SSOSettingsPage')
+    expect(settings.getAttribute('data-org-id')).toBe('9')
+    expect(screen.queryByTestId('OrganizationsPage')).not.toBeInTheDocument()
+  })
+
+  it('deep-links to the org picker (no id) on initial load', async () => {
+    window.history.pushState(null, '', '/iam')
+    vi.mocked(auth.getToken).mockReturnValue('token-iam5')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+
+    expect(await screen.findByTestId('OrganizationsPage')).toBeInTheDocument()
+    expect(screen.queryByTestId('SSOSettingsPage')).not.toBeInTheDocument()
+  })
+
+  it('navigates straight from an organization\'s detail page to its SSO settings via Manage SSO Settings', async () => {
+    window.history.pushState(null, '', '/organizations/42')
+    vi.mocked(auth.getToken).mockReturnValue('token-iam6')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    const detail = await screen.findByTestId('OrganizationDetailPage')
+    expect(detail.getAttribute('data-org-id')).toBe('42')
+
+    fireEvent.click(screen.getByText('manage-sso-link'))
+
+    const settings = await screen.findByTestId('SSOSettingsPage')
+    expect(settings.getAttribute('data-org-id')).toBe('42')
+    expect(screen.queryByTestId('OrganizationDetailPage')).not.toBeInTheDocument()
   })
 
   it('signing out via the profile menu returns to the login screen', async () => {
