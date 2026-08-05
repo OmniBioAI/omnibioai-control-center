@@ -60,12 +60,15 @@ export const NAVIGATION: NavSection[] = [
     items: [
       { key: 'organizations', label: 'Organizations', functional: true, visible: hasOrganizationsAccess },
       { key: 'users', label: 'Users', functional: true, visible: hasPlatformAdminAccess },
-      // Team and role/permission management both already work today,
-      // but only reached via Organization Details -- there's no
-      // standalone page for either yet, so per "only existing PAGES are
-      // functional" these are Coming Soon as their own nav destination.
-      { key: 'teams', label: 'Teams', functional: false },
-      { key: 'roles', label: 'Roles & Permissions', functional: false },
+      // PR11.2: promoted from Coming Soon to standalone pages
+      // (src/pages/identity/TeamsPage.tsx, RolesPage.tsx). Both reuse the
+      // exact same components and endpoints OrganizationDetailPage's
+      // embedded Teams/Members & Roles sections already used -- this PR
+      // adds an organization picker in front of them, nothing else -- so
+      // the visibility gate is unchanged from 'organizations' above:
+      // anyone who can see an org's detail page can see its teams/roles.
+      { key: 'teams', label: 'Teams', functional: true, visible: hasOrganizationsAccess },
+      { key: 'roles', label: 'Roles & Permissions', functional: true, visible: hasOrganizationsAccess },
     ],
   },
   {
