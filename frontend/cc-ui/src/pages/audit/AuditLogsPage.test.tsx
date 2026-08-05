@@ -40,6 +40,23 @@ const ssoUpdatedEvent: AuditEvent = {
   created_at: '2026-08-05T11:00:00',
 }
 
+// PR11.4c fixture -- deliberately includes a sensitive-looking metadata
+// key (client_secret) even though the real backend never writes one
+// into an override event; this proves masking generalizes to the new
+// event type too, not just the ones PR11.4b's tests already covered.
+const overrideCreatedEvent: AuditEvent = {
+  id: 3, event_type: 'sso_override_created', actor_user_id: 1, actor_email: 'admin@omnibioai.org',
+  target_user_id: null, target_email: null, organization_id: 3, organization_name: 'Acme Corp',
+  resource_type: 'organization_sso_config', resource_id: '5',
+  before_state: { sso_override_active: false, enforced: true },
+  after_state: { sso_override_active: true, enforced: true },
+  metadata: {
+    action: 'override_created', override_reason: 'IdP outage, unblocking pending fix',
+    enforced_before: true, timestamp: '2026-08-05T12:00:00', client_secret: 'should-never-render',
+  },
+  created_at: '2026-08-05T12:00:00',
+}
+
 function listResponse(items: AuditEvent[], overrides: Partial<AuditEventListResponse> = {}): AuditEventListResponse {
   return { items, total: items.length, page: 1, page_size: 20, total_pages: 1, ...overrides }
 }
@@ -175,5 +192,53 @@ describe('AuditLogsPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  // ── PR11.4c: break-glass override event rendering ────────────────────
+
+  it('renders a break-glass override event with its friendly label in the table', async () => {
+    vi.mocked(audit.fetchAuditEvents).mockResolvedValue(listResponse([overrideCreatedEvent]))
+    render(<AuditLogsPage />)
+
+    expect(await screen.findByRole('cell', { name: 'SSO Break-Glass Override Enabled' })).toBeInTheDocument()
+  })
+
+  it('shows the friendly label, description, and unmasked reason in the break-glass event detail', async () => {
+    vi.mocked(audit.fetchAuditEvents).mockResolvedValue(listResponse([overrideCreatedEvent]))
+    const user = userEvent.setup()
+    render(<AuditLogsPage />)
+    await screen.findByRole('cell', { name: 'SSO Break-Glass Override Enabled' })
+
+    await user.click(screen.getByRole('button', { name: 'View →' }))
+
+    const dialog = screen.getByRole('dialog', { name: 'Audit event detail' })
+    expect(within(dialog).getByText('SSO Break-Glass Override Enabled')).toBeInTheDocument()
+    expect(within(dialog).getByText(/temporarily allowing password login/)).toBeInTheDocument()
+    // A non-sensitive field (override_reason) renders in full...
+    expect(within(dialog).getByText(/IdP outage, unblocking pending fix/)).toBeInTheDocument()
+  })
+
+  it('still masks sensitive-looking metadata on a break-glass event, same as any other event type', async () => {
+    vi.mocked(audit.fetchAuditEvents).mockResolvedValue(listResponse([overrideCreatedEvent]))
+    const user = userEvent.setup()
+    render(<AuditLogsPage />)
+    await screen.findByRole('cell', { name: 'SSO Break-Glass Override Enabled' })
+
+    await user.click(screen.getByRole('button', { name: 'View →' }))
+
+    const dialog = screen.getByRole('dialog', { name: 'Audit event detail' })
+    expect(within(dialog).queryByText(/should-never-render/)).not.toBeInTheDocument()
+    expect(within(dialog).getByText(/••••••••/)).toBeInTheDocument()
+  })
+
+  it('offers the break-glass event types as filter options with friendly labels', async () => {
+    vi.mocked(audit.fetchAuditEvents).mockResolvedValue(listResponse([]))
+    render(<AuditLogsPage />)
+    await screen.findByText('No audit events recorded yet.')
+
+    const select = screen.getByLabelText('Filter by event type') as HTMLSelectElement
+    const optionLabels = Array.from(select.options).map(o => o.text)
+    expect(optionLabels).toContain('SSO Break-Glass Override Enabled')
+    expect(optionLabels).toContain('SSO Break-Glass Override Removed')
   })
 })

@@ -93,14 +93,43 @@ export const KNOWN_EVENT_TYPES = [
   'api_key_created', 'api_key_revoked',
   'oauth_client_created', 'oauth_client_revoked',
   'sso_configuration_created', 'sso_configuration_updated', 'sso_enforcement_changed',
+  // PR11.4c (Break-Glass Audit Completion).
+  'sso_override_created', 'sso_override_removed',
 ] as const
 
 /** "api_key_created" -> "API Key Created" -- display only. */
+// PR11.4c: explicit, friendlier wording for the two break-glass event
+// types -- the generic word-splitting transform below would produce
+// "SSO Override Created"/"SSO Override Removed" (accurate, but the
+// task asks for the more explicit "Break-Glass" framing an admin
+// scanning the log should immediately recognize as sensitive). A
+// one-off override map, not a generalization of formatEventType --
+// see docs/pr11-breakglass-audit-discovery.md §3.7 for why.
+const EVENT_TYPE_LABEL_OVERRIDES: Record<string, string> = {
+  sso_override_created: 'SSO Break-Glass Override Enabled',
+  sso_override_removed: 'SSO Break-Glass Override Removed',
+}
+
 export function formatEventType(eventType: string): string {
+  if (EVENT_TYPE_LABEL_OVERRIDES[eventType]) return EVENT_TYPE_LABEL_OVERRIDES[eventType]
   return eventType
     .split('_')
     .map(word => (word.toUpperCase() === 'SSO' || word.toUpperCase() === 'API' ? word.toUpperCase() : word[0].toUpperCase() + word.slice(1)))
     .join(' ')
+}
+
+// PR11.4c: one-line, human-readable explanation shown alongside the
+// label in the detail modal -- only defined for the two break-glass
+// event types (the task's own scope), not a blanket requirement for
+// every event type. Returns undefined for anything else; callers
+// render nothing in that case rather than a placeholder.
+const EVENT_TYPE_DESCRIPTIONS: Record<string, string> = {
+  sso_override_created: 'An emergency override was enabled, temporarily allowing password login for this organization despite SSO enforcement.',
+  sso_override_removed: 'The emergency override was removed, restoring normal SSO enforcement for this organization.',
+}
+
+export function describeEventType(eventType: string): string | undefined {
+  return EVENT_TYPE_DESCRIPTIONS[eventType]
 }
 
 // ── Defense-in-depth secret masking for the detail view ─────────────────
