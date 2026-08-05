@@ -99,7 +99,19 @@ export const NAVIGATION: NavSection[] = [
     key: 'security',
     label: 'Security',
     items: [
-      { key: 'iam', label: 'IAM', functional: false },
+      // PR11.3: Enterprise SSO Management UI. functional: true because a
+      // real page now exists (SSOSettingsPage, reached via an
+      // organization picker -- SSO config is per-org, so this
+      // destination lands on an org-selection step before the settings
+      // page itself, the same "list -> detail" shape 'organizations'
+      // already uses). No new permission: `visible` reuses
+      // hasOrganizationsAccess, the same gate 'organizations' already
+      // has -- this only decides whether the nav entry (and the org
+      // picker) renders at all; the actual manage_sso /
+      // override_sso_enforcement checks happen entirely backend-side,
+      // per-org, once a specific org's SSO settings are opened (see
+      // docs/admin-console-pr11-sso-discovery.md).
+      { key: 'iam', label: 'IAM / SSO Management', functional: true, visible: hasOrganizationsAccess },
       { key: 'audit-logs', label: 'Audit Logs', functional: false },
       { key: 'sessions', label: 'Sessions', functional: false },
       { key: 'api-keys', label: 'API Keys', functional: false },

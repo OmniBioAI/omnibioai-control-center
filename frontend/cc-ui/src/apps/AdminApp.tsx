@@ -19,6 +19,7 @@ import OrganizationsPage from '../pages/OrganizationsPage'
 import OrganizationDetailPage from '../pages/OrganizationDetailPage'
 import UsersPage from '../pages/UsersPage'
 import UserDetailPage from '../pages/UserDetailPage'
+import SSOSettingsPage from '../pages/identity/SSOSettingsPage'
 import AuthGate from './AuthGate'
 
 /**
@@ -69,6 +70,12 @@ function userIdFromPath(): number | null {
   const m = window.location.pathname.match(/^\/users\/(\d+)$/)
   return m ? Number(m[1]) : null
 }
+// PR11.3: /iam/{orgId} deep-links straight into that org's SSO settings,
+// same convention as /organizations/{id} and /users/{id} above.
+function ssoOrgIdFromPath(): number | null {
+  const m = window.location.pathname.match(/^\/iam\/(\d+)$/)
+  return m ? Number(m[1]) : null
+}
 
 function AdminDashboard() {
   const canSeeOps = hasAdminAccess()
@@ -78,10 +85,12 @@ function AdminDashboard() {
   const [active, setActive] = useState<PageKey>(() => {
     if (window.location.pathname.startsWith('/organizations')) return 'organizations'
     if (window.location.pathname.startsWith('/users')) return 'users'
+    if (window.location.pathname.startsWith('/iam')) return 'iam'
     return 'overview'
   })
   const [selectedOrgId, setSelectedOrgId] = useState<number | null>(() => orgIdFromPath())
   const [selectedUserId, setSelectedUserId] = useState<number | null>(() => userIdFromPath())
+  const [selectedSsoOrgId, setSelectedSsoOrgId] = useState<number | null>(() => ssoOrgIdFromPath())
   // AuthGate has already resolved the session (and populated auth.ts's
   // module-level cache) by the time this component ever renders -- no
   // separate fetch or local "logged in as" state needed here.
@@ -134,11 +143,12 @@ function AdminDashboard() {
     const path =
       active === 'organizations' ? (selectedOrgId != null ? `/organizations/${selectedOrgId}` : '/organizations')
       : active === 'users' ? (selectedUserId != null ? `/users/${selectedUserId}` : '/users')
+      : active === 'iam' ? (selectedSsoOrgId != null ? `/iam/${selectedSsoOrgId}` : '/iam')
       : '/'
     if (window.location.pathname !== path) {
       window.history.pushState(null, '', path)
     }
-  }, [active, selectedOrgId, selectedUserId])
+  }, [active, selectedOrgId, selectedUserId, selectedSsoOrgId])
 
   useEffect(() => {
     const onPopState = () => {
@@ -148,10 +158,14 @@ function AdminDashboard() {
       } else if (window.location.pathname.startsWith('/users')) {
         setActive('users')
         setSelectedUserId(userIdFromPath())
+      } else if (window.location.pathname.startsWith('/iam')) {
+        setActive('iam')
+        setSelectedSsoOrgId(ssoOrgIdFromPath())
       } else {
         setActive('overview')
         setSelectedOrgId(null)
         setSelectedUserId(null)
+        setSelectedSsoOrgId(null)
       }
     }
     window.addEventListener('popstate', onPopState)
@@ -162,6 +176,17 @@ function AdminDashboard() {
     setActive(key)
     if (key !== 'organizations') setSelectedOrgId(null)
     if (key !== 'users') setSelectedUserId(null)
+    if (key !== 'iam') setSelectedSsoOrgId(null)
+  }
+
+  // PR11.3: cross-page navigation for OrganizationDetailPage's "Manage
+  // SSO Settings" link -- unlike handleNavigate (a sidebar click, always
+  // starts that destination at its list root), this jumps straight to
+  // the 'iam' destination already deep-linked to one specific org, the
+  // same one the link was clicked from.
+  const navigateToSsoSettings = (orgId: number) => {
+    setActive('iam')
+    setSelectedSsoOrgId(orgId)
   }
 
   const handleSignOut = () => {
@@ -190,6 +215,7 @@ function AdminDashboard() {
       {renderPage(active, {
         canSeeOps, canSeeOrganizations, canSeeUsers, refreshKey,
         selectedOrgId, setSelectedOrgId, selectedUserId, setSelectedUserId,
+        selectedSsoOrgId, setSelectedSsoOrgId, navigateToSsoSettings,
       })}
     </AppShell>
   )
@@ -204,6 +230,9 @@ interface RenderCtx {
   setSelectedOrgId: (id: number | null) => void
   selectedUserId: number | null
   setSelectedUserId: (id: number | null) => void
+  selectedSsoOrgId: number | null
+  setSelectedSsoOrgId: (id: number | null) => void
+  navigateToSsoSettings: (orgId: number) => void
 }
 
 function renderPage(active: PageKey, ctx: RenderCtx) {
@@ -221,7 +250,13 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
     case 'organizations':
       if (!ctx.canSeeOrganizations) return null
       return ctx.selectedOrgId != null
-        ? <OrganizationDetailPage orgId={ctx.selectedOrgId} onBack={() => ctx.setSelectedOrgId(null)} />
+        ? (
+          <OrganizationDetailPage
+            orgId={ctx.selectedOrgId}
+            onBack={() => ctx.setSelectedOrgId(null)}
+            onManageSso={ctx.navigateToSsoSettings}
+          />
+        )
         : <OrganizationsPage onSelect={ctx.setSelectedOrgId} />
 
     case 'users':
@@ -229,6 +264,22 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
       return ctx.selectedUserId != null
         ? <UserDetailPage userId={ctx.selectedUserId} onBack={() => ctx.setSelectedUserId(null)} />
         : <UsersPage onSelect={ctx.setSelectedUserId} />
+
+    // PR11.3: SSO config is per-org, so this destination is a
+    // "pick an org, then manage its SSO settings" flow, same list ->
+    // detail shape as 'organizations' -- reusing OrganizationsPage as
+    // the picker rather than building a second org-list component (see
+    // docs/admin-console-pr11-sso-discovery.md). Same
+    // hasOrganizationsAccess gate navigation.ts's own `visible` uses for
+    // this nav item; the actual manage_sso/override_sso_enforcement
+    // decisions happen entirely backend-side once a specific org is
+    // open (SSOSettingsPage never assumes access just because this gate
+    // passed).
+    case 'iam':
+      if (!ctx.canSeeOrganizations) return null
+      return ctx.selectedSsoOrgId != null
+        ? <SSOSettingsPage orgId={ctx.selectedSsoOrgId} onBack={() => ctx.setSelectedSsoOrgId(null)} />
+        : <OrganizationsPage onSelect={ctx.setSelectedSsoOrgId} />
 
     default: {
       const item = findNavItem(active)
