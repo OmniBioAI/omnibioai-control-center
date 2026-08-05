@@ -115,7 +115,19 @@ export const NAVIGATION: NavSection[] = [
       // per-org, once a specific org's SSO settings are opened (see
       // docs/admin-console-pr11-sso-discovery.md).
       { key: 'iam', label: 'IAM / SSO Management', functional: true, visible: hasOrganizationsAccess },
-      { key: 'audit-logs', label: 'Audit Logs', functional: false },
+      // PR11.4b: Enterprise Identity Audit Trail Foundation.
+      // functional: true because a real page now exists
+      // (AuditLogsPage). Gated by hasPlatformAdminAccess, not
+      // hasOrganizationsAccess like 'iam'/'api-keys' -- the backend
+      // route this page reads (GET /platform/audit-events) is gated by
+      // manage_all_orgs specifically (no dedicated audit permission
+      // exists, and this PR doesn't add one -- see
+      // docs/pr11-identity-audit-discovery.md §5), so
+      // hasPlatformAdminAccess is the one gate that actually matches
+      // who can reach real data here. The backend check is still the
+      // only thing that matters for security; this only decides
+      // whether the nav entry renders.
+      { key: 'audit-logs', label: 'Audit Logs', functional: true, visible: hasPlatformAdminAccess },
       { key: 'sessions', label: 'Sessions', functional: false },
       // PR11.4: Service Accounts & API Keys Management UI. functional:
       // true because a real page now exists (ServiceAccountsPage,

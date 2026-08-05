@@ -98,6 +98,8 @@ vi.mock('../pages/identity/ServiceAccountsPage', () => ({
     <div data-testid="ServiceAccountsPage" data-org-id={orgId} data-initial-tab={initialTab ?? 'oauth-clients'} />
   ),
 }))
+// PR11.4b.
+vi.mock('../pages/audit/AuditLogsPage', () => ({ default: () => <div data-testid="AuditLogsPage" /> }))
 
 const admin: SessionUser = {
   userId: '1', email: 'admin@omnibioai.org', roles: ['admin'],
@@ -536,6 +538,53 @@ describe('AdminApp auth gate', () => {
     expect(page.getAttribute('data-org-id')).toBe('42')
     expect(page.getAttribute('data-initial-tab')).toBe('api-keys')
     expect(screen.queryByTestId('OrganizationDetailPage')).not.toBeInTheDocument()
+  })
+
+  // ── PR11.4b: Audit Logs nav item + routing ──────────────────────────────
+
+  it('shows the Audit Logs nav item for a platform admin, even with no global admin role', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-audit1')
+    vi.mocked(auth.ensureSession).mockResolvedValue(orgOnlyUser)
+    vi.mocked(auth.getSessionUser).mockReturnValue(orgOnlyUser)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(false)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    expect(screen.getByText('Audit Logs')).toBeInTheDocument()
+  })
+
+  it('hides the Audit Logs nav item for a user who is not a platform admin', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-audit2')
+    vi.mocked(auth.ensureSession).mockResolvedValue(orgOnlyUser)
+    vi.mocked(auth.getSessionUser).mockReturnValue(orgOnlyUser)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(false)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(false)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    expect(screen.queryByText('Audit Logs')).not.toBeInTheDocument()
+  })
+
+  it('reaches Audit Logs via the sidebar, no longer Coming Soon', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-audit3')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    clickNav('Audit Logs')
+
+    expect(await screen.findByTestId('AuditLogsPage')).toBeInTheDocument()
+    expect(screen.queryByText('Coming soon')).not.toBeInTheDocument()
   })
 
   it('signing out via the profile menu returns to the login screen', async () => {

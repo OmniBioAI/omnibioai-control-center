@@ -23,6 +23,7 @@ import TeamsPage from '../pages/identity/TeamsPage'
 import RolesPage from '../pages/identity/RolesPage'
 import SSOSettingsPage from '../pages/identity/SSOSettingsPage'
 import ServiceAccountsPage from '../pages/identity/ServiceAccountsPage'
+import AuditLogsPage from '../pages/audit/AuditLogsPage'
 import AuthGate from './AuthGate'
 
 /**
@@ -92,6 +93,10 @@ function AdminDashboard() {
   const canSeeOps = hasAdminAccess()
   const canSeeOrganizations = hasOrganizationsAccess()
   const canSeeUsers = hasPlatformAdminAccess()
+  // PR11.4b: same gate as 'users' -- GET /platform/audit-events is
+  // manage_all_orgs-gated, not org-scoped, so this is a flat platform-
+  // wide page (no org-picker/deep-link, unlike 'iam'/'api-keys').
+  const canSeeAuditLogs = hasPlatformAdminAccess()
 
   const [active, setActive] = useState<PageKey>(() => {
     if (window.location.pathname.startsWith('/organizations')) return 'organizations'
@@ -269,7 +274,7 @@ function AdminDashboard() {
       ) : undefined}
     >
       {renderPage(active, {
-        canSeeOps, canSeeOrganizations, canSeeUsers, refreshKey,
+        canSeeOps, canSeeOrganizations, canSeeUsers, canSeeAuditLogs, refreshKey,
         selectedOrgId, setSelectedOrgId, selectedUserId, setSelectedUserId,
         teamsOrgHint, rolesOrgHint, onViewTeams: handleViewTeams, onViewRoles: handleViewRoles,
         selectedSsoOrgId, setSelectedSsoOrgId, navigateToSsoSettings,
@@ -284,6 +289,7 @@ interface RenderCtx {
   canSeeOps: boolean
   canSeeOrganizations: boolean
   canSeeUsers: boolean
+  canSeeAuditLogs: boolean
   refreshKey: number
   selectedOrgId: number | null
   setSelectedOrgId: (id: number | null) => void
@@ -334,6 +340,13 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
       return ctx.selectedUserId != null
         ? <UserDetailPage userId={ctx.selectedUserId} onBack={() => ctx.setSelectedUserId(null)} />
         : <UsersPage onSelect={ctx.setSelectedUserId} />
+
+    // PR11.4b: flat platform-wide page, no org-picker/deep-link --
+    // audit events span every organization, filtered in-page, not
+    // reached by drilling into one org first.
+    case 'audit-logs':
+      if (!ctx.canSeeAuditLogs) return null
+      return <AuditLogsPage />
 
     // PR11.2: same gate as 'organizations' -- see navigation.ts.
     case 'teams':
