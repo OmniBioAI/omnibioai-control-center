@@ -39,6 +39,17 @@ from jwt.exceptions import PyJWKClientError
 
 JWT_SECRET = os.environ.get("JWT_SECRET", "change-me")
 
+# PR12: omnibioai-auth now stamps every token with iss=omnibioai-auth,
+# aud=omnibioai-platform (app/core/jwt.py::_sign there). PyJWT's `aud`
+# handling is stricter than jose's in *both* directions: passing
+# `audience=` when the token has no `aud` claim raises
+# MissingRequiredClaimError, but *not* passing it when the token does have
+# one raises InvalidAudienceError -- so which kwargs to pass has to be
+# decided per-token (see _migration_aware_claims_kwargs below), not fixed,
+# to keep verifying pre-PR12/synthetic tokens that carry neither claim.
+JWT_ISSUER = os.environ.get("JWT_ISSUER", "omnibioai-auth")
+JWT_AUDIENCE = os.environ.get("JWT_AUDIENCE", "omnibioai-platform")
+
 # omnibioai-auth's JWKS endpoint (app/api/routes_jwks.py) -- publishes the
 # public half of whatever key app/core/rsa_keys.py loaded/generated, keyed
 # by `kid`. Only ever consulted for a token whose header already declares
@@ -87,6 +98,31 @@ class TokenInvalid(Exception):
     never decides what an invalid token means to its caller."""
 
 
+def _migration_aware_claims_kwargs(token: str) -> dict[str, Any]:
+    """Which of audience=/issuer= to pass to the real, signature-verified
+    jwt.decode() call below, decided from the token's own *unverified*
+    payload -- only used to decide whether to ask PyJWT to enforce a claim
+    that's actually there, never to trust the claim's value itself (the
+    verified decode call re-checks the value against the signed payload
+    regardless). A token that predates PR12 (or a synthetic test token)
+    has neither claim, so neither kwarg is passed for it -- same
+    opportunistic, only-enforced-when-present approach
+    omnibioai-auth/app/core/jwt.py::decode_token and omnibioai-iam-client's
+    AsyncIAMClient use.
+    """
+    try:
+        unverified = jwt.decode(token, options={"verify_signature": False})
+    except Exception:
+        return {}
+
+    kwargs: dict[str, Any] = {}
+    if "aud" in unverified:
+        kwargs["audience"] = JWT_AUDIENCE
+    if "iss" in unverified:
+        kwargs["issuer"] = JWT_ISSUER
+    return kwargs
+
+
 def _decode(token: str) -> dict[str, Any]:
     """Verifies signature + expiry, dispatched by the token's own `alg`
     header rather than by any local config -- mirrors omnibioai-auth's own
@@ -100,6 +136,7 @@ def _decode(token: str) -> dict[str, Any]:
         raise TokenInvalid(f"invalid token: {e}")
 
     alg = header.get("alg")
+    claims_kwargs = _migration_aware_claims_kwargs(token)
 
     if alg == "RS256":
         kid = header.get("kid")
@@ -115,7 +152,7 @@ def _decode(token: str) -> dict[str, Any]:
             # to an unverified path.
             raise TokenInvalid(f"jwks fetch failed: {e}")
         try:
-            return jwt.decode(token, signing_key, algorithms=["RS256"])
+            return jwt.decode(token, signing_key, algorithms=["RS256"], **claims_kwargs)
         except jwt.ExpiredSignatureError:
             raise TokenInvalid("expired")
         except jwt.InvalidTokenError as e:
@@ -123,7 +160,7 @@ def _decode(token: str) -> dict[str, Any]:
 
     if alg == "HS256":
         try:
-            return jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            return jwt.decode(token, JWT_SECRET, algorithms=["HS256"], **claims_kwargs)
         except jwt.ExpiredSignatureError:
             raise TokenInvalid("expired")
         except jwt.InvalidTokenError as e:
