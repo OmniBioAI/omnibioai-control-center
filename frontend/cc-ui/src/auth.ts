@@ -193,6 +193,20 @@ export function hasPlatformAdminAccess(): boolean {
   return hasPermission('manage_all_orgs')
 }
 
+// PR13. UX-only, same caveat as hasPlatformAdminAccess above: decides
+// whether RolesPage *offers* create/edit/delete for the currently
+// selected org's custom roles, never whether a request actually succeeds
+// -- the org-scoped role endpoints re-check manage_org (or platform-admin
+// bypass) server-side regardless. Approximate for a multi-org user: the
+// JWT's `permissions` claim (as of PR13's JWT cutover) reflects the
+// user's *primary* org membership only, so this can under-report for a
+// non-primary org the viewer also manages -- the page still degrades
+// safely in that case (403 from the backend, same as any other denied
+// mutation), it just doesn't offer the button proactively.
+export function hasOrgManageAccess(): boolean {
+  return hasPermission('manage_org') || hasPlatformAdminAccess()
+}
+
 // Phase 3 PR2. Broader than hasAdminAccess(): admits anyone with real
 // organizational context (a member of at least one org, reflected by a
 // non-null orgId -- Phase 1 PR3) in addition to the existing global
