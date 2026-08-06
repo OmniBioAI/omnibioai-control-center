@@ -59,6 +59,99 @@ afterEach(() => {
 // client never tries to source or send the token itself is the correct,
 // available proxy for "relies on the cookie instead."
 
+// ── PR12: authorization-adjacent helpers ────────────────────────────────────
+//
+// hasAdminAccess/hasPermission/hasPlatformAdminAccess/hasOrganizationsAccess
+// were previously only exercised indirectly through page-level tests
+// (UsersPage, OrganizationDetailPage, RolesPage, ...) -- these are the
+// helpers every one of those pages' platform-vs-org gating decisions
+// actually goes through, so they get their own direct coverage here. All
+// are UX-only signals (see their own doc comments in auth.ts) -- the
+// backend independently re-checks every one of these via its own
+// require_permission/require_admin/require_org_permission, which is what
+// actually decides whether a request succeeds.
+
+async function loginAs(user: {
+  roles: string[]
+  permissions: string[]
+  org_id?: string | null
+}) {
+  const accessToken = makeToken({ sub: '1', exp: nowSeconds() + 900 })
+  vi.stubGlobal('fetch', mockFetchByUrl({
+    '/auth/login': jsonResponse({ access_token: accessToken, refresh_token: 'r' }),
+    '/auth/validate': jsonResponse({
+      valid: true,
+      user_id: '1',
+      email: 'user@omnibioai.org',
+      ...user,
+    }),
+  }))
+  await auth.login('user@omnibioai.org', 'password')
+}
+
+describe('hasAdminAccess', () => {
+  it('is true for the admin role', async () => {
+    await loginAs({ roles: ['admin'], permissions: [] })
+    expect(auth.hasAdminAccess()).toBe(true)
+  })
+
+  it('is false without the admin role, even with other permissions', async () => {
+    await loginAs({ roles: ['org_admin'], permissions: ['manage_org'] })
+    expect(auth.hasAdminAccess()).toBe(false)
+  })
+})
+
+describe('hasPermission', () => {
+  it('is true when the permission is present', async () => {
+    await loginAs({ roles: [], permissions: ['manage_roles'] })
+    expect(auth.hasPermission('manage_roles')).toBe(true)
+  })
+
+  it('is false when the permission is absent', async () => {
+    await loginAs({ roles: [], permissions: ['manage_roles'] })
+    expect(auth.hasPermission('manage_all_orgs')).toBe(false)
+  })
+})
+
+describe('hasPlatformAdminAccess (Platform Owner tier)', () => {
+  it('is true only with the manage_all_orgs permission', async () => {
+    await loginAs({ roles: ['platform_admin'], permissions: ['manage_all_orgs'] })
+    expect(auth.hasPlatformAdminAccess()).toBe(true)
+  })
+
+  it('is false for an org_admin without manage_all_orgs (Org Admin tier is org-scoped, not global)', async () => {
+    await loginAs({ roles: ['org_admin'], permissions: ['manage_org'], org_id: 'org-1' })
+    expect(auth.hasPlatformAdminAccess()).toBe(false)
+  })
+
+  it('is false for the legacy admin role alone (permission-based, not role-name-based)', async () => {
+    await loginAs({ roles: ['admin'], permissions: [] })
+    expect(auth.hasPlatformAdminAccess()).toBe(false)
+  })
+})
+
+describe('hasOrganizationsAccess', () => {
+  it('admits a platform admin', async () => {
+    await loginAs({ roles: [], permissions: ['manage_all_orgs'] })
+    expect(auth.hasOrganizationsAccess()).toBe(true)
+  })
+
+  it('admits the legacy admin role', async () => {
+    await loginAs({ roles: ['admin'], permissions: [] })
+    expect(auth.hasOrganizationsAccess()).toBe(true)
+  })
+
+  it('admits any org member via a non-null org_id', async () => {
+    await loginAs({ roles: ['org_member'], permissions: [], org_id: 'org-1' })
+    expect(auth.hasOrganizationsAccess()).toBe(true)
+  })
+
+  it('denies a user with no admin role, no platform permission, and no org', async () => {
+    await loginAs({ roles: [], permissions: [], org_id: null })
+    expect(auth.hasOrganizationsAccess()).toBe(false)
+  })
+})
+
 describe('login', () => {
   it('stores only the access token, never the refresh token', async () => {
     const accessToken = makeToken({ sub: '1', exp: nowSeconds() + 900 })

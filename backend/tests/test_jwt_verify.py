@@ -277,6 +277,73 @@ class TestVerifyToken(unittest.TestCase):
         payload = verify_token(token)
         self.assertEqual(payload["sub"], "1")
 
+    # -- PR12: iss/aud -------------------------------------------------
+
+    def test_token_with_matching_iss_and_aud_succeeds(self) -> None:
+        token = _token(
+            sub="1",
+            iss=jwt_verify_module.JWT_ISSUER,
+            aud=jwt_verify_module.JWT_AUDIENCE,
+        )
+        payload = verify_token(token)
+        self.assertEqual(payload["sub"], "1")
+
+    def test_token_missing_iss_and_aud_entirely_still_succeeds(self) -> None:
+        """Migration-window requirement: a pre-PR12 (or synthetic test)
+        token has neither claim -- every other test in this file relies on
+        this already, this just makes it explicit."""
+        token = _token(sub="1")
+        payload = verify_token(token)
+        self.assertEqual(payload["sub"], "1")
+
+    def test_token_with_wrong_audience_raises(self) -> None:
+        token = _token(sub="1", aud="some-other-service")
+        with self.assertRaises(TokenInvalid):
+            verify_token(token)
+
+    def test_token_with_wrong_issuer_raises(self) -> None:
+        token = _token(sub="1", iss="some-other-service")
+        with self.assertRaises(TokenInvalid):
+            verify_token(token)
+
+    def test_rs256_token_with_matching_iss_and_aud_succeeds(self) -> None:
+        self._install_jwks({"keys": [_jwk(_PUBLIC_KEY, KID)]})
+        token = _rs256_token(
+            _PRIVATE_KEY,
+            KID,
+            sub="1",
+            iss=jwt_verify_module.JWT_ISSUER,
+            aud=jwt_verify_module.JWT_AUDIENCE,
+        )
+        payload = verify_token(token)
+        self.assertEqual(payload["sub"], "1")
+
+    def test_rs256_token_with_wrong_audience_raises(self) -> None:
+        self._install_jwks({"keys": [_jwk(_PUBLIC_KEY, KID)]})
+        token = _rs256_token(_PRIVATE_KEY, KID, sub="1", aud="some-other-service")
+        with self.assertRaises(TokenInvalid):
+            verify_token(token)
+
+    def test_unverified_claims_peek_failure_falls_back_to_no_claim_checks(self) -> None:
+        """_migration_aware_claims_kwargs peeks at the unverified payload
+        purely to decide whether to ask PyJWT to enforce aud/iss -- if that
+        peek itself fails (e.g. a payload segment that isn't valid JSON),
+        it must fall back to no claim-enforcement kwargs at all rather than
+        raising, leaving the *real* signature-verified decode below to be
+        the one that ultimately rejects the token."""
+
+        def b64url(data: bytes) -> str:
+            import base64
+
+            return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+        header = b64url(b'{"alg": "HS256", "typ": "JWT"}')
+        bad_payload = b64url(b"not-valid-json-at-all")
+        token = f"{header}.{bad_payload}.sig"
+
+        with self.assertRaises(TokenInvalid):
+            verify_token(token)
+
 
 if __name__ == "__main__":
     unittest.main()
