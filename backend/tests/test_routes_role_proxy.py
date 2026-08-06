@@ -219,5 +219,125 @@ class TestOrgRolesProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 404)
 
 
+class TestPlatformRoleCatalogCrudProxy(unittest.TestCase):
+    """PR13: POST/PUT/DELETE /platform/roles -- role catalog CRUD, new in
+    this PR (only read + user-assignment existed before)."""
+
+    def test_create_forwards_body_and_method(self) -> None:
+        upstream = _mock_response(201, {"id": 5, "name": "custom", "description": None, "permissions": [], "organization_id": None})
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_role_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.post("/platform/roles", json={"name": "custom", "permissions": []}, headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 201)
+        call_args = mock_ctx.__aenter__.return_value.request.call_args
+        self.assertEqual(call_args.args[0], "POST")
+        self.assertTrue(call_args.args[1].endswith("/platform/roles"))
+        self.assertIn(b'"custom"', call_args.kwargs["content"])
+
+    def test_create_forwards_409_for_duplicate_name(self) -> None:
+        upstream = _mock_response(409, {"detail": "Role name 'admin' is already taken by a platform-wide role"})
+        with patch("control_center.api.routes_role_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.post("/platform/roles", json={"name": "admin", "permissions": []}, headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 409)
+
+    def test_update_forwards_role_id_and_body(self) -> None:
+        upstream = _mock_response(200, {"id": 5, "name": "custom", "description": None, "permissions": [], "organization_id": None})
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_role_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.put("/platform/roles/5", json={"permissions": ["dataset.read"]}, headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 200)
+        call_args = mock_ctx.__aenter__.return_value.request.call_args
+        self.assertEqual(call_args.args[0], "PUT")
+        self.assertTrue(call_args.args[1].endswith("/platform/roles/5"))
+
+    def test_update_forwards_404_for_org_scoped_role(self) -> None:
+        upstream = _mock_response(404, {"detail": "Role not found"})
+        with patch("control_center.api.routes_role_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.put("/platform/roles/9", json={"permissions": []}, headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_delete_forwards_method_and_role_id(self) -> None:
+        upstream = _mock_no_content_response(204)
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_role_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.delete("/platform/roles/5", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 204)
+        call_args = mock_ctx.__aenter__.return_value.request.call_args
+        self.assertEqual(call_args.args[0], "DELETE")
+        self.assertTrue(call_args.args[1].endswith("/platform/roles/5"))
+
+    def test_delete_forwards_409_for_role_in_use(self) -> None:
+        upstream = _mock_response(409, {"detail": "Role is currently assigned and cannot be deleted"})
+        with patch("control_center.api.routes_role_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.delete("/platform/roles/5", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 409)
+
+
+class TestOrganizationRoleCatalogCrudProxy(unittest.TestCase):
+    """PR13: GET/POST /organizations/{id}/roles, GET
+    /organizations/{id}/permissions, PUT/DELETE
+    /organizations/{id}/roles/{role_id} -- entirely new surface, proxying
+    to omnibioai-auth's newer routes_organization_roles.py."""
+
+    def test_list_roles_forwards_organization_id(self) -> None:
+        upstream = _mock_response(200, [{"id": 1, "name": "org_admin", "description": None, "permissions": ["manage_org"], "organization_id": None}])
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_role_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.get("/organizations/7/roles", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 200)
+        call_args = mock_ctx.__aenter__.return_value.request.call_args
+        self.assertTrue(call_args.args[1].endswith("/organizations/7/roles"))
+
+    def test_list_permissions_forwards_organization_id(self) -> None:
+        upstream = _mock_response(200, [{"name": "dataset.read", "resource": "dataset", "action": "read", "scope": "both", "category": "dataset", "description": "", "legacy": False, "deprecated": False, "deprecated_reason": None}])
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_role_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.get("/organizations/7/permissions", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 200)
+        call_args = mock_ctx.__aenter__.return_value.request.call_args
+        self.assertTrue(call_args.args[1].endswith("/organizations/7/permissions"))
+
+    def test_create_role_forwards_body(self) -> None:
+        upstream = _mock_response(201, {"id": 9, "name": "reviewer", "description": None, "permissions": [], "organization_id": 7})
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_role_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.post("/organizations/7/roles", json={"name": "reviewer", "permissions": ["dataset.read"]}, headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 201)
+        call_args = mock_ctx.__aenter__.return_value.request.call_args
+        self.assertEqual(call_args.args[0], "POST")
+        self.assertTrue(call_args.args[1].endswith("/organizations/7/roles"))
+
+    def test_create_role_forwards_400_for_global_permission(self) -> None:
+        upstream = _mock_response(400, {"detail": "Organization-scoped roles cannot hold platform-wide permissions: manage_all_orgs"})
+        with patch("control_center.api.routes_role_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.post("/organizations/7/roles", json={"name": "sneaky", "permissions": ["manage_all_orgs"]}, headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_update_role_forwards_organization_and_role_id(self) -> None:
+        upstream = _mock_response(200, {"id": 9, "name": "reviewer", "description": None, "permissions": [], "organization_id": 7})
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_role_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.put("/organizations/7/roles/9", json={"permissions": ["dataset.read"]}, headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 200)
+        call_args = mock_ctx.__aenter__.return_value.request.call_args
+        self.assertTrue(call_args.args[1].endswith("/organizations/7/roles/9"))
+
+    def test_update_role_forwards_404_for_other_orgs_role(self) -> None:
+        upstream = _mock_response(404, {"detail": "Role not found"})
+        with patch("control_center.api.routes_role_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.put("/organizations/7/roles/99", json={"permissions": []}, headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_delete_role_forwards_organization_and_role_id(self) -> None:
+        upstream = _mock_no_content_response(204)
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_role_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.delete("/organizations/7/roles/9", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 204)
+        call_args = mock_ctx.__aenter__.return_value.request.call_args
+        self.assertEqual(call_args.args[0], "DELETE")
+        self.assertTrue(call_args.args[1].endswith("/organizations/7/roles/9"))
+
+
 if __name__ == "__main__":
     unittest.main()

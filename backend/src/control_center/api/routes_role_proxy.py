@@ -80,6 +80,27 @@ async def remove_platform_user_role_proxy(user_id: int, role_id: int, request: R
     return await _proxy("DELETE", f"/platform/users/{user_id}/roles/{role_id}", request)
 
 
+# ---------------- Platform-wide role catalog CRUD (PR13) ----------------
+# Create/edit/delete of the role catalog itself -- unlike the read +
+# user-assignment routes above, this never existed before PR13 (neither
+# here nor in omnibioai-auth). Same proxy pattern, no local authorization.
+
+
+@router.post("/platform/roles")
+async def create_platform_role_proxy(request: Request) -> Response:
+    return await _proxy("POST", "/platform/roles", request)
+
+
+@router.put("/platform/roles/{role_id}")
+async def update_platform_role_proxy(role_id: int, request: Request) -> Response:
+    return await _proxy("PUT", f"/platform/roles/{role_id}", request)
+
+
+@router.delete("/platform/roles/{role_id}")
+async def delete_platform_role_proxy(role_id: int, request: Request) -> Response:
+    return await _proxy("DELETE", f"/platform/roles/{role_id}", request)
+
+
 # ---------------- Org-scoped roles (Phase 3 PR3B) ----------------
 
 
@@ -101,3 +122,37 @@ async def assign_org_member_role_proxy(org_id: int, user_id: int, request: Reque
 @router.delete("/orgs/{org_id}/members/{user_id}/roles/{role_id}")
 async def remove_org_member_role_proxy(org_id: int, user_id: int, role_id: int, request: Request) -> Response:
     return await _proxy("DELETE", f"/orgs/{org_id}/members/{user_id}/roles/{role_id}", request)
+
+
+# ---------------- Org-scoped custom role catalog CRUD (PR13) ----------------
+# `/organizations/{organization_id}/roles(/permissions)` -- omnibioai-auth's
+# newer, richer surface (routes_organization_roles.py), not the legacy
+# `/orgs/*` above. Every role visible to an org (platform-wide + this org's
+# own custom roles) plus create/edit/delete of that org's own custom roles.
+# Same proxy pattern: no local authorization, omnibioai-auth's
+# manage_org-or-platform-admin gate decides everything.
+
+
+@router.get("/organizations/{organization_id}/roles")
+async def list_organization_roles_proxy(organization_id: int, request: Request) -> Response:
+    return await _proxy("GET", f"/organizations/{organization_id}/roles", request)
+
+
+@router.get("/organizations/{organization_id}/permissions")
+async def list_organization_permissions_proxy(organization_id: int, request: Request) -> Response:
+    return await _proxy("GET", f"/organizations/{organization_id}/permissions", request)
+
+
+@router.post("/organizations/{organization_id}/roles")
+async def create_organization_role_proxy(organization_id: int, request: Request) -> Response:
+    return await _proxy("POST", f"/organizations/{organization_id}/roles", request)
+
+
+@router.put("/organizations/{organization_id}/roles/{role_id}")
+async def update_organization_role_proxy(organization_id: int, role_id: int, request: Request) -> Response:
+    return await _proxy("PUT", f"/organizations/{organization_id}/roles/{role_id}", request)
+
+
+@router.delete("/organizations/{organization_id}/roles/{role_id}")
+async def delete_organization_role_proxy(organization_id: int, role_id: int, request: Request) -> Response:
+    return await _proxy("DELETE", f"/organizations/{organization_id}/roles/{role_id}", request)
