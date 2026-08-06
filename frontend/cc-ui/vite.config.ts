@@ -31,6 +31,13 @@ export default defineConfig({
       // reasoning as every entry above.
       '/orgs': { target: 'http://localhost:7070', changeOrigin: true },
       '/platform': { target: 'http://localhost:7070', changeOrigin: true },
+      // PR13 -- org-scoped custom role catalog CRUD (RolesPage.tsx),
+      // proxied through control-center's own backend (routes_role_proxy.py)
+      // to omnibioai-auth's newer /organizations/{id}/... surface. Missing
+      // here meant `npm run dev` 404'd every fetchOrganizationRoles/
+      // fetchOrganizationPermissions/createOrganizationRole/etc call --
+      // caught while setting up a local run to screenshot PR13's UI.
+      '/organizations': { target: 'http://localhost:7070', changeOrigin: true },
       '/auth': { target: 'http://localhost:7070', changeOrigin: true },
       // PR10 -- Live Platform Dashboard, proxied through control-center's
       // own backend (routes_dashboard.py), same reasoning as every entry
