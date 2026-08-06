@@ -23,6 +23,7 @@ import TeamsPage from '../pages/identity/TeamsPage'
 import RolesPage from '../pages/identity/RolesPage'
 import SSOSettingsPage from '../pages/identity/SSOSettingsPage'
 import ServiceAccountsPage from '../pages/identity/ServiceAccountsPage'
+import BillingPage from '../pages/billing/BillingPage'
 import AuditLogsPage from '../pages/audit/AuditLogsPage'
 import SecurityDashboardPage from '../pages/security/SecurityDashboardPage'
 import OrganizationMFAPolicyPage from '../pages/security/OrganizationMFAPolicyPage'
@@ -97,6 +98,16 @@ function mfaPolicyOrgIdFromPath(): number | null {
   const m = window.location.pathname.match(/^\/security\/mfa-policy\/(\d+)$/)
   return m ? Number(m[1]) : null
 }
+// PR14.5C: /billing/{orgId} deep-links straight into that org's billing
+// dashboard, same convention as /iam/{orgId}'s own SSO deep-link above.
+// Invoice detail (a level deeper still) is intentionally not URL-
+// persisted -- same "hint only, no route of its own" precedent
+// teamsOrgHint/rolesOrgHint already establish below, kept simple rather
+// than adding a third path segment for one nested view.
+function billingOrgIdFromPath(): number | null {
+  const m = window.location.pathname.match(/^\/billing\/(\d+)$/)
+  return m ? Number(m[1]) : null
+}
 
 function AdminDashboard() {
   const canSeeOps = hasAdminAccess()
@@ -119,6 +130,7 @@ function AdminDashboard() {
     if (window.location.pathname.startsWith('/iam/service-accounts')) return 'api-keys'
     if (window.location.pathname.startsWith('/iam')) return 'iam'
     if (window.location.pathname.startsWith('/security/mfa-policy')) return 'mfa-policy'
+    if (window.location.pathname.startsWith('/billing')) return 'billing'
     return 'overview'
   })
   const [selectedOrgId, setSelectedOrgId] = useState<number | null>(() => orgIdFromPath())
@@ -126,6 +138,7 @@ function AdminDashboard() {
   const [selectedSsoOrgId, setSelectedSsoOrgId] = useState<number | null>(() => ssoOrgIdFromPath())
   const [selectedServiceAccountsOrgId, setSelectedServiceAccountsOrgId] = useState<number | null>(() => serviceAccountsOrgIdFromPath())
   const [selectedMfaPolicyOrgId, setSelectedMfaPolicyOrgId] = useState<number | null>(() => mfaPolicyOrgIdFromPath())
+  const [selectedBillingOrgId, setSelectedBillingOrgId] = useState<number | null>(() => billingOrgIdFromPath())
   // Not URL-persisted -- a lighter-weight UX detail than the deep-linked
   // org id itself, same "keep it simple" precedent the rest of this
   // routing already follows. Reset to the default whenever a fresh org
@@ -193,11 +206,12 @@ function AdminDashboard() {
       : active === 'iam' ? (selectedSsoOrgId != null ? `/iam/${selectedSsoOrgId}` : '/iam')
       : active === 'api-keys' ? (selectedServiceAccountsOrgId != null ? `/iam/service-accounts/${selectedServiceAccountsOrgId}` : '/iam/service-accounts')
       : active === 'mfa-policy' ? (selectedMfaPolicyOrgId != null ? `/security/mfa-policy/${selectedMfaPolicyOrgId}` : '/security/mfa-policy')
+      : active === 'billing' ? (selectedBillingOrgId != null ? `/billing/${selectedBillingOrgId}` : '/billing')
       : '/'
     if (window.location.pathname !== path) {
       window.history.pushState(null, '', path)
     }
-  }, [active, selectedOrgId, selectedUserId, selectedSsoOrgId, selectedServiceAccountsOrgId, selectedMfaPolicyOrgId])
+  }, [active, selectedOrgId, selectedUserId, selectedSsoOrgId, selectedServiceAccountsOrgId, selectedMfaPolicyOrgId, selectedBillingOrgId])
 
   useEffect(() => {
     const onPopState = () => {
@@ -216,6 +230,9 @@ function AdminDashboard() {
       } else if (window.location.pathname.startsWith('/security/mfa-policy')) {
         setActive('mfa-policy')
         setSelectedMfaPolicyOrgId(mfaPolicyOrgIdFromPath())
+      } else if (window.location.pathname.startsWith('/billing')) {
+        setActive('billing')
+        setSelectedBillingOrgId(billingOrgIdFromPath())
       } else {
         setActive('overview')
         setSelectedOrgId(null)
@@ -223,6 +240,7 @@ function AdminDashboard() {
         setSelectedSsoOrgId(null)
         setSelectedServiceAccountsOrgId(null)
         setSelectedMfaPolicyOrgId(null)
+        setSelectedBillingOrgId(null)
       }
     }
     window.addEventListener('popstate', onPopState)
@@ -236,6 +254,7 @@ function AdminDashboard() {
     if (key !== 'iam') setSelectedSsoOrgId(null)
     if (key !== 'api-keys') setSelectedServiceAccountsOrgId(null)
     if (key !== 'mfa-policy') setSelectedMfaPolicyOrgId(null)
+    if (key !== 'billing') setSelectedBillingOrgId(null)
     // A plain sidebar click (not a "View teams/roles" link) always starts
     // from TeamsPage/RolesPage's own default, not a stale hint left over
     // from a previous organization's detail page.
@@ -302,6 +321,7 @@ function AdminDashboard() {
         selectedServiceAccountsOrgId, setSelectedServiceAccountsOrgId, navigateToServiceAccounts,
         serviceAccountsInitialTab,
         selectedMfaPolicyOrgId, setSelectedMfaPolicyOrgId,
+        selectedBillingOrgId, setSelectedBillingOrgId,
       })}
     </AppShell>
   )
@@ -331,6 +351,8 @@ interface RenderCtx {
   serviceAccountsInitialTab: 'oauth-clients' | 'api-keys'
   selectedMfaPolicyOrgId: number | null
   setSelectedMfaPolicyOrgId: (id: number | null) => void
+  selectedBillingOrgId: number | null
+  setSelectedBillingOrgId: (id: number | null) => void
 }
 
 function renderPage(active: PageKey, ctx: RenderCtx) {
@@ -436,6 +458,21 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
           />
         )
         : <OrganizationsPage onSelect={ctx.setSelectedServiceAccountsOrgId} />
+
+    // PR14.5C: billing visibility/invoices are per-org, so this
+    // destination is a "pick an org, then view its billing dashboard"
+    // flow, same list -> detail shape as 'iam'/'api-keys' -- reusing
+    // OrganizationsPage as the picker rather than building a second
+    // org-list component. Same hasOrganizationsAccess gate navigation.ts's
+    // own `visible` uses for this nav item; the actual authorization
+    // (org member or platform admin) happens entirely backend-side once
+    // a specific org is open (BillingPage never assumes access just
+    // because this gate passed).
+    case 'billing':
+      if (!ctx.canSeeOrganizations) return null
+      return ctx.selectedBillingOrgId != null
+        ? <BillingPage orgId={ctx.selectedBillingOrgId} onBack={() => ctx.setSelectedBillingOrgId(null)} />
+        : <OrganizationsPage onSelect={ctx.setSelectedBillingOrgId} />
 
     default: {
       const item = findNavItem(active)

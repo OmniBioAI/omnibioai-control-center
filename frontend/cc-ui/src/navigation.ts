@@ -174,7 +174,16 @@ export const NAVIGATION: NavSection[] = [
     key: 'business',
     label: 'Business',
     items: [
-      { key: 'billing', label: 'Billing', functional: false },
+      // PR14.5C: billing visibility and invoice management are per-org,
+      // so this destination lands on an org-selection step first, same
+      // "list -> detail" shape 'iam'/'api-keys' already use. No new
+      // permission: `visible` reuses hasOrganizationsAccess, the same
+      // gate every other org-scoped nav entry has -- this only decides
+      // whether the nav entry (and the org picker) renders at all; the
+      // actual authorization (an org member or a platform admin) happens
+      // entirely backend-side, per-org, via omnibioai-billing's own
+      // app.core.iam.get_authorized_organization_id/get_authorized_invoice.
+      { key: 'billing', label: 'Billing', functional: true, visible: hasOrganizationsAccess },
       { key: 'licenses', label: 'Licenses', functional: false },
       { key: 'usage', label: 'Usage', functional: false },
     ],

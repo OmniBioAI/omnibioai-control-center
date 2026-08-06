@@ -100,6 +100,10 @@ vi.mock('../pages/identity/ServiceAccountsPage', () => ({
 }))
 // PR11.4b.
 vi.mock('../pages/audit/AuditLogsPage', () => ({ default: () => <div data-testid="AuditLogsPage" /> }))
+// PR14.5C.
+vi.mock('../pages/billing/BillingPage', () => ({
+  default: ({ orgId }: { orgId: number }) => <div data-testid="BillingPage" data-org-id={orgId} />,
+}))
 
 const admin: SessionUser = {
   userId: '1', email: 'admin@omnibioai.org', roles: ['admin'],
@@ -327,7 +331,7 @@ describe('AdminApp auth gate', () => {
 
   // ── Phase 2: new shell-specific coverage ──────────────────────────────────
 
-  it('renders Coming Soon for an unimplemented module (e.g. Billing)', async () => {
+  it('renders Coming Soon for an unimplemented module (e.g. Licenses)', async () => {
     vi.mocked(auth.getToken).mockReturnValue('token-admin5')
     vi.mocked(auth.ensureSession).mockResolvedValue(admin)
     vi.mocked(auth.getSessionUser).mockReturnValue(admin)
@@ -337,7 +341,11 @@ describe('AdminApp auth gate', () => {
     render(<AdminApp />)
     await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
 
-    clickNav('Billing')
+    // Billing was this module until PR14.5C activated it (see the
+    // dedicated "PR14.5C: Billing nav item + routing" block below) --
+    // Licenses/Usage remain unimplemented, so one of them now stands in
+    // as this test's still-Coming-Soon example.
+    clickNav('Licenses')
 
     expect(await screen.findByText('Coming soon')).toBeInTheDocument()
   })
@@ -419,6 +427,85 @@ describe('AdminApp auth gate', () => {
 
     expect(await screen.findByTestId('OrganizationsPage')).toBeInTheDocument()
     expect(screen.queryByTestId('SSOSettingsPage')).not.toBeInTheDocument()
+  })
+
+  // ── PR14.5C: Billing nav item + routing ─────────────────────────────
+
+  it('shows "Billing" as a real nav destination, not Coming Soon', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-billing1')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    clickNav('Billing')
+
+    expect(await screen.findByTestId('OrganizationsPage')).toBeInTheDocument()
+    expect(screen.queryByText('Coming soon')).not.toBeInTheDocument()
+  })
+
+  it('hides the Billing nav item for a user with no organizational access', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-billing2')
+    vi.mocked(auth.ensureSession).mockResolvedValue(nonAdmin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(nonAdmin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(false)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    expect(screen.queryByText('Billing')).not.toBeInTheDocument()
+  })
+
+  it('reuses the Organizations picker to select an org, then reaches BillingPage for it', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-billing3')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    clickNav('Billing')
+    await screen.findByTestId('OrganizationsPage')
+    fireEvent.click(screen.getByText('pick-org-7'))
+
+    const billing = await screen.findByTestId('BillingPage')
+    expect(billing.getAttribute('data-org-id')).toBe('7')
+    expect(screen.queryByTestId('OrganizationsPage')).not.toBeInTheDocument()
+  })
+
+  it('deep-links directly to a specific organization\'s billing dashboard on initial load', async () => {
+    window.history.pushState(null, '', '/billing/9')
+    vi.mocked(auth.getToken).mockReturnValue('token-billing4')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+
+    const billing = await screen.findByTestId('BillingPage')
+    expect(billing.getAttribute('data-org-id')).toBe('9')
+    expect(screen.queryByTestId('OrganizationsPage')).not.toBeInTheDocument()
+  })
+
+  it('deep-links to the org picker (no id) on initial load for Billing', async () => {
+    window.history.pushState(null, '', '/billing')
+    vi.mocked(auth.getToken).mockReturnValue('token-billing5')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+
+    expect(await screen.findByTestId('OrganizationsPage')).toBeInTheDocument()
+    expect(screen.queryByTestId('BillingPage')).not.toBeInTheDocument()
   })
 
   it('navigates straight from an organization\'s detail page to its SSO settings via Manage SSO Settings', async () => {
