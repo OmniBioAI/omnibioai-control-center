@@ -43,6 +43,10 @@ export default defineConfig({
       // own backend (routes_dashboard.py), same reasoning as every entry
       // above.
       '/dashboard': { target: 'http://localhost:7070', changeOrigin: true },
+      // PR14.5C -- Billing dashboard/invoice UI, proxied through
+      // control-center's own backend (routes_billing_proxy.py) to reach
+      // omnibioai-billing, same reasoning as every entry above.
+      '/billing': { target: 'http://localhost:7070', changeOrigin: true },
     },
   },
 })
