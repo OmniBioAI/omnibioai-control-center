@@ -17,6 +17,7 @@ import LlmPage from '../pages/LlmPage'
 import CloudPage from '../pages/CloudPage'
 import ToolExecutionPage from '../pages/operations/ToolExecutionPage'
 import AIModelsPage from '../pages/operations/AIModelsPage'
+import WorkflowsPage from '../pages/operations/WorkflowsPage'
 import OrganizationsPage from '../pages/OrganizationsPage'
 import OrganizationDetailPage from '../pages/OrganizationDetailPage'
 import UsersPage from '../pages/UsersPage'
@@ -380,6 +381,13 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
     // model-registry has no organization concept to pick one for.
     case 'ai-models':
       return ctx.canSeeOps ? <AIModelsPage /> : null
+
+    // PR A3: no org picker, same reasoning as 'tool-execution'/
+    // 'ai-models' above -- workflow catalog isn't org-owned, and
+    // GET /v1/runs isn't org-scoped upstream either (see
+    // WorkflowsPage.tsx's own module comment).
+    case 'workflows':
+      return ctx.canSeeOps ? <WorkflowsPage /> : null
 
     case 'organizations':
       if (!ctx.canSeeOrganizations) return null

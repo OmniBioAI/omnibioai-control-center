@@ -93,7 +93,19 @@ export const NAVIGATION: NavSection[] = [
           { key: 'cloud', label: 'Cloud', functional: true, visible: hasAdminAccess },
         ],
       },
-      { key: 'workflows', label: 'Workflows', functional: false },
+      // PR A3: Admin Console Capability Parity. functional: true because
+      // a real page now exists (WorkflowsPage), reusing
+      // omnibioai-workflow-bundles' own GET /v1/workflows,
+      // GET /v1/categories (both workflow.read-gated) and GET /v1/runs
+      // (workflow.execute-gated). Same hasAdminAccess() gate
+      // 'tool-execution'/'ai-models'/'infrastructure' above already
+      // use -- this only decides whether the nav entry renders; real
+      // authorization is entirely workflow-bundles' own, per-request.
+      // Note: GET /v1/runs has no organization-level filtering upstream
+      // today (tracked as an upstream follow-up, not something this nav
+      // gate can or should paper over) -- WorkflowsPage's Runs tab
+      // surfaces that explicitly rather than hiding it.
+      { key: 'workflows', label: 'Workflows', functional: true, visible: hasAdminAccess },
       // PR A1: Admin Console Capability Parity. functional: true because
       // a real page now exists (ToolExecutionPage), reusing
       // omnibioai-tes's own GET /api/runs (self-scoped to the caller's
