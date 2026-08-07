@@ -15,6 +15,7 @@ import EcosystemPage from '../pages/EcosystemPage'
 import ConfigPage from '../pages/ConfigPage'
 import LlmPage from '../pages/LlmPage'
 import CloudPage from '../pages/CloudPage'
+import ToolExecutionPage from '../pages/operations/ToolExecutionPage'
 import OrganizationsPage from '../pages/OrganizationsPage'
 import OrganizationDetailPage from '../pages/OrganizationDetailPage'
 import UsersPage from '../pages/UsersPage'
@@ -366,6 +367,13 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
     case 'config':    return ctx.canSeeOps ? <ConfigPage    refreshKey={ctx.refreshKey} /> : null
     case 'llms':      return ctx.canSeeOps ? <LlmPage       refreshKey={ctx.refreshKey} /> : null
     case 'cloud':     return ctx.canSeeOps ? <CloudPage     refreshKey={ctx.refreshKey} /> : null
+
+    // PR A1: no org picker (unlike 'billing'/'iam' below) -- TES
+    // self-scopes GET /api/runs to the caller's own organization_id
+    // server-side, there is no "view another org" endpoint to pick one
+    // for. Same canSeeOps gate the other Operations pages above use.
+    case 'tool-execution':
+      return ctx.canSeeOps ? <ToolExecutionPage /> : null
 
     case 'organizations':
       if (!ctx.canSeeOrganizations) return null

@@ -94,7 +94,17 @@ export const NAVIGATION: NavSection[] = [
         ],
       },
       { key: 'workflows', label: 'Workflows', functional: false },
-      { key: 'tool-execution', label: 'Tool Execution', functional: false },
+      // PR A1: Admin Console Capability Parity. functional: true because
+      // a real page now exists (ToolExecutionPage), reusing
+      // omnibioai-tes's own GET /api/runs (self-scoped to the caller's
+      // organization, require_permission(WORKFLOW_EXECUTE)) and
+      // unauthenticated GET /api/tools[/capabilities]. Same
+      // hasAdminAccess() gate 'infrastructure' above already uses -- this
+      // only decides whether the nav entry renders; the real
+      // authorization is entirely omnibioai-tes's own, per-request, same
+      // "backend is the real gate" convention this file already documents
+      // for 'iam'/'billing'/'audit-logs'.
+      { key: 'tool-execution', label: 'Tool Execution', functional: true, visible: hasAdminAccess },
       { key: 'ai-models', label: 'AI Models', functional: false },
     ],
   },
