@@ -39,7 +39,7 @@ def _mock_response(status_code: int, json_body=None, raise_json_error: bool = Fa
     return resp
 
 
-def _mock_async_client(response: MagicMock = None, side_effect=None):
+def _mock_async_client(response: MagicMock | None = None, side_effect=None):
     mock_client = MagicMock()
     mock_get = AsyncMock()
     if side_effect is not None:
