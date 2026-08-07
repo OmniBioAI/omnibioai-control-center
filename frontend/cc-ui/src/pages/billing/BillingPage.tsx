@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ShieldAlert, Receipt, FileText } from 'lucide-react'
+import { ShieldAlert, Receipt, FileText, CreditCard, Gauge } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip,
 } from 'recharts'
@@ -10,13 +10,22 @@ import {
 import { fetchMyOrg, fetchPlatformOrgDetail } from '../../organizations'
 import { hasPlatformAdminAccess } from '../../auth'
 import { Card, SectionHeader, StatCard, DataTable, LoadingState, ErrorState, EmptyState, ActionToolbar, Button } from '../../components/ui'
+// PR14.6D: two more tabs on this same page -- see SubscriptionPage.tsx's
+// own module comment for why they live there, not inline here.
+import { SubscriptionTab, UsageLimitsTab } from './SubscriptionPage'
 
 // PR14.5C: billing visibility and invoice management only -- no payment
 // endpoints exist on omnibioai-billing yet (deliberately out of scope,
 // per this PR's own spec), so there is nothing here to "pay" an invoice
 // with, only to view it.
 
-function formatCurrency(amount: number, currency: string): string {
+// Exported (formatCurrency, formatDate, classify, LoadState, useOrgLabel,
+// BackLink) so PR14.6D's SubscriptionPage.tsx -- a sibling tab wired into
+// this same page below -- reuses these instead of a second, possibly-
+// drifting copy. Everything else in this file stays module-private,
+// unchanged from PR14.5C.
+
+export function formatCurrency(amount: number, currency: string): string {
   try {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency.toUpperCase() }).format(amount)
   } catch {
@@ -26,7 +35,7 @@ function formatCurrency(amount: number, currency: string): string {
   }
 }
 
-function formatDate(iso: string | null): string {
+export function formatDate(iso: string | null): string {
   return iso ? new Date(iso).toLocaleDateString() : '—'
 }
 
@@ -40,7 +49,7 @@ function formatDateTime(iso: string | null): string {
 // "doesn't exist" from "not yours"). Both render as a permission-denied
 // variant here, same convention ServiceAccountsPage.tsx/SSOSettingsPage.tsx
 // already established for their own proxied endpoints.
-function classify(message: string): 'denied-404' | 'denied-403' | 'error' {
+export function classify(message: string): 'denied-404' | 'denied-403' | 'error' {
   if (message.endsWith(' 404')) return 'denied-404'
   if (message.endsWith(' 403')) return 'denied-403'
   return 'error'
@@ -144,7 +153,7 @@ function CostBreakdownChart({ orgId }: { orgId: number }) {
   )
 }
 
-type LoadState<T> = { status: 'loading' } | { status: 'denied'; reason: string } | { status: 'error'; message: string } | { status: 'ready'; data: T }
+export type LoadState<T> = { status: 'loading' } | { status: 'denied'; reason: string } | { status: 'error'; message: string } | { status: 'ready'; data: T }
 
 function OverviewTab({ orgId }: { orgId: number }) {
   const [state, setState] = useState<LoadState<OrganizationBillingSummary>>({ status: 'loading' })
@@ -392,7 +401,7 @@ function SummaryField({ title, value, emphasize }: { title: string; value: strin
 
 // ── Page ──────────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'invoices'
+type Tab = 'overview' | 'invoices' | 'subscription' | 'usage-limits'
 
 interface Props {
   orgId: number
@@ -428,11 +437,14 @@ export default function BillingPage({ orgId, onBack }: Props) {
         <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
           <TabButton active={tab === 'overview'} icon={Receipt} onClick={() => setTab('overview')}>Overview</TabButton>
           <TabButton active={tab === 'invoices'} icon={FileText} onClick={() => setTab('invoices')}>Invoices</TabButton>
+          <TabButton active={tab === 'subscription'} icon={CreditCard} onClick={() => setTab('subscription')}>Subscription</TabButton>
+          <TabButton active={tab === 'usage-limits'} icon={Gauge} onClick={() => setTab('usage-limits')}>Usage Limits</TabButton>
         </div>
         <div style={{ padding: 20 }}>
-          {tab === 'overview'
-            ? <OverviewTab orgId={orgId} />
-            : <InvoicesTab orgId={orgId} onSelectInvoice={setSelectedInvoiceId} />}
+          {tab === 'overview' && <OverviewTab orgId={orgId} />}
+          {tab === 'invoices' && <InvoicesTab orgId={orgId} onSelectInvoice={setSelectedInvoiceId} />}
+          {tab === 'subscription' && <SubscriptionTab orgId={orgId} />}
+          {tab === 'usage-limits' && <UsageLimitsTab orgId={orgId} />}
         </div>
       </Card>
     </div>
@@ -459,7 +471,7 @@ function TabButton({ active, icon: Icon, onClick, children }: {
   )
 }
 
-function BackLink({ label, onBack }: { label: string; onBack: () => void }) {
+export function BackLink({ label, onBack }: { label: string; onBack: () => void }) {
   return (
     <button
       onClick={onBack}

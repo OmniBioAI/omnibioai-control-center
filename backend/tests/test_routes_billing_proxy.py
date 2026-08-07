@@ -77,6 +77,27 @@ _LINE_ITEMS_OUT = {"line_items": [], "total": 0, "limit": 50, "offset": 0}
 
 _COST_BREAKDOWN_OUT = {"organization_id": 7, "group_by": "service", "entries": []}
 
+_SUBSCRIPTION_OUT = {
+    "organization_id": 7,
+    "billing_plan_id": 1,
+    "plan_name": "Enterprise",
+    "billing_interval": "monthly",
+    "currency": "usd",
+    "status": "active",
+    "start_date": "2026-01-01",
+    "end_date": None,
+    "renewal_date": "2026-02-01",
+    "features": [],
+}
+
+_USAGE_LIMITS_OUT = {
+    "organization_id": 7,
+    "billing_plan_id": 1,
+    "plan_name": "Enterprise",
+    "as_of": "2026-01-15",
+    "limits": [],
+}
+
 
 class TestOrganizationBillingSummaryProxy(unittest.TestCase):
     def test_forwards_success_response(self) -> None:
@@ -211,6 +232,63 @@ class TestInvoiceLineItemsProxy(unittest.TestCase):
         upstream = _mock_response(404, {"detail": "Invoice not found"})
         with patch("control_center.api.routes_billing_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/billing/invoices/99/line-items", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 404)
+
+
+class TestOrganizationSubscriptionProxy(unittest.TestCase):
+    def test_forwards_success_response(self) -> None:
+        upstream = _mock_response(200, _SUBSCRIPTION_OUT)
+        with patch("control_center.api.routes_billing_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.get("/billing/organizations/7/subscription", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["plan_name"], "Enterprise")
+
+    def test_forwards_organization_id_in_path(self) -> None:
+        upstream = _mock_response(200, _SUBSCRIPTION_OUT)
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_billing_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            client.get("/billing/organizations/42/subscription", headers={"Authorization": "Bearer tok"})
+        call_args = mock_ctx.__aenter__.return_value.get.call_args
+        self.assertTrue(call_args.args[0].endswith("/billing/organizations/42/subscription"))
+
+    def test_forwards_404_when_no_active_subscription(self) -> None:
+        upstream = _mock_response(404, {"detail": "organization_id=7 has no active subscription"})
+        with patch("control_center.api.routes_billing_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.get("/billing/organizations/7/subscription", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_billing_service_unreachable_returns_503(self) -> None:
+        with patch(
+            "control_center.api.routes_billing_proxy.httpx.AsyncClient",
+            return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
+        ):
+            resp = client.get("/billing/organizations/7/subscription", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 503)
+
+
+class TestOrganizationSubscriptionUsageLimitsProxy(unittest.TestCase):
+    def test_forwards_success_response(self) -> None:
+        upstream = _mock_response(200, _USAGE_LIMITS_OUT)
+        with patch("control_center.api.routes_billing_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.get("/billing/organizations/7/subscription/usage-limits", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["limits"], [])
+
+    def test_forwards_as_of_query_param(self) -> None:
+        upstream = _mock_response(200, _USAGE_LIMITS_OUT)
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_billing_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            client.get(
+                "/billing/organizations/7/subscription/usage-limits?as_of=2026-01-15",
+                headers={"Authorization": "Bearer tok"},
+            )
+        call_kwargs = mock_ctx.__aenter__.return_value.get.call_args.kwargs
+        self.assertEqual(call_kwargs["params"]["as_of"], "2026-01-15")
+
+    def test_forwards_404_when_no_active_subscription(self) -> None:
+        upstream = _mock_response(404, {"detail": "organization_id=7 has no active subscription"})
+        with patch("control_center.api.routes_billing_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.get("/billing/organizations/7/subscription/usage-limits", headers={"Authorization": "Bearer tok"})
         self.assertEqual(resp.status_code, 404)
 
 

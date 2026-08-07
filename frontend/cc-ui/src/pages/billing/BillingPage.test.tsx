@@ -21,6 +21,8 @@ vi.mock('../../billing', async () => {
     fetchInvoices: vi.fn(),
     fetchInvoiceDetail: vi.fn(),
     fetchCostBreakdown: vi.fn(),
+    fetchOrganizationSubscription: vi.fn(),
+    fetchSubscriptionUsageLimits: vi.fn(),
   }
 })
 
@@ -270,6 +272,53 @@ describe('BillingPage', () => {
     await user.click(screen.getByRole('button', { name: '← Back to invoices' }))
 
     expect(await screen.findByText('INV-0099')).toBeInTheDocument()
+  })
+
+  // ── Subscription / Usage Limits tabs (PR14.6D) ──────────────────────
+
+  it('switches to the Subscription tab and renders subscription data', async () => {
+    const user = userEvent.setup()
+    vi.mocked(billing.fetchOrganizationBillingSummary).mockResolvedValue(summaryWithPeriod)
+    vi.mocked(billing.fetchOrganizationSubscription).mockResolvedValue({
+      organization_id: 42, billing_plan_id: 7, plan_name: 'Enterprise', billing_interval: 'monthly',
+      currency: 'usd', status: 'active', start_date: '2026-01-01', end_date: null, renewal_date: '2026-02-01', features: [],
+    })
+    render(<BillingPage orgId={42} onBack={vi.fn()} />)
+    await screen.findByText('Current period usage')
+
+    await user.click(screen.getByRole('button', { name: /Subscription/ }))
+
+    expect(await screen.findByText('Enterprise')).toBeInTheDocument()
+  })
+
+  it('switches to the Usage Limits tab and renders limits data', async () => {
+    const user = userEvent.setup()
+    vi.mocked(billing.fetchOrganizationBillingSummary).mockResolvedValue(summaryWithPeriod)
+    vi.mocked(billing.fetchSubscriptionUsageLimits).mockResolvedValue({
+      organization_id: 42, billing_plan_id: 7, plan_name: 'Enterprise', as_of: '2026-01-15',
+      limits: [{ service: 'studio', action: 'gpu_train', resource: 'gpu_training', unit: 'hour', period: 'monthly', included: 500, used: 120, remaining: 380, percentage_used: 24 }],
+    })
+    render(<BillingPage orgId={42} onBack={vi.fn()} />)
+    await screen.findByText('Current period usage')
+
+    await user.click(screen.getByRole('button', { name: /Usage Limits/ }))
+
+    expect(await screen.findByText('gpu_training')).toBeInTheDocument()
+  })
+
+  it('resets to the Overview tab when the organization changes', async () => {
+    const user = userEvent.setup()
+    vi.mocked(billing.fetchOrganizationBillingSummary).mockResolvedValue(summaryWithPeriod)
+    vi.mocked(billing.fetchOrganizationSubscription).mockReturnValue(new Promise(() => {}))
+    const { rerender } = render(<BillingPage orgId={42} onBack={vi.fn()} />)
+    await screen.findByText('Current period usage')
+    await user.click(screen.getByRole('button', { name: /Subscription/ }))
+    await screen.findByText('Loading subscription…')
+
+    rerender(<BillingPage orgId={99} onBack={vi.fn()} />)
+
+    expect(await screen.findByText('Current period usage')).toBeInTheDocument()
+    expect(screen.queryByText('Loading subscription…')).not.toBeInTheDocument()
   })
 
   it('calls onBack when the top-level back link is clicked', async () => {
