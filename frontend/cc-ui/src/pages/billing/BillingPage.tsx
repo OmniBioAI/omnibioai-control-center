@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { ShieldAlert, Receipt, FileText, CreditCard, Gauge, type LucideIcon } from 'lucide-react'
+import { ShieldAlert, Receipt, FileText, CreditCard, Gauge, Activity, type LucideIcon } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip,
   type TooltipValueType,
 } from 'recharts'
 import {
-  fetchOrganizationBillingSummary, fetchInvoices, fetchInvoiceDetail, fetchCostBreakdown,
-  type OrganizationBillingSummary, type InvoiceListItem, type InvoiceDetail, type CostBreakdownResult,
+  fetchOrganizationBillingSummary, fetchInvoices, fetchInvoiceDetail, fetchCostBreakdown, fetchOrganizationUsage,
+  type OrganizationBillingSummary, type InvoiceListItem, type InvoiceDetail, type CostBreakdownResult, type OrganizationUsage,
 } from '../../billing'
 import { fetchMyOrg, fetchPlatformOrgDetail } from '../../organizations'
 import { hasPlatformAdminAccess } from '../../auth'
@@ -218,6 +218,63 @@ function OverviewTab({ orgId }: { orgId: number }) {
   )
 }
 
+// ── Usage tab: raw consumption by service/action/resource. ──────────────
+//
+// PR B (Admin Console Billing/Usage consolidation): distinct from the
+// existing Usage Limits tab (SubscriptionTab/UsageLimitsTab, imported
+// above) -- that tab shows consumption *relative to a plan's included
+// allowance* (included/used/remaining/percentage_used); this one shows
+// the plain consumed quantity per dimension, with no plan context, from
+// omnibioai-billing's GET /organizations/{id}/usage (previously
+// unproxied -- audited directly against app/routers/billing.py before
+// adding, see routes_billing_proxy.py's own comment on this addition).
+// This is what the standalone 'usage' nav placeholder (now removed from
+// navigation.ts) would have needed to become a real page on its own;
+// living here instead follows the same "tabs on the page that already
+// owns this destination" precedent PR14.6D's own SubscriptionPage.tsx
+// comment already established for Subscription/Usage Limits.
+function UsageTab({ orgId }: { orgId: number }) {
+  const [state, setState] = useState<LoadState<OrganizationUsage>>({ status: 'loading' })
+
+  const load = () => {
+    setState({ status: 'loading' })
+    fetchOrganizationUsage(orgId)
+      .then(data => setState({ status: 'ready', data }))
+      .catch((e: unknown) => {
+        const message = e instanceof Error ? e.message : String(e)
+        const kind = classify(message)
+        if (kind === 'denied-404' || kind === 'denied-403') setState({ status: 'denied', reason: "This organization's usage isn't accessible to you." })
+        else setState({ status: 'error', message })
+      })
+  }
+
+  useEffect(load, [orgId])
+
+  if (state.status === 'loading') return <LoadingState label="Loading usage…" />
+  if (state.status === 'denied') return <EmptyState icon={ShieldAlert} title="Permission denied" description={state.reason} />
+  if (state.status === 'error') return <ErrorState message={state.message} onRetry={load} />
+
+  const { data } = state
+  return (
+    <div>
+      <SectionHeader title="Usage" description={`${formatDate(data.period_start)} – ${formatDate(data.period_end)}.`} />
+      <Card>
+        <DataTable
+          rowKey={s => `${s.service}.${s.action}.${s.resource}`}
+          emptyLabel="No usage recorded for this period."
+          rows={data.services}
+          columns={[
+            { key: 'service', header: 'Service', render: s => s.service },
+            { key: 'action', header: 'Action', render: s => s.action },
+            { key: 'resource', header: 'Resource', render: s => s.resource },
+            { key: 'quantity', header: 'Consumed', render: s => `${s.quantity} ${s.unit}` },
+          ]}
+        />
+      </Card>
+    </div>
+  )
+}
+
 // ── Invoices tab: paginated list -> detail. ─────────────────────────────
 
 const PAGE_SIZE = 20
@@ -409,7 +466,7 @@ function SummaryField({ title, value, emphasize }: { title: string; value: strin
 
 // ── Page ──────────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'invoices' | 'subscription' | 'usage-limits'
+type Tab = 'overview' | 'invoices' | 'subscription' | 'usage-limits' | 'usage'
 
 interface Props {
   orgId: number
@@ -447,12 +504,14 @@ export default function BillingPage({ orgId, onBack }: Props) {
           <TabButton active={tab === 'invoices'} icon={FileText} onClick={() => setTab('invoices')}>Invoices</TabButton>
           <TabButton active={tab === 'subscription'} icon={CreditCard} onClick={() => setTab('subscription')}>Subscription</TabButton>
           <TabButton active={tab === 'usage-limits'} icon={Gauge} onClick={() => setTab('usage-limits')}>Usage Limits</TabButton>
+          <TabButton active={tab === 'usage'} icon={Activity} onClick={() => setTab('usage')}>Usage</TabButton>
         </div>
         <div style={{ padding: 20 }}>
           {tab === 'overview' && <OverviewTab orgId={orgId} />}
           {tab === 'invoices' && <InvoicesTab orgId={orgId} onSelectInvoice={setSelectedInvoiceId} />}
           {tab === 'subscription' && <SubscriptionTab orgId={orgId} />}
           {tab === 'usage-limits' && <UsageLimitsTab orgId={orgId} />}
+          {tab === 'usage' && <UsageTab orgId={orgId} />}
         </div>
       </Card>
     </div>

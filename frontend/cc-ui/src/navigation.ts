@@ -26,7 +26,7 @@ export type PageKey =
   | 'organizations' | 'users' | 'teams' | 'roles'
   | 'infrastructure' | 'workflows' | 'tool-execution' | 'ai-models'
   | 'security-overview' | 'mfa-policy' | 'iam' | 'audit-logs' | 'sessions' | 'api-keys'
-  | 'billing' | 'licenses' | 'usage'
+  | 'billing'
   | 'rag' | 'pubmed' | 'plugins'
   | 'integrations' | 'settings'
 
@@ -218,8 +218,27 @@ export const NAVIGATION: NavSection[] = [
       // entirely backend-side, per-org, via omnibioai-billing's own
       // app.core.iam.get_authorized_organization_id/get_authorized_invoice.
       { key: 'billing', label: 'Billing', functional: true, visible: hasOrganizationsAccess },
-      { key: 'licenses', label: 'Licenses', functional: false },
-      { key: 'usage', label: 'Usage', functional: false },
+      // PR B (Admin Console Billing/Usage consolidation): 'licenses' and
+      // 'usage' removed from this section, not flipped to functional.
+      // Both were Coming Soon placeholders that, on audit, turned out to
+      // already be covered:
+      //   - 'usage': BillingPage.tsx already had a Usage Limits tab
+      //     (PR14.6D); this PR adds a plain Usage tab alongside it (raw
+      //     consumption, GET /organizations/{id}/usage, previously
+      //     unproxied). A standalone nav destination for this would have
+      //     duplicated a page that already exists one click away.
+      //   - 'licenses': the only "licenses" concept anywhere in this
+      //     ecosystem is omnibioai-auth's legacy per-key desktop/
+      //     Electron activation system (app/api/routes_license.py,
+      //     LicenseValidateRequest.platform: web|desktop|both) --
+      //     Phase 1's own license-decommission work already targeted
+      //     that flow for retirement. It is not an org-seat/subscription
+      //     concept and building an Admin Console UI for it would be
+      //     resurrecting a superseded model, not consolidating one.
+      //     Organization-level plan/subscription management is exactly
+      //     what the 'billing' entry above (Subscription tab) already
+      //     is. See docs/pr-b-billing-usage-consolidation.md for the
+      //     full audit both of these decisions are based on.
     ],
   },
   {

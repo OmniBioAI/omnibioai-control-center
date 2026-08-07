@@ -1,6 +1,6 @@
 import {
-  Activity, BarChart3, Bot, BookOpen, BrainCircuit, Building2, Cloud, Container,
-  CreditCard, FileText, FlaskConical, KeyRound, KeySquare, LayoutDashboard, Network,
+  Activity, Bot, BookOpen, BrainCircuit, Building2, Cloud, Container,
+  CreditCard, FlaskConical, KeyRound, KeySquare, LayoutDashboard, Network,
   Plug, Puzzle, ScrollText, Server, Settings, Settings2, ShieldCheck, Clock, Users,
   UsersRound, Workflow, Wrench,
 } from 'lucide-react'
@@ -29,8 +29,6 @@ const ICONS: Partial<Record<PageKey, IconComponent>> = {
   sessions: Clock,
   'api-keys': KeySquare,
   billing: CreditCard,
-  licenses: FileText,
-  usage: BarChart3,
   rag: BookOpen,
   pubmed: FlaskConical,
   plugins: Puzzle,

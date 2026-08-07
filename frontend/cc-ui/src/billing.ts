@@ -25,6 +25,29 @@ async function apiFetch(path: string, init: RequestInit = {}): Promise<Response>
 
 // ── Shapes ──────────────────────────────────────────────────────────────
 
+// PR B (Admin Console Billing/Usage consolidation): raw consumption by
+// service/action/resource for a period -- distinct from
+// SubscriptionUsageLimit below, which is consumption *relative to a
+// plan's included allowance* (included/used/remaining/percentage_used).
+// This is the plain number, no plan context. Field shapes mirror
+// app/schemas/billing.py's UsageSummaryResponse/UsageDimensionSummary
+// exactly, same convention every other shape in this file already
+// follows.
+export interface UsageDimensionSummary {
+  service: string
+  action: string
+  resource: string
+  unit: string
+  quantity: number
+}
+
+export interface OrganizationUsage {
+  organization_id: number
+  period_start: string
+  period_end: string
+  services: UsageDimensionSummary[]
+}
+
 export interface CurrentPeriodSummary {
   billing_period_id: number
   period_start: string
@@ -173,6 +196,12 @@ export interface SubscriptionUsageLimits {
 }
 
 // ── Calls ───────────────────────────────────────────────────────────────
+
+export async function fetchOrganizationUsage(orgId: number): Promise<OrganizationUsage> {
+  const r = await apiFetch(`/billing/organizations/${orgId}/usage`)
+  if (!r.ok) throw new Error(await _errorMessage(r, `/billing/organizations/${orgId}/usage`))
+  return r.json()
+}
 
 export async function fetchOrganizationBillingSummary(orgId: number): Promise<OrganizationBillingSummary> {
   const r = await apiFetch(`/billing/organizations/${orgId}/summary`)

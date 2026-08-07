@@ -56,6 +56,15 @@ def _mock_async_client(response: MagicMock = None, side_effect=None):
     return mock_ctx
 
 
+_USAGE_OUT = {
+    "organization_id": 7,
+    "period_start": "2026-08-01",
+    "period_end": "2026-08-31",
+    "services": [
+        {"service": "tes", "action": "run", "resource": "compute_minutes", "unit": "minutes", "quantity": "120.0"},
+    ],
+}
+
 _SUMMARY_OUT = {
     "organization_id": 7,
     "current_period": None,
@@ -97,6 +106,53 @@ _USAGE_LIMITS_OUT = {
     "as_of": "2026-01-15",
     "limits": [],
 }
+
+
+class TestOrganizationUsageProxy(unittest.TestCase):
+    def test_forwards_success_response(self) -> None:
+        upstream = _mock_response(200, _USAGE_OUT)
+        with patch("control_center.api.routes_billing_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.get("/billing/organizations/7/usage", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["services"][0]["service"], "tes")
+
+    def test_forwards_authorization_header(self) -> None:
+        upstream = _mock_response(200, _USAGE_OUT)
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_billing_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            client.get("/billing/organizations/7/usage", headers={"Authorization": "Bearer my-token-123"})
+        call_kwargs = mock_ctx.__aenter__.return_value.get.call_args.kwargs
+        self.assertEqual(call_kwargs["headers"]["Authorization"], "Bearer my-token-123")
+
+    def test_forwards_organization_id_in_path(self) -> None:
+        upstream = _mock_response(200, _USAGE_OUT)
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_billing_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            client.get("/billing/organizations/42/usage", headers={"Authorization": "Bearer tok"})
+        call_args = mock_ctx.__aenter__.return_value.get.call_args
+        self.assertTrue(call_args.args[0].endswith("/billing/organizations/42/usage"))
+
+    def test_forwards_403_for_wrong_organization(self) -> None:
+        upstream = _mock_response(403, {"detail": "Not authorized for this organization"})
+        with patch("control_center.api.routes_billing_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.get("/billing/organizations/7/usage", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_billing_service_unreachable_returns_503(self) -> None:
+        with patch(
+            "control_center.api.routes_billing_proxy.httpx.AsyncClient",
+            return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
+        ):
+            resp = client.get("/billing/organizations/7/usage", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 503)
+        self.assertIn("billing-service unreachable", resp.json()["error"])
+
+    def test_non_json_upstream_response_handled(self) -> None:
+        upstream = _mock_response(500, raise_json_error=True)
+        with patch("control_center.api.routes_billing_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.get("/billing/organizations/7/usage", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 500)
+        self.assertIn("non-JSON", resp.json()["error"])
 
 
 class TestOrganizationBillingSummaryProxy(unittest.TestCase):

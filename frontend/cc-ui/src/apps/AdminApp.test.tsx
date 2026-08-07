@@ -331,7 +331,7 @@ describe('AdminApp auth gate', () => {
 
   // ── Phase 2: new shell-specific coverage ──────────────────────────────────
 
-  it('renders Coming Soon for an unimplemented module (e.g. Licenses)', async () => {
+  it('renders Coming Soon for an unimplemented module (e.g. Settings)', async () => {
     vi.mocked(auth.getToken).mockReturnValue('token-admin5')
     vi.mocked(auth.ensureSession).mockResolvedValue(admin)
     vi.mocked(auth.getSessionUser).mockReturnValue(admin)
@@ -341,11 +341,14 @@ describe('AdminApp auth gate', () => {
     render(<AdminApp />)
     await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
 
-    // Billing was this module until PR14.5C activated it (see the
-    // dedicated "PR14.5C: Billing nav item + routing" block below) --
-    // Licenses/Usage remain unimplemented, so one of them now stands in
-    // as this test's still-Coming-Soon example.
-    clickNav('Licenses')
+    // Billing was this module until PR14.5C activated it, then
+    // Licenses/Usage stood in until PR B (Billing/Usage consolidation)
+    // removed both nav items entirely -- 'usage' turned out to duplicate
+    // BillingPage.tsx's own Usage/Usage Limits tabs, and 'licenses'
+    // would have resurrected a superseded legacy model (see
+    // navigation.ts's own comment on this). Settings is still a real
+    // Coming Soon destination, so it stands in now.
+    clickNav('Settings')
 
     expect(await screen.findByText('Coming soon')).toBeInTheDocument()
   })
