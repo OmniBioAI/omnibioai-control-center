@@ -2,6 +2,24 @@
 
 Status: implemented (frontend build split only — see "Remaining deployment work" below for what this PR does *not* do).
 
+> **2026-08-07 update:** point 3 below is now done. **PR14.7B**
+> (`docker/nginx/{api-proxy.conf,control-center.conf}` + Dockerfile Stage
+> 3, MERGED) wires `dist-admin`/`dist-control` into an actual nginx
+> serving image, host-based by `Host` header, verified on
+> `localhost:5174` — but not yet reachable externally. **PR14.7C**
+> (Cloudflare Tunnel cutover — repoints `control.omnibioai.org`'s
+> ingress rule at `:5174`, was `:7070` direct-to-backend, and adds a new
+> `admin.omnibioai.org` rule at the same `:5174`) is the deliberate
+> follow-up that makes both domains reachable externally; as of this
+> note it's **prepared but not yet applied** — needs root on the
+> tunnel host plus a DNS record for `admin.omnibioai.org` (none exists
+> yet), both outside what a coding agent can do unattended. See
+> "Deployment mapping" below for exact target state and the rollout
+> report for this session for the prerequisites. `nginx-router.conf`
+> (point 1 below) is correctly *not* touched by either PR:
+> `control.omnibioai.org` bypasses it via a direct tunnel ingress rule,
+> so this stays a `/etc/cloudflared/config.yml`-only change.
+
 ## Architecture decision
 
 **One repository, two builds, two domains.**
@@ -64,27 +82,56 @@ frontend/cc-ui/dist-control/  # control.omnibioai.org
 
 Both are gitignored (`frontend/cc-ui/.gitignore`), generated fresh by `npm run build:admin`/`build:control` or the Dockerfile's `frontend-builder` stage. The pre-existing `frontend/cc-ui/dist/` (committed to git — an existing, unrelated repo convention, not something this PR changes) is still produced too, by the unmodified `npm run build`, so the Dockerfile's existing (currently unused in the live deployment — see below) Stage 3 keeps working exactly as before.
 
-## Deployment mapping (target — not yet wired, see Remaining deployment work)
+## Deployment mapping
+
+End-to-end path, PR14.7B (MERGED) + PR14.7C (Cloudflare Tunnel cutover,
+prepared/not yet applied — see status note above):
 
 ```
-admin.omnibioai.org
-        |
-        v
-  dist-admin/
-
-control.omnibioai.org
-        |
-        v
-  dist-control/
+                     Cloudflare Tunnel (/etc/cloudflared/config.yml,     omnibioai-control-center
+                      on the tunnel host, root-owned -- NOT in any repo)      docker/nginx/*.conf
+                              │                                              (localhost:5174)
+  admin.omnibioai.org ───────►│ ingress: admin.omnibioai.org → :5174 ───────► server_name admin.omnibioai.org
+                              │                                                 root .../html/admin (dist-admin/)
+  control.omnibioai.org ─────►│ ingress: control.omnibioai.org → :5174 ─────► server_name control.omnibioai.org
+                              │            (was :7070 direct-to-backend)        root .../html/control (dist-control/)
+                              │                                                        │
+                              │                                                        ▼
+                              │                                              both proxy API paths to
+                              │                                              control-center:7070 (FastAPI) --
+                              │                                              same backend, same IAM checks,
+                              │                                              regardless of which domain served
 ```
 
-## Remaining deployment work (explicitly out of scope for this PR)
+`admin.omnibioai.org` needs a DNS record pointed at this tunnel before
+the ingress rule above does anything externally — Cloudflare Tunnel
+ingress rules only govern traffic the edge already knows to route into
+the tunnel; they don't create the DNS side themselves. See the PR14.7C
+rollout report for the exact command.
 
-This PR produces the two build artifacts. It does **not** modify `nginx-router.conf`, Cloudflare Tunnel configuration, or anything in `omnibioai-studio` — those changes are cross-repo and need their own coordinated PR. For that follow-up work, two things discovered during this phase's architecture review are worth carrying forward:
+## Remaining deployment work
 
-1. **`nginx-router.conf` has no host-based routing today** — a single `server_name _` catch-all serves every path-based route. Serving `dist-admin`/`dist-control` at two distinct domains requires either two `server_name` blocks keyed off the incoming `Host` header, or a path-based split, as a deliberate decision in that follow-up PR.
-2. **More importantly: in the live deployment, `cc-ui`'s built frontend is not served at all today**, dual-build or not. `control-center`'s container runs only `uvicorn control_center.main:app` — no `StaticFiles`/`.mount()` call exists in the backend (confirmed by direct inspection) — and `main.py`'s `root()` serves a completely different, self-contained static page, not `cc-ui`'s bundle. `nginx-router.conf` has its own "KNOWN DRIFT" comment confirming this is deliberate/known, not an oversight. **This means the actual, most critical next step for either domain to work at all is wiring `dist-admin`/`dist-control` into serving — the domain split is the correct shape to serve them in, but by itself doesn't make either one reachable.**
-3. The Dockerfile's existing Stage 3 (`nginx:alpine`, serves `dist/` on port 5174) appears to have been built for exactly this kind of static-serving need and was never wired into `docker-compose-release.yml`. Worth adapting rather than designing serving from scratch, once that follow-up work starts.
+Done, PR14.7B (MERGED): `dist-admin`/`dist-control` are wired into an
+actual nginx serving image (`docker/nginx/{api-proxy.conf,
+control-center.conf}` + Dockerfile Stage 3), verified on
+`localhost:5174`. `control-center`'s FastAPI process itself is
+unchanged — still no `StaticFiles`/`.mount()` in `main.py`; serving is
+entirely nginx's job, in a separate `control-center-web` container.
+
+Done, PR14.7C (prepared, not yet applied — see status note above):
+Cloudflare Tunnel ingress cutover, `control.omnibioai.org` → `:5174`
+(was `:7070`), plus a new `admin.omnibioai.org` → `:5174` rule.
+`omnibioai-studio/docker/nginx-router.conf` correctly stays untouched by
+this — `control.omnibioai.org` bypasses that router via a direct tunnel
+ingress rule (documented in that file's own PR7 comment), so serving
+stayed entirely self-contained in `control-center`'s own image rather
+than requiring host-based routing in the shared router too.
+
+Not yet done: Cloudflare Access policy coverage for `admin.omnibioai.org`
+specifically (Access policies live in the Cloudflare Zero Trust
+dashboard, not in `config.yml` or any file in this repo — verify there
+directly, don't assume a wildcard/existing policy already covers a new
+hostname).
 
 ## Remaining gaps / non-goals of this PR (unchanged from the task's own scope)
 
