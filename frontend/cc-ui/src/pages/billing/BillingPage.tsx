@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { ShieldAlert, Receipt, FileText, CreditCard, Gauge } from 'lucide-react'
+import { ShieldAlert, Receipt, FileText, CreditCard, Gauge, type LucideIcon } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip,
+  type TooltipValueType,
 } from 'recharts'
 import {
   fetchOrganizationBillingSummary, fetchInvoices, fetchInvoiceDetail, fetchCostBreakdown,
@@ -143,7 +144,14 @@ function CostBreakdownChart({ orgId }: { orgId: number }) {
           <XAxis type="number" tickFormatter={v => formatCurrency(v, state.data.currency)} tick={{ fill: CHART_MUTED, fontSize: 10 }} axisLine={false} tickLine={false} />
           <YAxis type="category" dataKey="name" tick={{ fill: CHART_MUTED, fontSize: 10 }} axisLine={false} tickLine={false} width={90} />
           <Tooltip
-            formatter={(v: number) => formatCurrency(v, state.data.currency)}
+            // recharts' Formatter<ValueType, NameType> passes `value` as
+            // TValue | undefined (TValue defaults to the union
+            // number | string | ReadonlyArray<number | string>), not a
+            // bare number -- barData's own `value` is always
+            // Number(v.cost) (see above), so the non-number/undefined
+            // branch is unreachable in practice, but the type must still
+            // account for it since formatCurrency requires a real number.
+            formatter={(v: TooltipValueType | undefined) => typeof v === 'number' ? formatCurrency(v, state.data.currency) : ''}
             contentStyle={{ background: '#1a1d2e', border: `1px solid ${CHART_BORDER}`, borderRadius: 8, fontSize: 12 }}
           />
           <Bar dataKey="value" fill={CHART_BAR_COLOR} radius={[0, 4, 4, 0]} />
@@ -452,7 +460,13 @@ export default function BillingPage({ orgId, onBack }: Props) {
 }
 
 function TabButton({ active, icon: Icon, onClick, children }: {
-  active: boolean; icon: React.ComponentType<{ size?: number }>; onClick: () => void; children: React.ReactNode
+  // Was React.ComponentType<{ size?: number }> -- lucide-react's current
+  // exported icon type is ForwardRefExoticComponent<... & RefAttributes<
+  // SVGSVGElement>>, which isn't assignable to a plain ComponentType (its
+  // propTypes shape differs). LucideIcon is lucide-react's own type alias
+  // for exactly that exported shape -- using it here doesn't change which
+  // icon renders or how, only what type-checks.
+  active: boolean; icon: LucideIcon; onClick: () => void; children: React.ReactNode
 }) {
   return (
     <button
