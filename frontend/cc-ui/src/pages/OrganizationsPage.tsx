@@ -8,6 +8,7 @@ import {
   type PlatformOrgListResponse,
   type SortOrder,
 } from '../organizations'
+import { Pagination } from '../components/ui'
 import { hasPlatformAdminAccess } from '../auth'
 import OrganizationTable, { type OrganizationTableRow } from '../components/organizations/OrganizationTable'
 
@@ -43,28 +44,6 @@ function ErrBox({ msg }: { msg: string }) {
   )
 }
 
-function Pagination({ page, totalPages, onPage }: { page: number; totalPages: number; onPage: (p: number) => void }) {
-  if (totalPages <= 1) return null
-  const btnBase: React.CSSProperties = {
-    fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 6,
-    border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer',
-  }
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '12px 0' }}>
-      <button onClick={() => onPage(page - 1)} disabled={page === 1}
-        style={{ ...btnBase, color: page === 1 ? 'var(--muted)' : 'var(--text2)', opacity: page === 1 ? 0.4 : 1 }}>
-        ← Prev
-      </button>
-      <span style={{ fontSize: 12, color: 'var(--muted)', minWidth: 90, textAlign: 'center' }}>
-        Page <span style={{ color: 'var(--text)', fontWeight: 700 }}>{page}</span> of {totalPages}
-      </span>
-      <button onClick={() => onPage(page + 1)} disabled={page === totalPages}
-        style={{ ...btnBase, color: page === totalPages ? 'var(--muted)' : 'var(--text2)', opacity: page === totalPages ? 0.4 : 1 }}>
-        Next →
-      </button>
-    </div>
-  )
-}
 
 interface Props {
   onSelect: (orgId: number) => void
@@ -208,7 +187,7 @@ function PlatformOrgsView({ onSelect, refreshSignal }: ViewProps) {
 
   return (
     <div>
-      <form onSubmit={submitSearch} style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+      <form onSubmit={submitSearch} style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         <input
           value={searchInput}
           onChange={e => setSearchInput(e.target.value)}

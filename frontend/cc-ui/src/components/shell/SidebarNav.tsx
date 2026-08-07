@@ -1,7 +1,7 @@
 import {
   Activity, Bot, BookOpen, BrainCircuit, Building2, Cloud, Container,
   CreditCard, FlaskConical, KeyRound, KeySquare, LayoutDashboard, Network,
-  Plug, Puzzle, ScrollText, Server, Settings, Settings2, ShieldCheck, Clock, Users,
+  Plug, ScrollText, Server, Settings, Settings2, ShieldCheck, Clock, Users,
   UsersRound, Workflow, Wrench,
 } from 'lucide-react'
 import { NAVIGATION, isNavItemVisible } from '../../navigation'
@@ -31,7 +31,6 @@ const ICONS: Partial<Record<PageKey, IconComponent>> = {
   billing: CreditCard,
   rag: BookOpen,
   pubmed: FlaskConical,
-  plugins: Puzzle,
   integrations: Plug,
   settings: Settings,
 }

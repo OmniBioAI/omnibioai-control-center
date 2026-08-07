@@ -58,6 +58,15 @@ describe('ToolExecutionPage', () => {
     expect(screen.queryByText('No runs for your organization yet.')).not.toBeInTheDocument()
   })
 
+  // PR E2: a 401 must render as a distinct session-issue state, not the
+  // same "Permission denied" copy a 403 gets.
+  it('shows a session-expired state when the backend 401s, not Permission denied', async () => {
+    vi.mocked(tes.fetchRuns).mockRejectedValue(new Error('/tes/runs 401'))
+    render(<ToolExecutionPage />)
+    expect(await screen.findByText('Session expired')).toBeInTheDocument()
+    expect(screen.queryByText('Permission denied')).not.toBeInTheDocument()
+  })
+
   it('shows a generic error with retry on other failures', async () => {
     vi.mocked(tes.fetchRuns).mockRejectedValueOnce(new Error('/tes/runs 503'))
     vi.mocked(tes.fetchRuns).mockResolvedValueOnce([runningRun])

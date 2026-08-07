@@ -8,16 +8,13 @@ import {
 } from '../../serviceAccounts'
 import { fetchMyOrg, fetchPlatformOrgDetail } from '../../organizations'
 import { hasPlatformAdminAccess } from '../../auth'
-import { Card, SectionHeader, LoadingState, ErrorState, EmptyState, ActionToolbar, Button, DataTable } from '../../components/ui'
+import { Card, SectionHeader, LoadingState, ErrorState, EmptyState, ActionToolbar, Button, DataTable, BackLink } from '../../components/ui'
+import { formatDate } from '../../format'
 
 const fieldLabel: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: 'var(--text2)', marginBottom: 4, display: 'block' }
 const fieldStyle: React.CSSProperties = {
   fontSize: 13, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)',
   background: 'var(--bg)', color: 'var(--text)', width: '100%', boxSizing: 'border-box',
-}
-
-function formatDate(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleString() : '—'
 }
 
 function StatusText({ status }: { status: string }) {
@@ -511,7 +508,7 @@ export default function ServiceAccountsPage({ orgId, onBack, initialTab = 'oauth
 
   return (
     <div>
-      <BackLink onBack={onBack} />
+      <BackLink label="Back to Organizations" onBack={onBack} />
       <SectionHeader
         title="Service Accounts"
         description={`Organization-level API keys and OAuth service accounts for ${orgLabel}.`}
@@ -542,20 +539,6 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
       }}
     >
       {children}
-    </button>
-  )
-}
-
-function BackLink({ onBack }: { onBack: () => void }) {
-  return (
-    <button
-      onClick={onBack}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 16,
-        fontSize: 12, fontWeight: 600, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer',
-      }}
-    >
-      ← Back
     </button>
   )
 }

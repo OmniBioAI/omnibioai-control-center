@@ -10,7 +10,8 @@ import {
 } from '../../security'
 import { fetchMyOrg, fetchPlatformOrgDetail } from '../../organizations'
 import { hasPermission, hasPlatformAdminAccess } from '../../auth'
-import { Card, SectionHeader, LoadingState, ErrorState, EmptyState, ActionToolbar, Button } from '../../components/ui'
+import { Card, SectionHeader, LoadingState, ErrorState, EmptyState, ActionToolbar, Button, BackLink } from '../../components/ui'
+import { formatDate } from '../../format'
 
 // PR11.5.6 (Admin Console Security UI). Structurally mirrors
 // SSOSettingsPage.tsx (PR11.3) deliberately closely -- same org-label
@@ -58,10 +59,6 @@ function ErrBox({ msg }: { msg: string }) {
  * exists for this in components/ui yet). */
 function BoolText({ value: v, trueLabel, falseLabel }: { value: boolean; trueLabel: string; falseLabel: string }) {
   return <span style={{ color: v ? 'var(--color-success, #22c55e)' : 'var(--muted)' }}>{v ? trueLabel : falseLabel}</span>
-}
-
-function formatDate(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleString() : '—'
 }
 
 // ── Current Policy ───────────────────────────────────────────────────────
@@ -343,7 +340,7 @@ export default function OrganizationMFAPolicyPage({ orgId, onBack }: Props) {
 
   return (
     <div>
-      <BackLink onBack={onBack} />
+      <BackLink label="Back to Organizations" onBack={onBack} />
       <SectionHeader
         title="MFA Policy"
         description="Organization-level multi-factor authentication requirement."
@@ -393,19 +390,5 @@ export default function OrganizationMFAPolicyPage({ orgId, onBack }: Props) {
         </>
       )}
     </div>
-  )
-}
-
-function BackLink({ onBack }: { onBack: () => void }) {
-  return (
-    <button
-      onClick={onBack}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 16,
-        fontSize: 12, fontWeight: 600, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer',
-      }}
-    >
-      ← Back
-    </button>
   )
 }

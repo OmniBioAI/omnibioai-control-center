@@ -4,6 +4,7 @@ import { fetchPlatformUsers, type PlatformUserSummary } from '../../users'
 import { fetchPlatformOrgs, type PlatformOrgSummary } from '../../organizations'
 import { fetchAuditEvents, formatEventType, MFA_EVENT_TYPES, type AuditEvent } from '../../audit'
 import { Card, SectionHeader, StatCard, LoadingState, ErrorState, EmptyState } from '../../components/ui'
+import { formatDate } from '../../format'
 
 // PR11.5.6 (Admin Console Security UI). Enterprise security overview --
 // MFA adoption, organization MFA policy counts, recent MFA/audit events.
@@ -81,10 +82,6 @@ async function loadDashboardData(): Promise<DashboardData> {
     orgsWithoutPolicy: orgs.filter(o => !o.mfa_policy_configured).length,
     recentEvents,
   }
-}
-
-function formatDate(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleString() : '—'
 }
 
 function enrollmentPct(data: DashboardData): string {

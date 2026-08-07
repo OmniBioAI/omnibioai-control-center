@@ -27,7 +27,7 @@ export type PageKey =
   | 'infrastructure' | 'workflows' | 'tool-execution' | 'ai-models'
   | 'security-overview' | 'mfa-policy' | 'iam' | 'audit-logs' | 'sessions' | 'api-keys'
   | 'billing'
-  | 'rag' | 'pubmed' | 'plugins'
+  | 'rag' | 'pubmed'
   | 'integrations' | 'settings'
 
 export interface NavItem {
@@ -263,7 +263,18 @@ export const NAVIGATION: NavSection[] = [
       // check.
       { key: 'rag', label: 'RAG', functional: true, visible: hasAdminAccess },
       { key: 'pubmed', label: 'PubMed', functional: true, visible: hasAdminAccess },
-      { key: 'plugins', label: 'Plugins', functional: false },
+      // PR E2 (re-verified PR D §3.2's finding, unchanged): removed, not
+      // flipped to functional. The only "plugin" concept anywhere in
+      // this ecosystem is the GHCR omnibioai-plugin-* container-image
+      // family -- confirmed again by re-reading routes_docker.py's
+      // GET /docker/plugin-images directly (auto-discovers every
+      // plugins/*/plugin.json manifest, resolves each to its GHCR
+      // image, reports local presence) -- already fully live under
+      // Operations > Infrastructure > Docker > "Plugin Docker Images".
+      // A second nav entry here would duplicate that tab exactly, same
+      // failure mode PR B avoided for Licenses/Usage. See
+      // docs/pr-d-admin-placeholder-audit.md §3.2 for the original
+      // discovery.
     ],
   },
   {

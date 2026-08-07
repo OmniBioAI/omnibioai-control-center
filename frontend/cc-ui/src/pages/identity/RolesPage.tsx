@@ -215,19 +215,24 @@ export default function RolesPage({ initialOrgId }: Props) {
   const [editing, setEditing] = useState<{ role: RoleSummary; scope: Scope } | null>(null)
   const [deleting, setDeleting] = useState<RoleSummary | null>(null)
 
-  useEffect(() => {
+  // PR E2: extracted from an inline useEffect callback into a named
+  // function so ErrorState below can offer Retry, same fix TeamsPage.tsx
+  // got -- no behavior change to the fetch/state logic itself.
+  const loadOrgs = () => {
     setOrgs(null)
     setOrgsErr(null)
-    const load = isPlatformAdmin
+    const fetchOrgs = isPlatformAdmin
       ? fetchPlatformOrgs({ pageSize: 100 }).then((r): OrgOption[] => r.items.map((o: PlatformOrgSummary) => ({ id: o.id, name: o.name })))
       : fetchMyOrgs().then((list): OrgOption[] => list.map((o: MyOrg) => ({ id: o.id, name: o.name })))
-    load
+    fetchOrgs
       .then(list => {
         setOrgs(list)
         setSelectedOrgId(cur => (cur != null && list.some(o => o.id === cur) ? cur : (list[0]?.id ?? null)))
       })
       .catch(e => setOrgsErr(String(e)))
-  }, [isPlatformAdmin])
+  }
+
+  useEffect(loadOrgs, [isPlatformAdmin])
 
   useEffect(() => {
     if (isPlatformAdmin) fetchPermissionRegistry().then(setPlatformPermissions).catch(() => setPlatformPermissions([]))
@@ -287,7 +292,7 @@ export default function RolesPage({ initialOrgId }: Props) {
         ) : undefined}
       />
 
-      {orgsErr && <ErrorState message={orgsErr} />}
+      {orgsErr && <ErrorState message={orgsErr} onRetry={loadOrgs} />}
       {!orgsErr && orgs == null && <LoadingState label="Loading organizations…" />}
       {!orgsErr && orgs && orgs.length === 0 && (
         <EmptyState title={isPlatformAdmin ? 'No organizations exist yet.' : "You don't belong to any organization yet."} />
@@ -295,7 +300,7 @@ export default function RolesPage({ initialOrgId }: Props) {
 
       {!orgsErr && orgs && orgs.length > 0 && selectedOrgId != null && (
         <>
-          {rolesErr && <ErrorState message={rolesErr} />}
+          {rolesErr && <ErrorState message={rolesErr} onRetry={loadRoles} />}
           {!rolesErr && roles == null && <LoadingState label="Loading roles…" />}
           {!rolesErr && roles && roles.length === 0 && (
             <EmptyState title="No roles defined for this organization." />

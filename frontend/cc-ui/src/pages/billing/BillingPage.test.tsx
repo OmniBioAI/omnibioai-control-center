@@ -125,6 +125,18 @@ describe('BillingPage', () => {
     expect(screen.queryByText('Current period usage')).not.toBeInTheDocument()
   })
 
+  // PR E2: a 401 (session issue) must never render as "Permission
+  // denied" -- that's misleading, since a stale/invalid token is not a
+  // permissions problem.
+  it('shows a session-expired state on a 401, distinct from Permission denied', async () => {
+    vi.mocked(billing.fetchOrganizationBillingSummary).mockRejectedValue(new Error('/billing/organizations/42/summary 401'))
+    render(<BillingPage orgId={42} onBack={vi.fn()} />)
+
+    expect(await screen.findByText('Session expired')).toBeInTheDocument()
+    expect(screen.queryByText('Permission denied')).not.toBeInTheDocument()
+    expect(screen.queryByText('Current period usage')).not.toBeInTheDocument()
+  })
+
   it('shows an error state with retry for an unexpected failure', async () => {
     vi.mocked(billing.fetchOrganizationBillingSummary).mockRejectedValueOnce(new Error('/billing/organizations/42/summary 503'))
     vi.mocked(billing.fetchOrganizationBillingSummary).mockResolvedValueOnce(summaryWithPeriod)

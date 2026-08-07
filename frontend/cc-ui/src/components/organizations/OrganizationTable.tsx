@@ -103,7 +103,22 @@ export default function OrganizationTable({ rows, onSelect, richColumns, sortBy,
       </thead>
       <tbody>
         {rows.map(row => (
-          <tr key={row.id} style={rowStyle} onClick={() => onSelect(row.id)} data-testid={`org-row-${row.id}`}>
+          <tr
+            key={row.id}
+            style={rowStyle}
+            onClick={() => onSelect(row.id)}
+            // PR E2: additive keyboard-accessibility fix, same as
+            // UsersPage.tsx's equivalent row -- a keyboard path already
+            // existed via the Actions column's real <button> below, but
+            // making the row itself focusable/actionable doesn't rely on
+            // a caller discovering that button first. onClick above is
+            // unchanged; this only adds an equivalent path.
+            role="button"
+            tabIndex={0}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(row.id) } }}
+            aria-label={`View organization ${row.name}`}
+            data-testid={`org-row-${row.id}`}
+          >
             <td style={{ ...td, color: 'var(--text)', fontWeight: 600 }}>{row.name}</td>
             <td style={{ ...td, fontFamily: 'var(--mono)', fontSize: 11 }}>{row.slug ?? '—'}</td>
             <td style={td}>{row.plan ?? '—'}</td>

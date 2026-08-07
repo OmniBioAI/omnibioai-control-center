@@ -4,7 +4,8 @@ import {
   fetchRuns, fetchTools, fetchToolCapabilities,
   type RunRecord, type ToolSummary,
 } from '../../tes'
-import { Card, SectionHeader, StatCard, DataTable, LoadingState, ErrorState, EmptyState } from '../../components/ui'
+import { Card, SectionHeader, StatCard, DataTable, LoadingState, ErrorState, EmptyState, SessionExpiredState } from '../../components/ui'
+import { formatDate, classifyAuthError } from '../../format'
 
 // PR A1 (Admin Console Capability Parity -- Tool Execution). Flat page,
 // no organization picker: omnibioai-tes's GET /api/runs self-scopes to
@@ -15,8 +16,10 @@ import { Card, SectionHeader, StatCard, DataTable, LoadingState, ErrorState, Emp
 // BillingPage.tsx's org-picker shape.
 //
 // Two tabs: Runs (permission-gated by TES's own require_permission(
-// WORKFLOW_EXECUTE), classified via the ' 403'/' 404' suffix convention
-// every other proxied page in this app already uses) and Tools
+// WORKFLOW_EXECUTE), classified via the shared classifyAuthError --
+// PR E2, previously a local classify() that folded a 401 into the same
+// "Permission denied" copy as a 403, which misattributed a stale/
+// invalid session to the caller's own permissions) and Tools
 // (unauthenticated upstream -- always visible once the page itself is
 // reachable, no separate denied state needed for that half).
 //
@@ -46,21 +49,9 @@ function RunStateBadge({ state }: { state: string }) {
   )
 }
 
-function formatDate(iso?: string): string {
-  return iso ? new Date(iso).toLocaleString() : '—'
-}
-
-// classify() mirrors BillingPage.tsx/AuditLogsPage.tsx's own convention:
-// distinguish "no permission" (403) from a genuine error, by the
-// thrown message's trailing status suffix -- no authorization decision
-// is made here, this only decides how to render what the backend
-// already decided.
-function classify(message: string): 'denied' | 'error' {
-  return message.endsWith(' 403') || message.endsWith(' 401') ? 'denied' : 'error'
-}
-
 type RunsState =
   | { status: 'loading' }
+  | { status: 'session' }
   | { status: 'denied'; reason: string }
   | { status: 'error'; message: string }
   | { status: 'ready'; runs: RunRecord[] }
@@ -74,13 +65,17 @@ function RunsTab() {
       .then(runs => setState({ status: 'ready', runs }))
       .catch((e: unknown) => {
         const message = e instanceof Error ? e.message : String(e)
-        setState(classify(message) === 'denied' ? { status: 'denied', reason: message } : { status: 'error', message })
+        const kind = classifyAuthError(message)
+        if (kind === 'session') setState({ status: 'session' })
+        else if (kind === 'denied') setState({ status: 'denied', reason: message })
+        else setState({ status: 'error', message })
       })
   }
 
   useEffect(load, [])
 
   if (state.status === 'loading') return <LoadingState label="Loading runs…" />
+  if (state.status === 'session') return <SessionExpiredState />
   if (state.status === 'denied') {
     return (
       <EmptyState

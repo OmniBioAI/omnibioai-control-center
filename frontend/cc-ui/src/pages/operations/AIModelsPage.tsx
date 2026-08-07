@@ -4,7 +4,8 @@ import {
   fetchModels, fetchModelRegistryHealth, fetchModelRegistryAuthStatus,
   type ModelVersionRow, type ModelRegistryHealth, type ModelRegistryAuthStatus,
 } from '../../model_registry'
-import { Card, SectionHeader, StatCard, DataTable, LoadingState, ErrorState, EmptyState } from '../../components/ui'
+import { Card, SectionHeader, StatCard, DataTable, LoadingState, ErrorState, EmptyState, SessionExpiredState } from '../../components/ui'
+import { formatDate, classifyAuthError } from '../../format'
 
 // PR A2 (Admin Console Capability Parity -- AI Models). Flat page, no
 // organization picker: model-registry has no organization concept
@@ -27,10 +28,13 @@ import { Card, SectionHeader, StatCard, DataTable, LoadingState, ErrorState, Emp
 //     authenticate," not invented infrastructure metrics.
 //
 // Permission/error handling is included defensively (EmptyState+
-// ShieldAlert on a 401/403) even though none of these three routes are
-// gated upstream today -- see model_registry.ts's module comment. If
-// that ever changes, this page already renders it correctly without a
-// follow-up UI change.
+// ShieldAlert on a 403, a distinct SessionExpiredState on a 401) even
+// though none of these three routes are gated upstream today -- see
+// model_registry.ts's module comment. If that ever changes, this page
+// already renders it correctly without a follow-up UI change. PR E2:
+// previously a local classify() folded 401 into the same "Permission
+// denied" bucket as 403 -- now uses the shared classifyAuthError, same
+// fix as every other page in this app that had the same conflation.
 
 type Tab = 'registered' | 'versions' | 'runtime'
 
@@ -53,17 +57,6 @@ function StageBadge({ stage }: { stage?: string }) {
       {label}
     </span>
   )
-}
-
-function formatDate(iso?: string): string {
-  return iso ? new Date(iso).toLocaleString() : '—'
-}
-
-// classify() mirrors ToolExecutionPage.tsx/BillingPage.tsx's own
-// convention: distinguish "no permission" from a genuine error, by the
-// thrown message's trailing status suffix.
-function classify(message: string): 'denied' | 'error' {
-  return message.endsWith(' 401') || message.endsWith(' 403') ? 'denied' : 'error'
 }
 
 interface ModelGroup {
@@ -104,6 +97,7 @@ function groupByModel(rows: ModelVersionRow[]): ModelGroup[] {
 
 type ModelsState =
   | { status: 'loading' }
+  | { status: 'session' }
   | { status: 'denied'; reason: string }
   | { status: 'error'; message: string }
   | { status: 'ready'; rows: ModelVersionRow[] }
@@ -117,7 +111,10 @@ function useModels() {
       .then(rows => setState({ status: 'ready', rows }))
       .catch((e: unknown) => {
         const message = e instanceof Error ? e.message : String(e)
-        setState(classify(message) === 'denied' ? { status: 'denied', reason: message } : { status: 'error', message })
+        const kind = classifyAuthError(message)
+        if (kind === 'session') setState({ status: 'session' })
+        else if (kind === 'denied') setState({ status: 'denied', reason: message })
+        else setState({ status: 'error', message })
       })
   }
 
@@ -139,6 +136,7 @@ function RegisteredModelsTab() {
   const { state, load } = useModels()
 
   if (state.status === 'loading') return <LoadingState label="Loading registered models…" />
+  if (state.status === 'session') return <SessionExpiredState />
   if (state.status === 'denied') return <DeniedState />
   if (state.status === 'error') return <ErrorState message={state.message} onRetry={load} />
 
@@ -172,6 +170,7 @@ function ModelVersionsTab() {
   const { state, load } = useModels()
 
   if (state.status === 'loading') return <LoadingState label="Loading model versions…" />
+  if (state.status === 'session') return <SessionExpiredState />
   if (state.status === 'denied') return <DeniedState />
   if (state.status === 'error') return <ErrorState message={state.message} onRetry={load} />
 
@@ -193,6 +192,7 @@ function ModelVersionsTab() {
 
 type RuntimeState =
   | { status: 'loading' }
+  | { status: 'session' }
   | { status: 'denied'; reason: string }
   | { status: 'error'; message: string }
   | { status: 'ready'; health: ModelRegistryHealth; authStatus: ModelRegistryAuthStatus }
@@ -206,13 +206,17 @@ function RuntimeStatusTab() {
       .then(([health, authStatus]) => setState({ status: 'ready', health, authStatus }))
       .catch((e: unknown) => {
         const message = e instanceof Error ? e.message : String(e)
-        setState(classify(message) === 'denied' ? { status: 'denied', reason: message } : { status: 'error', message })
+        const kind = classifyAuthError(message)
+        if (kind === 'session') setState({ status: 'session' })
+        else if (kind === 'denied') setState({ status: 'denied', reason: message })
+        else setState({ status: 'error', message })
       })
   }
 
   useEffect(load, [])
 
   if (state.status === 'loading') return <LoadingState label="Loading runtime status…" />
+  if (state.status === 'session') return <SessionExpiredState />
   if (state.status === 'denied') return <DeniedState />
   if (state.status === 'error') return <ErrorState message={state.message} onRetry={load} />
 

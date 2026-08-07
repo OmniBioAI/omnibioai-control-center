@@ -46,19 +46,25 @@ export default function TeamsPage({ initialOrgId }: Props) {
   const [err, setErr] = useState<string | null>(null)
   const [selectedOrgId, setSelectedOrgId] = useState<number | null>(initialOrgId ?? null)
 
-  useEffect(() => {
+  // PR E2: extracted from an inline useEffect callback into a named
+  // function so ErrorState below can offer Retry -- same convention
+  // every other page's `const load = () => {...}; useEffect(load, [...])`
+  // already follows. No behavior change to the fetch/state logic itself.
+  const load = () => {
     setOrgs(null)
     setErr(null)
-    const load = isPlatformAdmin
+    const fetchOrgs = isPlatformAdmin
       ? fetchPlatformOrgs({ pageSize: 100 }).then((r): OrgOption[] => r.items.map((o: PlatformOrgSummary) => ({ id: o.id, name: o.name })))
       : fetchMyOrgs().then((list): OrgOption[] => list.map((o: MyOrg) => ({ id: o.id, name: o.name })))
-    load
+    fetchOrgs
       .then(list => {
         setOrgs(list)
         setSelectedOrgId(cur => (cur != null && list.some(o => o.id === cur) ? cur : (list[0]?.id ?? null)))
       })
       .catch(e => setErr(String(e)))
-  }, [isPlatformAdmin])
+  }
+
+  useEffect(load, [isPlatformAdmin])
 
   return (
     <PageContainer>
@@ -81,7 +87,7 @@ export default function TeamsPage({ initialOrgId }: Props) {
         ) : undefined}
       />
 
-      {err && <ErrorState message={err} />}
+      {err && <ErrorState message={err} onRetry={load} />}
       {!err && orgs == null && <LoadingState label="Loading organizations…" />}
       {!err && orgs && orgs.length === 0 && (
         <EmptyState title={isPlatformAdmin ? 'No organizations exist yet.' : "You don't belong to any organization yet."} />

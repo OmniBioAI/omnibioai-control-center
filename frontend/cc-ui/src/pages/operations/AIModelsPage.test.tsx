@@ -60,6 +60,15 @@ describe('AIModelsPage', () => {
     expect(screen.queryByText('No models registered yet.')).not.toBeInTheDocument()
   })
 
+  // PR E2: a 401 must render as a distinct session-issue state, not the
+  // same "Permission denied" copy a 403 gets.
+  it('shows a session-expired state when the backend 401s, not Permission denied', async () => {
+    vi.mocked(modelRegistry.fetchModels).mockRejectedValue(new Error('/model-registry/models 401'))
+    render(<AIModelsPage />)
+    expect(await screen.findByText('Session expired')).toBeInTheDocument()
+    expect(screen.queryByText('Permission denied')).not.toBeInTheDocument()
+  })
+
   it('shows a generic error with retry on other failures', async () => {
     vi.mocked(modelRegistry.fetchModels).mockRejectedValueOnce(new Error('/model-registry/models 503'))
     vi.mocked(modelRegistry.fetchModels).mockResolvedValueOnce(modelVersions)

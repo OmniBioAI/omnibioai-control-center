@@ -4,7 +4,8 @@ import {
   fetchWorkflows, fetchCategories, fetchRuns,
   type WorkflowRow, type CategoryStat, type WorkflowRun,
 } from '../../workflows'
-import { Card, SectionHeader, StatCard, DataTable, LoadingState, ErrorState, EmptyState } from '../../components/ui'
+import { Card, SectionHeader, StatCard, DataTable, LoadingState, ErrorState, EmptyState, SessionExpiredState } from '../../components/ui'
+import { formatDate, classifyAuthError } from '../../format'
 
 // PR A3 (Admin Console Capability Parity -- Workflows). Flat page, no
 // organization picker -- workflow definitions/categories aren't
@@ -25,17 +26,6 @@ import { Card, SectionHeader, StatCard, DataTable, LoadingState, ErrorState, Emp
 // workflow.publish -- out of this PR's read-only scope).
 
 type Tab = 'workflows' | 'categories' | 'runs'
-
-function formatDate(iso?: string): string {
-  return iso ? new Date(iso).toLocaleString() : '—'
-}
-
-// classify() mirrors ToolExecutionPage.tsx's own convention: distinguish
-// "no permission" from a genuine error, by the thrown message's
-// trailing status suffix.
-function classify(message: string): 'denied' | 'error' {
-  return message.endsWith(' 401') || message.endsWith(' 403') ? 'denied' : 'error'
-}
 
 function DeniedState({ permission }: { permission: string }) {
   return (
@@ -78,6 +68,7 @@ function RunsNotice() {
 
 type WorkflowsState =
   | { status: 'loading' }
+  | { status: 'session' }
   | { status: 'denied'; reason: string }
   | { status: 'error'; message: string }
   | { status: 'ready'; rows: WorkflowRow[] }
@@ -91,13 +82,17 @@ function WorkflowsTab() {
       .then(rows => setState({ status: 'ready', rows }))
       .catch((e: unknown) => {
         const message = e instanceof Error ? e.message : String(e)
-        setState(classify(message) === 'denied' ? { status: 'denied', reason: message } : { status: 'error', message })
+        const kind = classifyAuthError(message)
+        if (kind === 'session') setState({ status: 'session' })
+        else if (kind === 'denied') setState({ status: 'denied', reason: message })
+        else setState({ status: 'error', message })
       })
   }
 
   useEffect(load, [])
 
   if (state.status === 'loading') return <LoadingState label="Loading workflows…" />
+  if (state.status === 'session') return <SessionExpiredState />
   if (state.status === 'denied') return <DeniedState permission="workflow.read" />
   if (state.status === 'error') return <ErrorState message={state.message} onRetry={load} />
 
@@ -130,6 +125,7 @@ function WorkflowsTab() {
 
 type CategoriesState =
   | { status: 'loading' }
+  | { status: 'session' }
   | { status: 'denied'; reason: string }
   | { status: 'error'; message: string }
   | { status: 'ready'; rows: CategoryStat[] }
@@ -143,13 +139,17 @@ function CategoriesTab() {
       .then(rows => setState({ status: 'ready', rows }))
       .catch((e: unknown) => {
         const message = e instanceof Error ? e.message : String(e)
-        setState(classify(message) === 'denied' ? { status: 'denied', reason: message } : { status: 'error', message })
+        const kind = classifyAuthError(message)
+        if (kind === 'session') setState({ status: 'session' })
+        else if (kind === 'denied') setState({ status: 'denied', reason: message })
+        else setState({ status: 'error', message })
       })
   }
 
   useEffect(load, [])
 
   if (state.status === 'loading') return <LoadingState label="Loading categories…" />
+  if (state.status === 'session') return <SessionExpiredState />
   if (state.status === 'denied') return <DeniedState permission="workflow.read" />
   if (state.status === 'error') return <ErrorState message={state.message} onRetry={load} />
 
@@ -169,6 +169,7 @@ function CategoriesTab() {
 
 type RunsState =
   | { status: 'loading' }
+  | { status: 'session' }
   | { status: 'denied'; reason: string }
   | { status: 'error'; message: string }
   | { status: 'ready'; runs: WorkflowRun[] }
@@ -182,13 +183,17 @@ function RunsTab() {
       .then(runs => setState({ status: 'ready', runs }))
       .catch((e: unknown) => {
         const message = e instanceof Error ? e.message : String(e)
-        setState(classify(message) === 'denied' ? { status: 'denied', reason: message } : { status: 'error', message })
+        const kind = classifyAuthError(message)
+        if (kind === 'session') setState({ status: 'session' })
+        else if (kind === 'denied') setState({ status: 'denied', reason: message })
+        else setState({ status: 'error', message })
       })
   }
 
   useEffect(load, [])
 
   if (state.status === 'loading') return <LoadingState label="Loading runs…" />
+  if (state.status === 'session') return <><RunsNotice /><SessionExpiredState /></>
   if (state.status === 'denied') return <><RunsNotice /><DeniedState permission="workflow.execute" /></>
   if (state.status === 'error') return <><RunsNotice /><ErrorState message={state.message} onRetry={load} /></>
 

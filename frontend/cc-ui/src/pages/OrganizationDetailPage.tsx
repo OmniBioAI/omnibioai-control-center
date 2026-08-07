@@ -13,6 +13,7 @@ import { assignOrgMemberRole, fetchOrgRoles, removeOrgMemberRole, type RoleSumma
 import { hasPlatformAdminAccess } from '../auth'
 import OrganizationStatusBadge from '../components/organizations/OrganizationStatusBadge'
 import OrganizationSummaryCard from '../components/organizations/OrganizationSummaryCard'
+import { BackLink } from '../components/ui'
 import SecuritySummaryCard from '../components/organizations/SecuritySummaryCard'
 import RoleAssignmentList from '../components/roles/RoleAssignmentList'
 import RoleSelector from '../components/roles/RoleSelector'
@@ -330,7 +331,7 @@ function PlatformDetailView({ orgId, onBack, onViewTeams, onViewRoles, onManageS
     // never assumes access just because the URL contains an org_id.
     return (
       <div>
-        <BackLink onBack={onBack} />
+        <BackLink label="Back to Organizations" onBack={onBack} />
         <ErrBox msg={err ?? 'Organization not found'} />
       </div>
     )
@@ -338,7 +339,7 @@ function PlatformDetailView({ orgId, onBack, onViewTeams, onViewRoles, onManageS
 
   return (
     <div>
-      <BackLink onBack={onBack} />
+      <BackLink label="Back to Organizations" onBack={onBack} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
         <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)' }}>{org.name}</h2>
         <OrganizationStatusBadge status={org.status} />
@@ -451,7 +452,7 @@ function MyOrgDetailView({ orgId, onBack, onViewTeams, onViewRoles }: Props) {
     // actually stops them; this is just how that rejection renders.
     return (
       <div>
-        <BackLink onBack={onBack} />
+        <BackLink label="Back to Organizations" onBack={onBack} />
         <ErrBox msg={err ?? 'Organization not found'} />
       </div>
     )
@@ -459,7 +460,7 @@ function MyOrgDetailView({ orgId, onBack, onViewTeams, onViewRoles }: Props) {
 
   return (
     <div>
-      <BackLink onBack={onBack} />
+      <BackLink label="Back to Organizations" onBack={onBack} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
         <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)' }}>{org.name}</h2>
         <OrganizationStatusBadge status={org.status} />
@@ -500,19 +501,6 @@ function MyOrgDetailView({ orgId, onBack, onViewTeams, onViewRoles }: Props) {
   )
 }
 
-function BackLink({ onBack }: { onBack: () => void }) {
-  return (
-    <button
-      onClick={onBack}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 16,
-        fontSize: 12, fontWeight: 600, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer',
-      }}
-    >
-      ← Back to Organizations
-    </button>
-  )
-}
 
 export default function OrganizationDetailPage({ orgId, onBack, onViewTeams, onViewRoles, onManageSso, onManageServiceAccounts }: Props) {
   const [isPlatformAdmin] = useState(() => hasPlatformAdminAccess())

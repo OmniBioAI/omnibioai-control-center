@@ -63,6 +63,15 @@ describe('WorkflowsPage', () => {
     expect(screen.queryByText('No workflows registered yet.')).not.toBeInTheDocument()
   })
 
+  // PR E2: a 401 must render as a distinct session-issue state, not the
+  // same "Permission denied" copy a 403 gets.
+  it('shows a session-expired state when the backend 401s, not Permission denied', async () => {
+    vi.mocked(workflows.fetchWorkflows).mockRejectedValue(new Error('/workflow-bundles/workflows 401'))
+    render(<WorkflowsPage />)
+    expect(await screen.findByText('Session expired')).toBeInTheDocument()
+    expect(screen.queryByText('Permission denied')).not.toBeInTheDocument()
+  })
+
   it('shows a generic error with retry on other failures', async () => {
     vi.mocked(workflows.fetchWorkflows).mockRejectedValueOnce(new Error('/workflow-bundles/workflows 503'))
     vi.mocked(workflows.fetchWorkflows).mockResolvedValueOnce([starSalmon])

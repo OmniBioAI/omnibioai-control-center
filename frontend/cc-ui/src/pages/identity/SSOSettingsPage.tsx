@@ -10,7 +10,8 @@ import {
 } from '../../sso'
 import { fetchMyOrg, fetchPlatformOrgDetail } from '../../organizations'
 import { hasPermission, hasPlatformAdminAccess } from '../../auth'
-import { Card, SectionHeader, LoadingState, ErrorState, EmptyState, ActionToolbar, Button } from '../../components/ui'
+import { Card, SectionHeader, LoadingState, ErrorState, EmptyState, ActionToolbar, Button, BackLink } from '../../components/ui'
+import { formatDate } from '../../format'
 
 const MANAGE_SSO = 'manage_sso'
 const OVERRIDE_SSO_ENFORCEMENT = 'override_sso_enforcement'
@@ -66,10 +67,6 @@ function discoveryStatusLabel(status: string): string {
   if (status === 'pending_verification') return 'Pending verification'
   if (status === 'disabled') return 'Disabled'
   return status
-}
-
-function formatDate(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleString() : '—'
 }
 
 // ── Current Configuration ──────────────────────────────────────────────
@@ -527,7 +524,7 @@ export default function SSOSettingsPage({ orgId, onBack }: Props) {
 
   return (
     <div>
-      <BackLink onBack={onBack} />
+      <BackLink label="Back to Organizations" onBack={onBack} />
       <SectionHeader
         title="SSO Settings"
         description="Organization-level enterprise OIDC SSO configuration."
@@ -571,19 +568,5 @@ export default function SSOSettingsPage({ orgId, onBack }: Props) {
         </>
       )}
     </div>
-  )
-}
-
-function BackLink({ onBack }: { onBack: () => void }) {
-  return (
-    <button
-      onClick={onBack}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 16,
-        fontSize: 12, fontWeight: 600, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer',
-      }}
-    >
-      ← Back
-    </button>
   )
 }
