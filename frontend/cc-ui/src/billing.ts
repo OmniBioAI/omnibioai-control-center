@@ -126,6 +126,52 @@ export interface InvoiceListFilters {
   offset?: number
 }
 
+// PR14.6D: subscription summary + usage-limits shapes. Field shapes
+// mirror app/schemas/subscriptions.py's SubscriptionSummaryResponse/
+// SubscriptionUsageLimitsResponse exactly, same convention every other
+// shape in this file already follows.
+
+export interface SubscriptionFeature {
+  feature_key: string
+  value_type: string
+  bool_value: boolean | null
+  int_value: number | null
+  string_value: string | null
+}
+
+export interface SubscriptionSummary {
+  organization_id: number
+  billing_plan_id: number
+  plan_name: string
+  billing_interval: string
+  currency: string
+  status: string
+  start_date: string
+  end_date: string | null
+  renewal_date: string | null
+  features: SubscriptionFeature[]
+}
+
+export interface SubscriptionUsageLimit {
+  service: string
+  action: string
+  resource: string
+  unit: string
+  period: string
+  included: number
+  used: number
+  remaining: number
+  percentage_used: number
+}
+
+export interface SubscriptionUsageLimits {
+  organization_id: number
+  billing_plan_id: number
+  plan_name: string
+  as_of: string
+  limits: SubscriptionUsageLimit[]
+}
+
 // ── Calls ───────────────────────────────────────────────────────────────
 
 export async function fetchOrganizationBillingSummary(orgId: number): Promise<OrganizationBillingSummary> {
@@ -164,6 +210,22 @@ export async function fetchCostBreakdown(
   orgId: number, startDate: string, endDate: string, groupBy: 'service' | 'action' | 'resource' | 'month' = 'service',
 ): Promise<CostBreakdownResult> {
   const path = `/billing/organizations/${orgId}/cost-breakdown?start_date=${startDate}&end_date=${endDate}&group_by=${groupBy}`
+  const r = await apiFetch(path)
+  if (!r.ok) throw new Error(await _errorMessage(r, path))
+  return r.json()
+}
+
+export async function fetchOrganizationSubscription(orgId: number): Promise<SubscriptionSummary> {
+  const path = `/billing/organizations/${orgId}/subscription`
+  const r = await apiFetch(path)
+  if (!r.ok) throw new Error(await _errorMessage(r, path))
+  return r.json()
+}
+
+export async function fetchSubscriptionUsageLimits(orgId: number, asOf?: string): Promise<SubscriptionUsageLimits> {
+  const path = asOf
+    ? `/billing/organizations/${orgId}/subscription/usage-limits?as_of=${asOf}`
+    : `/billing/organizations/${orgId}/subscription/usage-limits`
   const r = await apiFetch(path)
   if (!r.ok) throw new Error(await _errorMessage(r, path))
   return r.json()

@@ -15,11 +15,15 @@ from fastapi.responses import JSONResponse
 # file only relays the Authorization header verbatim and preserves the
 # upstream status code.
 #
-# All five routes are read-only (GET) -- PR14.5C is billing visibility
-# and invoice management only, no payment/write endpoints exist on the
+# All routes are read-only (GET) -- PR14.5C is billing visibility and
+# invoice management only, no payment/write endpoints exist on the
 # billing service yet, so unlike routes_org_sso_proxy.py's _proxy this
 # one never needs to forward a request body or handle a 204 empty
 # response.
+#
+# PR14.6D adds the two subscription-scoped routes at the bottom
+# (subscription summary + usage-limits) -- same _proxy, same
+# authorization posture, no change to anything above.
 router = APIRouter()
 
 BILLING_URL = os.environ.get("BILLING_URL", "http://billing-service:8005")
@@ -79,3 +83,16 @@ async def get_invoice_detail_proxy(invoice_id: int, request: Request) -> JSONRes
 @router.get("/billing/invoices/{invoice_id}/line-items")
 async def get_invoice_line_items_proxy(invoice_id: int, request: Request) -> JSONResponse:
     return await _proxy(f"/billing/invoices/{invoice_id}/line-items", request)
+
+
+# ---------------- Organization-scoped subscription (PR14.6D) ----------------
+
+
+@router.get("/billing/organizations/{organization_id}/subscription")
+async def get_organization_subscription_proxy(organization_id: int, request: Request) -> JSONResponse:
+    return await _proxy(f"/billing/organizations/{organization_id}/subscription", request)
+
+
+@router.get("/billing/organizations/{organization_id}/subscription/usage-limits")
+async def get_organization_subscription_usage_limits_proxy(organization_id: int, request: Request) -> JSONResponse:
+    return await _proxy(f"/billing/organizations/{organization_id}/subscription/usage-limits", request)
