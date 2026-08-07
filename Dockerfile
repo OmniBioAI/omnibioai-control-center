@@ -5,11 +5,11 @@
 # dist-control/ (control.omnibioai.org, ops pages only -- Organizations/
 # Users/Roles/Teams code is genuinely absent via dead-code elimination,
 # not just hidden; see docs/admin-console-build.md for how this is
-# verified). `npm run build` (the pre-existing single `dist/` output) is
-# also still run, unchanged, so Stage 3 below -- which already only
-# consumes `dist/` and was not deployed by this build target even before
-# this PR (see docs/admin-console-build.md) -- keeps working exactly as
-# it did before this change.
+# verified). PR14.7B: Stage 3 below now actually serves dist-admin/
+# dist-control (host-based split), not the plain `dist/` output this
+# comment used to describe -- `npm run build` (dist/) is still run here,
+# unchanged, purely so nothing that might still reference it breaks; it
+# just isn't Stage 3's input anymore.
 FROM --platform=$BUILDPLATFORM node:20-bookworm-slim AS frontend-builder
 WORKDIR /frontend
 COPY frontend/cc-ui/package*.json ./
@@ -42,21 +42,20 @@ ENV PYTHONPATH=/app/src PYTHONUNBUFFERED=1
 EXPOSE 7070
 CMD ["uvicorn", "control_center.main:app", "--host", "0.0.0.0", "--port", "7070"]
 
-# ── Stage 3: nginx serves React, proxies API routes → backend ─────────────────
+# ── Stage 3: nginx serves both React bundles, proxies API routes → backend ────
+# PR14.7B: host-based domain split -- dist-control (control.omnibioai.org)
+# and dist-admin (admin.omnibioai.org) served from the same image, same
+# nginx process, dispatched by Host header. See docker/nginx/*.conf for
+# the actual server blocks/proxy locations (kept as real files, not an
+# inline heredoc, since the API proxy location list is now large enough
+# -- one entry per backend route, control_center/main.py registers none
+# of them under a common prefix -- that it needs to be readable/
+# reviewable on its own). Stage 1's plain `npm run build` (dist/) is
+# unchanged and still runs; this stage simply never consumed it beyond
+# this PR either (see docs/admin-console-build.md).
 FROM nginx:alpine AS frontend
-COPY --from=frontend-builder /frontend/dist /usr/share/nginx/html
-COPY <<'EOF' /etc/nginx/conf.d/default.conf
-server {
-    listen 5174;
-    root /usr/share/nginx/html;
-    index index.html;
-    location / { try_files $uri $uri/ /index.html; }
-    location /summary  { proxy_pass http://control-center:7070; proxy_set_header Host $host; }
-    location /health   { proxy_pass http://control-center:7070; }
-    location /services { proxy_pass http://control-center:7070; proxy_set_header Host $host; }
-    location /report   { proxy_pass http://control-center:7070; proxy_set_header Host $host; }
-    location /config   { proxy_pass http://control-center:7070; proxy_set_header Host $host; }
-    location /docker   { proxy_pass http://control-center:7070; proxy_set_header Host $host; }
-}
-EOF
+COPY --from=frontend-builder /frontend/dist-control /usr/share/nginx/html/control
+COPY --from=frontend-builder /frontend/dist-admin /usr/share/nginx/html/admin
+COPY docker/nginx/api-proxy.conf /etc/nginx/api-proxy.conf
+COPY docker/nginx/control-center.conf /etc/nginx/conf.d/default.conf
 EXPOSE 5174
