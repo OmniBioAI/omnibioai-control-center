@@ -18,6 +18,7 @@ import CloudPage from '../pages/CloudPage'
 import ToolExecutionPage from '../pages/operations/ToolExecutionPage'
 import AIModelsPage from '../pages/operations/AIModelsPage'
 import WorkflowsPage from '../pages/operations/WorkflowsPage'
+import RAGPage from '../pages/operations/RAGPage'
 import OrganizationsPage from '../pages/OrganizationsPage'
 import OrganizationDetailPage from '../pages/OrganizationDetailPage'
 import UsersPage from '../pages/UsersPage'
@@ -388,6 +389,18 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
     // WorkflowsPage.tsx's own module comment).
     case 'workflows':
       return ctx.canSeeOps ? <WorkflowsPage /> : null
+
+    // PR A4: 'rag' and 'pubmed' are two distinct nav entries pointing at
+    // the same page -- RAG has no separate PubMed concept server-side
+    // (see navigation.ts's own comment on this). No org picker: this
+    // page's data isn't org-scoped, and isn't per-admin-authorized at
+    // all (see RAGPage.tsx's own module comment) -- canSeeOps is the
+    // only real gate here, not a visibility layer in front of a
+    // separate backend check the way it is for the other Operations
+    // pages above.
+    case 'rag':
+    case 'pubmed':
+      return ctx.canSeeOps ? <RAGPage /> : null
 
     case 'organizations':
       if (!ctx.canSeeOrganizations) return null

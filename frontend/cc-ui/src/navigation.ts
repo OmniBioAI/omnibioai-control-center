@@ -226,8 +226,24 @@ export const NAVIGATION: NavSection[] = [
     key: 'knowledge',
     label: 'Knowledge',
     items: [
-      { key: 'rag', label: 'RAG', functional: false },
-      { key: 'pubmed', label: 'PubMed', functional: false },
+      // PR A4: Admin Console Capability Parity. functional: true because
+      // a real page now exists (RAGPage), reusing omnibioai-rag's own
+      // GET /v1/studies and GET /v1/cache/stats (both answered via a
+      // control-center-held RAGBIO_API_KEY service credential, not the
+      // viewing admin's own token -- see rag.ts's module comment) plus
+      // GET /health. Both 'rag' and 'pubmed' point at the same page:
+      // RAG's only indexed corpus today is PubMed abstracts (confirmed
+      // by reading ragbio/api/server.py directly), there is no separate
+      // PubMed concept server-side to build a second page against.
+      // Same hasAdminAccess() gate 'tool-execution'/'ai-models'/
+      // 'workflows'/'infrastructure' above already use -- this only
+      // decides whether the nav entry renders; unlike those three,
+      // this page's underlying data isn't per-admin-authorized at all
+      // (see rag.ts), so this gate is the only real access control this
+      // page has, not a visibility layer in front of a separate backend
+      // check.
+      { key: 'rag', label: 'RAG', functional: true, visible: hasAdminAccess },
+      { key: 'pubmed', label: 'PubMed', functional: true, visible: hasAdminAccess },
       { key: 'plugins', label: 'Plugins', functional: false },
     ],
   },
