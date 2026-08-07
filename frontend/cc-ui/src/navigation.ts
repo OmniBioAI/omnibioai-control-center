@@ -105,7 +105,19 @@ export const NAVIGATION: NavSection[] = [
       // "backend is the real gate" convention this file already documents
       // for 'iam'/'billing'/'audit-logs'.
       { key: 'tool-execution', label: 'Tool Execution', functional: true, visible: hasAdminAccess },
-      { key: 'ai-models', label: 'AI Models', functional: false },
+      // PR A2: Admin Console Capability Parity. functional: true because
+      // a real page now exists (AIModelsPage), reusing
+      // omnibioai-model-registry's own GET /v1/models (grouped
+      // client-side into Registered Models vs. Model Versions -- no
+      // separate upstream endpoint for each) plus GET /health and
+      // GET /v1/auth/status for the Runtime Status tab. Same
+      // hasAdminAccess() gate 'tool-execution'/'infrastructure' above
+      // already use -- this only decides whether the nav entry renders;
+      // none of these three routes are gated at all on the
+      // model-registry side today (confirmed by reading its source),
+      // so there is no separate real authorization boundary this gate
+      // could be papering over.
+      { key: 'ai-models', label: 'AI Models', functional: true, visible: hasAdminAccess },
     ],
   },
   {

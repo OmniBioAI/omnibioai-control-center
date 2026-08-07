@@ -16,6 +16,7 @@ import ConfigPage from '../pages/ConfigPage'
 import LlmPage from '../pages/LlmPage'
 import CloudPage from '../pages/CloudPage'
 import ToolExecutionPage from '../pages/operations/ToolExecutionPage'
+import AIModelsPage from '../pages/operations/AIModelsPage'
 import OrganizationsPage from '../pages/OrganizationsPage'
 import OrganizationDetailPage from '../pages/OrganizationDetailPage'
 import UsersPage from '../pages/UsersPage'
@@ -374,6 +375,11 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
     // for. Same canSeeOps gate the other Operations pages above use.
     case 'tool-execution':
       return ctx.canSeeOps ? <ToolExecutionPage /> : null
+
+    // PR A2: no org picker, same reasoning as 'tool-execution' above --
+    // model-registry has no organization concept to pick one for.
+    case 'ai-models':
+      return ctx.canSeeOps ? <AIModelsPage /> : null
 
     case 'organizations':
       if (!ctx.canSeeOrganizations) return null
