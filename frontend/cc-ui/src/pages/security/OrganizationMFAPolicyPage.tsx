@@ -10,8 +10,8 @@ import {
 } from '../../security'
 import { fetchMyOrg, fetchPlatformOrgDetail } from '../../organizations'
 import { hasPermission, hasPlatformAdminAccess } from '../../auth'
-import { Card, SectionHeader, LoadingState, ErrorState, EmptyState, ActionToolbar, Button, BackLink } from '../../components/ui'
-import { formatDate } from '../../format'
+import { Card, SectionHeader, LoadingState, ErrorState, EmptyState, ActionToolbar, Button, BackLink, SessionExpiredState } from '../../components/ui'
+import { formatDate, classifyAuthError } from '../../format'
 
 // PR11.5.6 (Admin Console Security UI). Structurally mirrors
 // SSOSettingsPage.tsx (PR11.3) deliberately closely -- same org-label
@@ -294,6 +294,7 @@ export default function OrganizationMFAPolicyPage({ orgId, onBack }: Props) {
   const [policy, setPolicy] = useState<OrgMFAPolicy | null>(null)
   const [notConfigured, setNotConfigured] = useState(false)
   const [denied, setDenied] = useState(false)
+  const [session, setSession] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
@@ -305,16 +306,20 @@ export default function OrganizationMFAPolicyPage({ orgId, onBack }: Props) {
     setLoading(true)
     setError(null)
     setDenied(false)
+    setSession(false)
     setNotConfigured(false)
     fetchOrgMFAPolicy(orgId)
       .then(p => setPolicy(p))
       .catch((e: unknown) => {
         const message = e instanceof Error ? e.message : String(e)
-        if (message.endsWith(' 404')) {
+        const kind = classifyAuthError(message)
+        if (kind === 'not-found') {
           setNotConfigured(true)
           setPolicy(null)
-        } else if (message.endsWith(' 403')) {
+        } else if (kind === 'denied') {
           setDenied(true)
+        } else if (kind === 'session') {
+          setSession(true)
         } else {
           setError(message)
         }
@@ -348,6 +353,8 @@ export default function OrganizationMFAPolicyPage({ orgId, onBack }: Props) {
 
       {loading && <LoadingState label="Loading MFA policy…" />}
 
+      {!loading && session && <SessionExpiredState />}
+
       {!loading && denied && (
         <EmptyState
           icon={ShieldAlert}
@@ -358,7 +365,7 @@ export default function OrganizationMFAPolicyPage({ orgId, onBack }: Props) {
 
       {!loading && error && <ErrorState message={error} onRetry={load} />}
 
-      {!loading && !denied && !error && (
+      {!loading && !session && !denied && !error && (
         <>
           {policy && <CurrentPolicyCard orgLabel={orgLabel} policy={policy} />}
 

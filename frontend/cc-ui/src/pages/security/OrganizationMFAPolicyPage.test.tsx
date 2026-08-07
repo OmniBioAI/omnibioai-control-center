@@ -80,6 +80,14 @@ describe('OrganizationMFAPolicyPage', () => {
     expect(screen.queryByText('Current Policy')).not.toBeInTheDocument()
   })
 
+  it('shows a session-expired state on a 401, not a permission-denied one', async () => {
+    vi.mocked(security.fetchOrgMFAPolicy).mockRejectedValue(new Error('/orgs/42/mfa-policy 401'))
+    render(<OrganizationMFAPolicyPage orgId={42} onBack={vi.fn()} />)
+
+    expect(await screen.findByText('Session expired')).toBeInTheDocument()
+    expect(screen.queryByText('Permission denied')).not.toBeInTheDocument()
+  })
+
   it('shows an error state with retry for an unexpected failure', async () => {
     vi.mocked(security.fetchOrgMFAPolicy).mockRejectedValueOnce(new Error('/orgs/42/mfa-policy 503'))
     vi.mocked(security.fetchOrgMFAPolicy).mockResolvedValueOnce(disabledPolicy)

@@ -84,6 +84,15 @@ describe('SecurityDashboardPage', () => {
     expect(await screen.findByText('Permission denied')).toBeInTheDocument()
   })
 
+  it('shows a session-expired state on a 401, not a permission-denied one', async () => {
+    vi.mocked(users.fetchPlatformUsers).mockRejectedValue(new Error('/platform/users 401'))
+    vi.mocked(organizations.fetchPlatformOrgs).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100, total_pages: 0 })
+    vi.mocked(audit.fetchAuditEvents).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 50, total_pages: 0 })
+    render(<SecurityDashboardPage />)
+    expect(await screen.findByText('Session expired')).toBeInTheDocument()
+    expect(screen.queryByText('Permission denied')).not.toBeInTheDocument()
+  })
+
   it('shows an error state with retry for an unexpected failure', async () => {
     vi.mocked(users.fetchPlatformUsers).mockRejectedValueOnce(new Error('/platform/users 500'))
     vi.mocked(organizations.fetchPlatformOrgs).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100, total_pages: 0 })

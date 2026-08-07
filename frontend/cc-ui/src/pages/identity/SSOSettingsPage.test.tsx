@@ -89,6 +89,14 @@ describe('SSOSettingsPage', () => {
     expect(screen.queryByText('Current Configuration')).not.toBeInTheDocument()
   })
 
+  it('shows a session-expired state on a 401, not a permission-denied one', async () => {
+    vi.mocked(sso.fetchOrgSSOConfig).mockRejectedValue(new Error('/orgs/42/sso 401'))
+    render(<SSOSettingsPage orgId={42} onBack={vi.fn()} />)
+
+    expect(await screen.findByText('Session expired')).toBeInTheDocument()
+    expect(screen.queryByText('Permission denied')).not.toBeInTheDocument()
+  })
+
   it('shows an error state with retry for an unexpected failure', async () => {
     vi.mocked(sso.fetchOrgSSOConfig).mockRejectedValueOnce(new Error('/orgs/42/sso 503'))
     vi.mocked(sso.fetchOrgSSOConfig).mockResolvedValueOnce(configuredConfig)

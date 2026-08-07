@@ -118,6 +118,14 @@ describe('ServiceAccountsPage', () => {
     expect(await screen.findByText("This organization's API keys aren't accessible to you.")).toBeInTheDocument()
   })
 
+  it('shows a session-expired state on a 401, not a permission-denied one', async () => {
+    vi.mocked(serviceAccounts.fetchOAuthClients).mockRejectedValue(new Error('/orgs/42/oauth-clients 401'))
+    render(<ServiceAccountsPage orgId={42} onBack={vi.fn()} />)
+
+    expect(await screen.findByText('Session expired')).toBeInTheDocument()
+    expect(screen.queryByText('Permission denied')).not.toBeInTheDocument()
+  })
+
   it('creates an OAuth client, shows the secret exactly once, and clears it on Done', async () => {
     const user = userEvent.setup()
     vi.mocked(serviceAccounts.fetchOAuthClients).mockResolvedValue([])

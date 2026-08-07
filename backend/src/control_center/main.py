@@ -97,9 +97,35 @@ app = FastAPI(
 from prometheus_fastapi_instrumentator import Instrumentator
 Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
+# PR E (Admin Console Production Hardening): allow_origins=["*"] was a
+# wildcard -- every other backend in this ecosystem that mounts
+# CORSMiddleware (omnibioai-auth's app/core/config.py CORS_ALLOWED_
+# ORIGINS, omnibioai-rag's ragbio/api/server.py _CORS_ORIGINS) uses an
+# explicit, env-driven origin allowlist instead; this file was the one
+# outlier, confirmed by reading all three directly. In the actual
+# deployed topology (docker/nginx/control-center.conf) the browser only
+# ever reaches this backend same-origin, through nginx's reverse
+# proxy -- CORSMiddleware only matters for a browser calling this API
+# directly, cross-origin, which the wildcard permitted from literally
+# any site. Same CORS_ALLOWED_ORIGINS env var name/comma-separated
+# format as omnibioai-auth's, for one ecosystem-wide convention;
+# defaults cover both production domains (docs/admin-console-build.md)
+# and this app's own local dev ports (5173 `npm run dev`, 5174 the
+# nginx-fronted prod-like local build).
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173,"
+        "http://localhost:5174,http://127.0.0.1:5174,"
+        "https://admin.omnibioai.org,https://control.omnibioai.org",
+    ).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
