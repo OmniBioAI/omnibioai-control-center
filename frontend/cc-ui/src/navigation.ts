@@ -271,7 +271,22 @@ export const NAVIGATION: NavSection[] = [
     label: 'Platform',
     items: [
       { key: 'integrations', label: 'Integrations', functional: false },
-      { key: 'settings', label: 'Settings', functional: false },
+      // PR E1: Admin Settings integration. functional: true because a
+      // real page now exists (PlatformSettingsPage), reusing
+      // omnibioai-auth's own GET /auth/config (GlobalConfig -- no
+      // permission required upstream, just a valid token, confirmed by
+      // reading app/api/routes_config.py directly; see
+      // docs/pr-d-admin-placeholder-audit.md §3.4 for the discovery
+      // that found this backend). Same hasAdminAccess() gate
+      // 'tool-execution'/'ai-models'/'workflows'/'rag' above already
+      // use -- this only decides whether the nav entry renders, not a
+      // visibility layer in front of a separate real permission (there
+      // isn't one for reads). Read-only in this PR: omnibioai-auth's own
+      // PUT /auth/config (manage_config-gated, can set a platform-wide
+      // LLM API key / cloud credentials) is deliberately not proxied or
+      // exposed yet -- see routes_platform_config_proxy.py's own module
+      // comment for that scope decision.
+      { key: 'settings', label: 'Settings', functional: true, visible: hasAdminAccess },
     ],
   },
 ]

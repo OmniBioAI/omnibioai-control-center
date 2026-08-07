@@ -19,6 +19,7 @@ import ToolExecutionPage from '../pages/operations/ToolExecutionPage'
 import AIModelsPage from '../pages/operations/AIModelsPage'
 import WorkflowsPage from '../pages/operations/WorkflowsPage'
 import RAGPage from '../pages/operations/RAGPage'
+import PlatformSettingsPage from '../pages/PlatformSettingsPage'
 import OrganizationsPage from '../pages/OrganizationsPage'
 import OrganizationDetailPage from '../pages/OrganizationDetailPage'
 import UsersPage from '../pages/UsersPage'
@@ -508,6 +509,12 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
       return ctx.selectedBillingOrgId != null
         ? <BillingPage orgId={ctx.selectedBillingOrgId} onBack={() => ctx.setSelectedBillingOrgId(null)} />
         : <OrganizationsPage onSelect={ctx.setSelectedBillingOrgId} />
+
+    // PR E1: no org picker -- omnibioai-auth's GlobalConfig is
+    // platform-wide, not org-scoped. Same canSeeOps gate the other
+    // Operations-family pages above use.
+    case 'settings':
+      return ctx.canSeeOps ? <PlatformSettingsPage /> : null
 
     default: {
       const item = findNavItem(active)
