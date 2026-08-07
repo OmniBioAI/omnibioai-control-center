@@ -42,6 +42,11 @@ from control_center.api.routes_audit_proxy import router as audit_proxy_router
 from control_center.api.routes_org_sso_proxy import router as org_sso_proxy_router
 from control_center.api.routes_org_mfa_proxy import router as org_mfa_proxy_router
 from control_center.api.routes_billing_proxy import router as billing_proxy_router
+from control_center.api.routes_tes_proxy import router as tes_proxy_router
+from control_center.api.routes_model_registry_proxy import router as model_registry_proxy_router
+from control_center.api.routes_workflow_bundles_proxy import router as workflow_bundles_proxy_router
+from control_center.api.routes_rag_proxy import router as rag_proxy_router
+from control_center.api.routes_platform_config_proxy import router as platform_config_proxy_router
 from control_center.api.routes_cloud import router as cloud_router
 from control_center.core.auth import require_permission
 from control_center.api.routes_config import router as config_router
@@ -92,9 +97,35 @@ app = FastAPI(
 from prometheus_fastapi_instrumentator import Instrumentator
 Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
+# PR E (Admin Console Production Hardening): allow_origins=["*"] was a
+# wildcard -- every other backend in this ecosystem that mounts
+# CORSMiddleware (omnibioai-auth's app/core/config.py CORS_ALLOWED_
+# ORIGINS, omnibioai-rag's ragbio/api/server.py _CORS_ORIGINS) uses an
+# explicit, env-driven origin allowlist instead; this file was the one
+# outlier, confirmed by reading all three directly. In the actual
+# deployed topology (docker/nginx/control-center.conf) the browser only
+# ever reaches this backend same-origin, through nginx's reverse
+# proxy -- CORSMiddleware only matters for a browser calling this API
+# directly, cross-origin, which the wildcard permitted from literally
+# any site. Same CORS_ALLOWED_ORIGINS env var name/comma-separated
+# format as omnibioai-auth's, for one ecosystem-wide convention;
+# defaults cover both production domains (docs/admin-console-build.md)
+# and this app's own local dev ports (5173 `npm run dev`, 5174 the
+# nginx-fronted prod-like local build).
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173,"
+        "http://localhost:5174,http://127.0.0.1:5174,"
+        "https://admin.omnibioai.org,https://control.omnibioai.org",
+    ).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -128,6 +159,11 @@ app.include_router(audit_proxy_router)
 app.include_router(org_sso_proxy_router)
 app.include_router(org_mfa_proxy_router)
 app.include_router(billing_proxy_router)
+app.include_router(tes_proxy_router)
+app.include_router(model_registry_proxy_router)
+app.include_router(workflow_bundles_proxy_router)
+app.include_router(rag_proxy_router)
+app.include_router(platform_config_proxy_router)
 # No blanket permission dependency here, unlike summary/docker/config/
 # services above -- routes_dashboard.py's own docstring explains why:
 # each section of its one response is authorized independently, either

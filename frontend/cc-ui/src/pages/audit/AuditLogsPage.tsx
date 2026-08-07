@@ -5,7 +5,8 @@ import {
   type AuditEvent, type AuditEventListResponse,
 } from '../../audit'
 import { fetchPlatformOrgs, type PlatformOrgSummary } from '../../organizations'
-import { Card, SectionHeader, LoadingState, ErrorState, EmptyState, ActionToolbar, Button, DataTable } from '../../components/ui'
+import { Card, SectionHeader, LoadingState, ErrorState, EmptyState, ActionToolbar, Button, DataTable, Pagination } from '../../components/ui'
+import { formatDate } from '../../format'
 
 const PAGE_SIZE = 20
 
@@ -14,10 +15,6 @@ const selectStyle: React.CSSProperties = {
   border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)',
 }
 const fieldLabel: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: 'var(--text2)', marginBottom: 4, display: 'block' }
-
-function formatDate(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleString() : '—'
-}
 
 // ── Detail modal -- same page-local Modal shape ServiceAccountsPage.tsx
 // (PR11.4) and ConfigPage.tsx's AddServiceModal already established;
@@ -246,29 +243,6 @@ export default function AuditLogsPage() {
       )}
 
       {selected && <EventDetailModal event={selected} onClose={() => setSelected(null)} />}
-    </div>
-  )
-}
-
-function Pagination({ page, totalPages, onPage }: { page: number; totalPages: number; onPage: (p: number) => void }) {
-  if (totalPages <= 1) return null
-  const btnBase: React.CSSProperties = {
-    fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 6,
-    border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer',
-  }
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '12px 0' }}>
-      <button onClick={() => onPage(page - 1)} disabled={page === 1}
-        style={{ ...btnBase, color: page === 1 ? 'var(--muted)' : 'var(--text2)', opacity: page === 1 ? 0.4 : 1 }}>
-        ← Prev
-      </button>
-      <span style={{ fontSize: 12, color: 'var(--muted)', minWidth: 90, textAlign: 'center' }}>
-        Page <span style={{ color: 'var(--text)', fontWeight: 700 }}>{page}</span> of {totalPages}
-      </span>
-      <button onClick={() => onPage(page + 1)} disabled={page === totalPages}
-        style={{ ...btnBase, color: page === totalPages ? 'var(--muted)' : 'var(--text2)', opacity: page === totalPages ? 0.4 : 1 }}>
-        Next →
-      </button>
     </div>
   )
 }

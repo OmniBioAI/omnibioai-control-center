@@ -47,6 +47,19 @@ export default defineConfig({
       // control-center's own backend (routes_billing_proxy.py) to reach
       // omnibioai-billing, same reasoning as every entry above.
       '/billing': { target: 'http://localhost:7070', changeOrigin: true },
+      // PR E (Admin Console Production Hardening) -- PR A1-A4 added
+      // these four routers (routes_tes_proxy.py, routes_model_registry_
+      // proxy.py, routes_workflow_bundles_proxy.py, routes_rag_proxy.py)
+      // but never added the matching dev-proxy entry here, same gap
+      // PR13's own comment above already warned about for /organizations
+      // ("Missing here meant `npm run dev` 404'd..."). `npm run dev`
+      // couldn't reach any of these four pages' APIs until now -- the
+      // same production nginx gap this PR also fixes in
+      // docker/nginx/api-proxy.conf.
+      '/tes': { target: 'http://localhost:7070', changeOrigin: true },
+      '/model-registry': { target: 'http://localhost:7070', changeOrigin: true },
+      '/workflow-bundles': { target: 'http://localhost:7070', changeOrigin: true },
+      '/rag': { target: 'http://localhost:7070', changeOrigin: true },
     },
   },
 })

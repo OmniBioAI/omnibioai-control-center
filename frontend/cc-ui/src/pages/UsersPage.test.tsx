@@ -136,6 +136,22 @@ describe('UsersPage', () => {
     expect(onSelect).toHaveBeenCalledWith(77)
   })
 
+  // PR E2: rows were mouse-only before (no role, no tabIndex, no key
+  // handler) -- this proves the keyboard-equivalent path actually works,
+  // not just that the attributes are present.
+  it('invokes onSelect when a row is focused and Enter is pressed', async () => {
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    vi.mocked(users.fetchPlatformUsers).mockResolvedValue({
+      items: [userRow({ id: 77 })], total: 1, page: 1, page_size: 20, total_pages: 1,
+    })
+    render(<UsersPage onSelect={onSelect} />)
+    const row = await screen.findByTestId('user-row-77')
+    row.focus()
+    await user.keyboard('{Enter}')
+    expect(onSelect).toHaveBeenCalledWith(77)
+  })
+
   it('shows org_count and global roles as lightweight summaries, not nested membership details', async () => {
     vi.mocked(users.fetchPlatformUsers).mockResolvedValue({
       items: [userRow({ global_roles: ['platform_admin'], org_count: 3 })],

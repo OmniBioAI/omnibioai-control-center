@@ -10,7 +10,8 @@ import {
 } from '../../sso'
 import { fetchMyOrg, fetchPlatformOrgDetail } from '../../organizations'
 import { hasPermission, hasPlatformAdminAccess } from '../../auth'
-import { Card, SectionHeader, LoadingState, ErrorState, EmptyState, ActionToolbar, Button } from '../../components/ui'
+import { Card, SectionHeader, LoadingState, ErrorState, EmptyState, ActionToolbar, Button, BackLink, SessionExpiredState } from '../../components/ui'
+import { formatDate, classifyAuthError } from '../../format'
 
 const MANAGE_SSO = 'manage_sso'
 const OVERRIDE_SSO_ENFORCEMENT = 'override_sso_enforcement'
@@ -66,10 +67,6 @@ function discoveryStatusLabel(status: string): string {
   if (status === 'pending_verification') return 'Pending verification'
   if (status === 'disabled') return 'Disabled'
   return status
-}
-
-function formatDate(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleString() : '—'
 }
 
 // ── Current Configuration ──────────────────────────────────────────────
@@ -494,6 +491,7 @@ export default function SSOSettingsPage({ orgId, onBack }: Props) {
   const [config, setConfig] = useState<OrgSSOConfig | null>(null)
   const [notConfigured, setNotConfigured] = useState(false)
   const [denied, setDenied] = useState(false)
+  const [session, setSession] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const orgLabel = useOrgLabel(orgId)
@@ -503,6 +501,7 @@ export default function SSOSettingsPage({ orgId, onBack }: Props) {
     setLoading(true)
     setError(null)
     setDenied(false)
+    setSession(false)
     setNotConfigured(false)
     fetchOrgSSOConfig(orgId)
       .then(cfg => setConfig(cfg))
@@ -511,11 +510,14 @@ export default function SSOSettingsPage({ orgId, onBack }: Props) {
         // same convention as organizations.ts/roles.ts/teams.ts) -- the
         // status code is always the message's trailing token.
         const message = e instanceof Error ? e.message : String(e)
-        if (message.endsWith(' 404')) {
+        const kind = classifyAuthError(message)
+        if (kind === 'not-found') {
           setNotConfigured(true)
           setConfig(null)
-        } else if (message.endsWith(' 403')) {
+        } else if (kind === 'denied') {
           setDenied(true)
+        } else if (kind === 'session') {
+          setSession(true)
         } else {
           setError(message)
         }
@@ -527,13 +529,15 @@ export default function SSOSettingsPage({ orgId, onBack }: Props) {
 
   return (
     <div>
-      <BackLink onBack={onBack} />
+      <BackLink label="Back to Organizations" onBack={onBack} />
       <SectionHeader
         title="SSO Settings"
         description="Organization-level enterprise OIDC SSO configuration."
       />
 
       {loading && <LoadingState label="Loading SSO configuration…" />}
+
+      {!loading && session && <SessionExpiredState />}
 
       {!loading && denied && (
         <EmptyState
@@ -545,7 +549,7 @@ export default function SSOSettingsPage({ orgId, onBack }: Props) {
 
       {!loading && error && <ErrorState message={error} onRetry={load} />}
 
-      {!loading && !denied && !error && (
+      {!loading && !session && !denied && !error && (
         <>
           {config && <CurrentConfigCard orgLabel={orgLabel} config={config} />}
 
@@ -571,19 +575,5 @@ export default function SSOSettingsPage({ orgId, onBack }: Props) {
         </>
       )}
     </div>
-  )
-}
-
-function BackLink({ onBack }: { onBack: () => void }) {
-  return (
-    <button
-      onClick={onBack}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 16,
-        fontSize: 12, fontWeight: 600, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer',
-      }}
-    >
-      ← Back
-    </button>
   )
 }

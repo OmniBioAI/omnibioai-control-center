@@ -23,6 +23,7 @@ vi.mock('../../billing', async () => {
     fetchCostBreakdown: vi.fn(),
     fetchOrganizationSubscription: vi.fn(),
     fetchSubscriptionUsageLimits: vi.fn(),
+    fetchOrganizationUsage: vi.fn(),
   }
 })
 
@@ -102,6 +103,7 @@ describe('BillingPage', () => {
       organization_id: 42, period_start: '2026-07-07', period_end: '2026-08-06',
       group_by: 'service', currency: 'usd', breakdown: {},
     })
+    vi.mocked(billing.fetchOrganizationUsage).mockReset()
     vi.mocked(organizations.fetchMyOrg).mockReset()
     vi.mocked(organizations.fetchPlatformOrgDetail).mockReset()
     vi.mocked(organizations.fetchMyOrg).mockResolvedValue(myOrg)
@@ -120,6 +122,18 @@ describe('BillingPage', () => {
     render(<BillingPage orgId={42} onBack={vi.fn()} />)
 
     expect(await screen.findByText('Permission denied')).toBeInTheDocument()
+    expect(screen.queryByText('Current period usage')).not.toBeInTheDocument()
+  })
+
+  // PR E2: a 401 (session issue) must never render as "Permission
+  // denied" -- that's misleading, since a stale/invalid token is not a
+  // permissions problem.
+  it('shows a session-expired state on a 401, distinct from Permission denied', async () => {
+    vi.mocked(billing.fetchOrganizationBillingSummary).mockRejectedValue(new Error('/billing/organizations/42/summary 401'))
+    render(<BillingPage orgId={42} onBack={vi.fn()} />)
+
+    expect(await screen.findByText('Session expired')).toBeInTheDocument()
+    expect(screen.queryByText('Permission denied')).not.toBeInTheDocument()
     expect(screen.queryByText('Current period usage')).not.toBeInTheDocument()
   })
 
@@ -304,6 +318,82 @@ describe('BillingPage', () => {
     await user.click(screen.getByRole('button', { name: /Usage Limits/ }))
 
     expect(await screen.findByText('gpu_training')).toBeInTheDocument()
+  })
+
+  // ── Usage tab (PR B) ─────────────────────────────────────────────────
+
+  it('shows a loading state while usage is in flight', async () => {
+    const user = userEvent.setup()
+    vi.mocked(billing.fetchOrganizationBillingSummary).mockResolvedValue(summaryWithPeriod)
+    vi.mocked(billing.fetchOrganizationUsage).mockReturnValue(new Promise(() => {}))
+    render(<BillingPage orgId={42} onBack={vi.fn()} />)
+    await screen.findByText('Current period usage')
+
+    await user.click(screen.getByRole('button', { name: 'Usage' }))
+
+    expect(await screen.findByText('Loading usage…')).toBeInTheDocument()
+  })
+
+  it('shows the empty state when no usage was recorded for the period', async () => {
+    const user = userEvent.setup()
+    vi.mocked(billing.fetchOrganizationBillingSummary).mockResolvedValue(summaryWithPeriod)
+    vi.mocked(billing.fetchOrganizationUsage).mockResolvedValue({
+      organization_id: 42, period_start: '2026-08-01', period_end: '2026-08-31', services: [],
+    })
+    render(<BillingPage orgId={42} onBack={vi.fn()} />)
+    await screen.findByText('Current period usage')
+
+    await user.click(screen.getByRole('button', { name: 'Usage' }))
+
+    expect(await screen.findByText('No usage recorded for this period.')).toBeInTheDocument()
+  })
+
+  it('switches to the Usage tab and renders real consumption data', async () => {
+    const user = userEvent.setup()
+    vi.mocked(billing.fetchOrganizationBillingSummary).mockResolvedValue(summaryWithPeriod)
+    vi.mocked(billing.fetchOrganizationUsage).mockResolvedValue({
+      organization_id: 42, period_start: '2026-08-01', period_end: '2026-08-31',
+      services: [{ service: 'tes', action: 'run', resource: 'compute_minutes', unit: 'minutes', quantity: 120 }],
+    })
+    render(<BillingPage orgId={42} onBack={vi.fn()} />)
+    await screen.findByText('Current period usage')
+
+    await user.click(screen.getByRole('button', { name: 'Usage' }))
+
+    expect(await screen.findByRole('columnheader', { name: 'Consumed' })).toBeInTheDocument()
+    expect(screen.getByText('tes')).toBeInTheDocument()
+    expect(screen.getByText('120 minutes')).toBeInTheDocument()
+  })
+
+  it('shows a permission-denied state for usage on a 403', async () => {
+    const user = userEvent.setup()
+    vi.mocked(billing.fetchOrganizationBillingSummary).mockResolvedValue(summaryWithPeriod)
+    vi.mocked(billing.fetchOrganizationUsage).mockRejectedValue(new Error('/billing/organizations/42/usage 403'))
+    render(<BillingPage orgId={42} onBack={vi.fn()} />)
+    await screen.findByText('Current period usage')
+
+    await user.click(screen.getByRole('button', { name: 'Usage' }))
+
+    expect(await screen.findByText("This organization's usage isn't accessible to you.")).toBeInTheDocument()
+  })
+
+  it('shows a generic error with retry for usage on an unexpected failure', async () => {
+    const user = userEvent.setup()
+    vi.mocked(billing.fetchOrganizationBillingSummary).mockResolvedValue(summaryWithPeriod)
+    vi.mocked(billing.fetchOrganizationUsage).mockRejectedValueOnce(new Error('/billing/organizations/42/usage 503'))
+    vi.mocked(billing.fetchOrganizationUsage).mockResolvedValueOnce({
+      organization_id: 42, period_start: '2026-08-01', period_end: '2026-08-31',
+      services: [{ service: 'tes', action: 'run', resource: 'compute_minutes', unit: 'minutes', quantity: 120 }],
+    })
+    render(<BillingPage orgId={42} onBack={vi.fn()} />)
+    await screen.findByText('Current period usage')
+
+    await user.click(screen.getByRole('button', { name: 'Usage' }))
+    expect(await screen.findByText('/billing/organizations/42/usage 503')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /retry/i }))
+
+    await waitFor(() => expect(screen.getByText('tes')).toBeInTheDocument())
   })
 
   it('resets to the Overview tab when the organization changes', async () => {

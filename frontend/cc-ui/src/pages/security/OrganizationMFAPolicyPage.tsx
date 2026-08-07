@@ -10,7 +10,8 @@ import {
 } from '../../security'
 import { fetchMyOrg, fetchPlatformOrgDetail } from '../../organizations'
 import { hasPermission, hasPlatformAdminAccess } from '../../auth'
-import { Card, SectionHeader, LoadingState, ErrorState, EmptyState, ActionToolbar, Button } from '../../components/ui'
+import { Card, SectionHeader, LoadingState, ErrorState, EmptyState, ActionToolbar, Button, BackLink, SessionExpiredState } from '../../components/ui'
+import { formatDate, classifyAuthError } from '../../format'
 
 // PR11.5.6 (Admin Console Security UI). Structurally mirrors
 // SSOSettingsPage.tsx (PR11.3) deliberately closely -- same org-label
@@ -58,10 +59,6 @@ function ErrBox({ msg }: { msg: string }) {
  * exists for this in components/ui yet). */
 function BoolText({ value: v, trueLabel, falseLabel }: { value: boolean; trueLabel: string; falseLabel: string }) {
   return <span style={{ color: v ? 'var(--color-success, #22c55e)' : 'var(--muted)' }}>{v ? trueLabel : falseLabel}</span>
-}
-
-function formatDate(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleString() : '—'
 }
 
 // ── Current Policy ───────────────────────────────────────────────────────
@@ -297,6 +294,7 @@ export default function OrganizationMFAPolicyPage({ orgId, onBack }: Props) {
   const [policy, setPolicy] = useState<OrgMFAPolicy | null>(null)
   const [notConfigured, setNotConfigured] = useState(false)
   const [denied, setDenied] = useState(false)
+  const [session, setSession] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
@@ -308,16 +306,20 @@ export default function OrganizationMFAPolicyPage({ orgId, onBack }: Props) {
     setLoading(true)
     setError(null)
     setDenied(false)
+    setSession(false)
     setNotConfigured(false)
     fetchOrgMFAPolicy(orgId)
       .then(p => setPolicy(p))
       .catch((e: unknown) => {
         const message = e instanceof Error ? e.message : String(e)
-        if (message.endsWith(' 404')) {
+        const kind = classifyAuthError(message)
+        if (kind === 'not-found') {
           setNotConfigured(true)
           setPolicy(null)
-        } else if (message.endsWith(' 403')) {
+        } else if (kind === 'denied') {
           setDenied(true)
+        } else if (kind === 'session') {
+          setSession(true)
         } else {
           setError(message)
         }
@@ -343,13 +345,15 @@ export default function OrganizationMFAPolicyPage({ orgId, onBack }: Props) {
 
   return (
     <div>
-      <BackLink onBack={onBack} />
+      <BackLink label="Back to Organizations" onBack={onBack} />
       <SectionHeader
         title="MFA Policy"
         description="Organization-level multi-factor authentication requirement."
       />
 
       {loading && <LoadingState label="Loading MFA policy…" />}
+
+      {!loading && session && <SessionExpiredState />}
 
       {!loading && denied && (
         <EmptyState
@@ -361,7 +365,7 @@ export default function OrganizationMFAPolicyPage({ orgId, onBack }: Props) {
 
       {!loading && error && <ErrorState message={error} onRetry={load} />}
 
-      {!loading && !denied && !error && (
+      {!loading && !session && !denied && !error && (
         <>
           {policy && <CurrentPolicyCard orgLabel={orgLabel} policy={policy} />}
 
@@ -393,19 +397,5 @@ export default function OrganizationMFAPolicyPage({ orgId, onBack }: Props) {
         </>
       )}
     </div>
-  )
-}
-
-function BackLink({ onBack }: { onBack: () => void }) {
-  return (
-    <button
-      onClick={onBack}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 16,
-        fontSize: 12, fontWeight: 600, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer',
-      }}
-    >
-      ← Back
-    </button>
   )
 }

@@ -3,7 +3,8 @@ import { ShieldAlert, ShieldCheck } from 'lucide-react'
 import { fetchPlatformUsers, type PlatformUserSummary } from '../../users'
 import { fetchPlatformOrgs, type PlatformOrgSummary } from '../../organizations'
 import { fetchAuditEvents, formatEventType, MFA_EVENT_TYPES, type AuditEvent } from '../../audit'
-import { Card, SectionHeader, StatCard, LoadingState, ErrorState, EmptyState } from '../../components/ui'
+import { Card, SectionHeader, StatCard, LoadingState, ErrorState, EmptyState, SessionExpiredState } from '../../components/ui'
+import { formatDate, classifyAuthError } from '../../format'
 
 // PR11.5.6 (Admin Console Security UI). Enterprise security overview --
 // MFA adoption, organization MFA policy counts, recent MFA/audit events.
@@ -83,10 +84,6 @@ async function loadDashboardData(): Promise<DashboardData> {
   }
 }
 
-function formatDate(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleString() : '—'
-}
-
 function enrollmentPct(data: DashboardData): string {
   if (data.totalUsers === 0) return '—'
   return `${Math.round((data.mfaEnabledUsers / data.totalUsers) * 100)}%`
@@ -95,6 +92,7 @@ function enrollmentPct(data: DashboardData): string {
 export default function SecurityDashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [denied, setDenied] = useState(false)
+  const [session, setSession] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -102,11 +100,14 @@ export default function SecurityDashboardPage() {
     setLoading(true)
     setError(null)
     setDenied(false)
+    setSession(false)
     loadDashboardData()
       .then(setData)
       .catch((e: unknown) => {
         const message = e instanceof Error ? e.message : String(e)
-        if (message.endsWith(' 403')) setDenied(true)
+        const kind = classifyAuthError(message)
+        if (kind === 'session') setSession(true)
+        else if (kind === 'denied') setDenied(true)
         else setError(message)
       })
       .finally(() => setLoading(false))
@@ -123,6 +124,8 @@ export default function SecurityDashboardPage() {
 
       {loading && <LoadingState label="Loading security overview…" />}
 
+      {!loading && session && <SessionExpiredState />}
+
       {!loading && denied && (
         <EmptyState
           icon={ShieldAlert}
@@ -133,7 +136,7 @@ export default function SecurityDashboardPage() {
 
       {!loading && error && <ErrorState message={error} onRetry={load} />}
 
-      {!loading && !denied && !error && data && (
+      {!loading && !session && !denied && !error && data && (
         data.totalUsers === 0 ? (
           <EmptyState
             icon={ShieldCheck}

@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react'
-import { ShieldAlert, Receipt, FileText, CreditCard, Gauge, type LucideIcon } from 'lucide-react'
+import { ShieldAlert, Receipt, FileText, CreditCard, Gauge, Activity, type LucideIcon } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip,
   type TooltipValueType,
 } from 'recharts'
 import {
-  fetchOrganizationBillingSummary, fetchInvoices, fetchInvoiceDetail, fetchCostBreakdown,
-  type OrganizationBillingSummary, type InvoiceListItem, type InvoiceDetail, type CostBreakdownResult,
+  fetchOrganizationBillingSummary, fetchInvoices, fetchInvoiceDetail, fetchCostBreakdown, fetchOrganizationUsage,
+  type OrganizationBillingSummary, type InvoiceListItem, type InvoiceDetail, type CostBreakdownResult, type OrganizationUsage,
 } from '../../billing'
 import { fetchMyOrg, fetchPlatformOrgDetail } from '../../organizations'
 import { hasPlatformAdminAccess } from '../../auth'
-import { Card, SectionHeader, StatCard, DataTable, LoadingState, ErrorState, EmptyState, ActionToolbar, Button } from '../../components/ui'
+import { Card, SectionHeader, StatCard, DataTable, LoadingState, ErrorState, EmptyState, ActionToolbar, Button, BackLink, Pagination, SessionExpiredState } from '../../components/ui'
+import { formatDate, formatDateOnly, classifyAuthError } from '../../format'
 // PR14.6D: two more tabs on this same page -- see SubscriptionPage.tsx's
 // own module comment for why they live there, not inline here.
 import { SubscriptionTab, UsageLimitsTab } from './SubscriptionPage'
@@ -20,11 +21,21 @@ import { SubscriptionTab, UsageLimitsTab } from './SubscriptionPage'
 // per this PR's own spec), so there is nothing here to "pay" an invoice
 // with, only to view it.
 
-// Exported (formatCurrency, formatDate, classify, LoadState, useOrgLabel,
-// BackLink) so PR14.6D's SubscriptionPage.tsx -- a sibling tab wired into
-// this same page below -- reuses these instead of a second, possibly-
-// drifting copy. Everything else in this file stays module-private,
-// unchanged from PR14.5C.
+// Exported (formatCurrency, formatDateOnly, classify, LoadState,
+// useOrgLabel) so PR14.6D's SubscriptionPage.tsx -- a sibling tab wired
+// into this same page below -- reuses these instead of a second,
+// possibly-drifting copy. Everything else in this file stays
+// module-private, unchanged from PR14.5C.
+//
+// PR E2: this file's own formatDate (date-only, toLocaleDateString) and
+// formatDateTime (full timestamp, toLocaleString) were the inverse of
+// every other page's naming convention in this app (everywhere else,
+// "formatDate" means the full timestamp) -- both are now imported from
+// the shared ../../format module under names that match that
+// convention (formatDate = timestamp, formatDateOnly = date-only), and
+// every call site in this file/SubscriptionPage.tsx was updated to
+// match. Same BackLink import, now from components/ui instead of a
+// local definition -- see components/ui/BackLink.tsx's own comment.
 
 export function formatCurrency(amount: number, currency: string): string {
   try {
@@ -36,13 +47,7 @@ export function formatCurrency(amount: number, currency: string): string {
   }
 }
 
-export function formatDate(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleDateString() : '—'
-}
-
-function formatDateTime(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleString() : '—'
-}
+export { formatDateOnly }
 
 // GET .../summary, .../invoices, .../cost-breakdown all 403 for a
 // non-member (get_authorized_organization_id) -- .../invoices/{id} 404s
@@ -50,9 +55,19 @@ function formatDateTime(iso: string | null): string {
 // "doesn't exist" from "not yours"). Both render as a permission-denied
 // variant here, same convention ServiceAccountsPage.tsx/SSOSettingsPage.tsx
 // already established for their own proxied endpoints.
-export function classify(message: string): 'denied-404' | 'denied-403' | 'error' {
-  if (message.endsWith(' 404')) return 'denied-404'
-  if (message.endsWith(' 403')) return 'denied-403'
+//
+// PR E2: 'denied-401' added, delegating to the shared classifyAuthError
+// -- previously a 401 fell into the same generic 'error' bucket as an
+// unreachable/503 upstream, so a session that had simply expired showed
+// the same raw "<path> 401" text as an outage. Every call site below
+// now renders that case as its own "Session expired" state instead of
+// either "Permission denied" (misleading -- it's not a permissions
+// problem) or a raw error string.
+export function classify(message: string): 'denied-401' | 'denied-404' | 'denied-403' | 'error' {
+  const kind = classifyAuthError(message)
+  if (kind === 'session') return 'denied-401'
+  if (kind === 'not-found') return 'denied-404'
+  if (kind === 'denied') return 'denied-403'
   return 'error'
 }
 
@@ -161,7 +176,16 @@ function CostBreakdownChart({ orgId }: { orgId: number }) {
   )
 }
 
-export type LoadState<T> = { status: 'loading' } | { status: 'denied'; reason: string } | { status: 'error'; message: string } | { status: 'ready'; data: T }
+// PR E2: added 'session' -- a 401 (the caller's own token is missing/
+// expired/invalid) is not the same fact as 'denied' (a valid token
+// lacking the right permission), so it gets its own status instead of
+// being folded into either 'denied' or the generic 'error' bucket.
+export type LoadState<T> =
+  | { status: 'loading' }
+  | { status: 'session' }
+  | { status: 'denied'; reason: string }
+  | { status: 'error'; message: string }
+  | { status: 'ready'; data: T }
 
 function OverviewTab({ orgId }: { orgId: number }) {
   const [state, setState] = useState<LoadState<OrganizationBillingSummary>>({ status: 'loading' })
@@ -173,7 +197,8 @@ function OverviewTab({ orgId }: { orgId: number }) {
       .catch((e: unknown) => {
         const message = e instanceof Error ? e.message : String(e)
         const kind = classify(message)
-        if (kind === 'denied-404' || kind === 'denied-403') setState({ status: 'denied', reason: "This organization's billing summary isn't accessible to you." })
+        if (kind === 'denied-401') setState({ status: 'session' })
+        else if (kind === 'denied-404' || kind === 'denied-403') setState({ status: 'denied', reason: "This organization's billing summary isn't accessible to you." })
         else setState({ status: 'error', message })
       })
   }
@@ -181,6 +206,7 @@ function OverviewTab({ orgId }: { orgId: number }) {
   useEffect(load, [orgId])
 
   if (state.status === 'loading') return <LoadingState label="Loading billing summary…" />
+  if (state.status === 'session') return <SessionExpiredState />
   if (state.status === 'denied') return <EmptyState icon={ShieldAlert} title="Permission denied" description={state.reason} />
   if (state.status === 'error') return <ErrorState message={state.message} onRetry={load} />
 
@@ -193,7 +219,7 @@ function OverviewTab({ orgId }: { orgId: number }) {
         <StatCard label="Invoices to date" value={data.invoice_count} />
         <StatCard
           label="Current billing period"
-          value={data.current_period ? `${formatDate(data.current_period.period_start)} – ${formatDate(data.current_period.period_end)}` : 'No billing history yet'}
+          value={data.current_period ? `${formatDateOnly(data.current_period.period_start)} – ${formatDateOnly(data.current_period.period_end)}` : 'No billing history yet'}
         />
       </div>
 
@@ -218,32 +244,68 @@ function OverviewTab({ orgId }: { orgId: number }) {
   )
 }
 
-// ── Invoices tab: paginated list -> detail. ─────────────────────────────
+// ── Usage tab: raw consumption by service/action/resource. ──────────────
+//
+// PR B (Admin Console Billing/Usage consolidation): distinct from the
+// existing Usage Limits tab (SubscriptionTab/UsageLimitsTab, imported
+// above) -- that tab shows consumption *relative to a plan's included
+// allowance* (included/used/remaining/percentage_used); this one shows
+// the plain consumed quantity per dimension, with no plan context, from
+// omnibioai-billing's GET /organizations/{id}/usage (previously
+// unproxied -- audited directly against app/routers/billing.py before
+// adding, see routes_billing_proxy.py's own comment on this addition).
+// This is what the standalone 'usage' nav placeholder (now removed from
+// navigation.ts) would have needed to become a real page on its own;
+// living here instead follows the same "tabs on the page that already
+// owns this destination" precedent PR14.6D's own SubscriptionPage.tsx
+// comment already established for Subscription/Usage Limits.
+function UsageTab({ orgId }: { orgId: number }) {
+  const [state, setState] = useState<LoadState<OrganizationUsage>>({ status: 'loading' })
 
-const PAGE_SIZE = 20
-
-function Pagination({ page, totalPages, onPage }: { page: number; totalPages: number; onPage: (p: number) => void }) {
-  if (totalPages <= 1) return null
-  const btnBase: React.CSSProperties = {
-    fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 6,
-    border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer',
+  const load = () => {
+    setState({ status: 'loading' })
+    fetchOrganizationUsage(orgId)
+      .then(data => setState({ status: 'ready', data }))
+      .catch((e: unknown) => {
+        const message = e instanceof Error ? e.message : String(e)
+        const kind = classify(message)
+        if (kind === 'denied-401') setState({ status: 'session' })
+        else if (kind === 'denied-404' || kind === 'denied-403') setState({ status: 'denied', reason: "This organization's usage isn't accessible to you." })
+        else setState({ status: 'error', message })
+      })
   }
+
+  useEffect(load, [orgId])
+
+  if (state.status === 'loading') return <LoadingState label="Loading usage…" />
+  if (state.status === 'session') return <SessionExpiredState />
+  if (state.status === 'denied') return <EmptyState icon={ShieldAlert} title="Permission denied" description={state.reason} />
+  if (state.status === 'error') return <ErrorState message={state.message} onRetry={load} />
+
+  const { data } = state
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '12px 0' }}>
-      <button onClick={() => onPage(page - 1)} disabled={page === 1}
-        style={{ ...btnBase, color: page === 1 ? 'var(--muted)' : 'var(--text2)', opacity: page === 1 ? 0.4 : 1 }}>
-        ← Prev
-      </button>
-      <span style={{ fontSize: 12, color: 'var(--muted)', minWidth: 90, textAlign: 'center' }}>
-        Page <span style={{ color: 'var(--text)', fontWeight: 700 }}>{page}</span> of {totalPages}
-      </span>
-      <button onClick={() => onPage(page + 1)} disabled={page === totalPages}
-        style={{ ...btnBase, color: page === totalPages ? 'var(--muted)' : 'var(--text2)', opacity: page === totalPages ? 0.4 : 1 }}>
-        Next →
-      </button>
+    <div>
+      <SectionHeader title="Usage" description={`${formatDateOnly(data.period_start)} – ${formatDateOnly(data.period_end)}.`} />
+      <Card>
+        <DataTable
+          rowKey={s => `${s.service}.${s.action}.${s.resource}`}
+          emptyLabel="No usage recorded for this period."
+          rows={data.services}
+          columns={[
+            { key: 'service', header: 'Service', render: s => s.service },
+            { key: 'action', header: 'Action', render: s => s.action },
+            { key: 'resource', header: 'Resource', render: s => s.resource },
+            { key: 'quantity', header: 'Consumed', render: s => `${s.quantity} ${s.unit}` },
+          ]}
+        />
+      </Card>
     </div>
   )
 }
+
+// ── Invoices tab: paginated list -> detail. ─────────────────────────────
+
+const PAGE_SIZE = 20
 
 const STATUS_FILTERS = ['ALL', 'DRAFT', 'ISSUED', 'PAID', 'VOID'] as const
 
@@ -263,7 +325,8 @@ function InvoicesTab({ orgId, onSelectInvoice }: { orgId: number; onSelectInvoic
       .catch((e: unknown) => {
         const message = e instanceof Error ? e.message : String(e)
         const kind = classify(message)
-        if (kind === 'denied-404' || kind === 'denied-403') setState({ status: 'denied', reason: "This organization's invoices aren't accessible to you." })
+        if (kind === 'denied-401') setState({ status: 'session' })
+        else if (kind === 'denied-404' || kind === 'denied-403') setState({ status: 'denied', reason: "This organization's invoices aren't accessible to you." })
         else setState({ status: 'error', message })
       })
   }
@@ -288,6 +351,7 @@ function InvoicesTab({ orgId, onSelectInvoice }: { orgId: number; onSelectInvoic
 
       <div style={{ marginTop: 12 }}>
         {state.status === 'loading' && <LoadingState label="Loading invoices…" />}
+        {state.status === 'session' && <SessionExpiredState />}
         {state.status === 'denied' && <EmptyState icon={ShieldAlert} title="Permission denied" description={state.reason} />}
         {state.status === 'error' && <ErrorState message={state.message} onRetry={load} />}
         {state.status === 'ready' && (
@@ -298,10 +362,10 @@ function InvoicesTab({ orgId, onSelectInvoice }: { orgId: number; onSelectInvoic
               rows={state.data.invoices}
               columns={[
                 { key: 'invoice_number', header: 'Invoice #', render: i => i.invoice_number ?? `#${i.id}` },
-                { key: 'period', header: 'Billing period', render: i => `${formatDate(i.period_start)} – ${formatDate(i.period_end)}` },
+                { key: 'period', header: 'Billing period', render: i => `${formatDateOnly(i.period_start)} – ${formatDateOnly(i.period_end)}` },
                 { key: 'total', header: 'Total', render: i => formatCurrency(i.total, i.currency) },
                 { key: 'status', header: 'Status', render: i => <StatusBadge status={i.status} /> },
-                { key: 'created', header: 'Created', render: i => formatDateTime(i.created_at) },
+                { key: 'created', header: 'Created', render: i => formatDate(i.created_at) },
                 {
                   key: 'actions', header: '', render: i => (
                     <button
@@ -337,7 +401,8 @@ function InvoiceDetailView({ invoiceId, onBack }: { invoiceId: number; onBack: (
         // get_authorized_invoice returns 404 (not 403) for a wrong-org
         // invoice, by design -- both render as the same permission-denied
         // variant here, never leaking whether the invoice id exists.
-        if (kind === 'denied-404' || kind === 'denied-403') setState({ status: 'denied', reason: "This invoice isn't accessible to you." })
+        if (kind === 'denied-401') setState({ status: 'session' })
+        else if (kind === 'denied-404' || kind === 'denied-403') setState({ status: 'denied', reason: "This invoice isn't accessible to you." })
         else setState({ status: 'error', message })
       })
   }
@@ -349,6 +414,7 @@ function InvoiceDetailView({ invoiceId, onBack }: { invoiceId: number; onBack: (
       <BackLink label="Back to invoices" onBack={onBack} />
 
       {state.status === 'loading' && <LoadingState label="Loading invoice…" />}
+      {state.status === 'session' && <SessionExpiredState />}
       {state.status === 'denied' && <EmptyState icon={ShieldAlert} title="Permission denied" description={state.reason} />}
       {state.status === 'error' && <ErrorState message={state.message} onRetry={load} />}
 
@@ -356,7 +422,7 @@ function InvoiceDetailView({ invoiceId, onBack }: { invoiceId: number; onBack: (
         <>
           <SectionHeader
             title={state.data.invoice_number ?? `Invoice #${state.data.id}`}
-            description={`Billing period ${formatDate(state.data.period_start)} – ${formatDate(state.data.period_end)}`}
+            description={`Billing period ${formatDateOnly(state.data.period_start)} – ${formatDateOnly(state.data.period_end)}`}
             actions={<StatusBadge status={state.data.status} />}
           />
 
@@ -367,9 +433,9 @@ function InvoiceDetailView({ invoiceId, onBack }: { invoiceId: number; onBack: (
               <SummaryField title="Adjustments" value={formatCurrency(state.data.adjustments, state.data.currency)} />
               <SummaryField title="Taxes" value={formatCurrency(state.data.taxes, state.data.currency)} />
               <SummaryField title="Total" value={formatCurrency(state.data.total, state.data.currency)} emphasize />
-              <SummaryField title="Issued" value={formatDateTime(state.data.issued_at)} />
-              <SummaryField title="Due" value={formatDateTime(state.data.due_at)} />
-              <SummaryField title="Paid" value={formatDateTime(state.data.paid_at)} />
+              <SummaryField title="Issued" value={formatDate(state.data.issued_at)} />
+              <SummaryField title="Due" value={formatDate(state.data.due_at)} />
+              <SummaryField title="Paid" value={formatDate(state.data.paid_at)} />
             </div>
           </Card>
 
@@ -409,7 +475,7 @@ function SummaryField({ title, value, emphasize }: { title: string; value: strin
 
 // ── Page ──────────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'invoices' | 'subscription' | 'usage-limits'
+type Tab = 'overview' | 'invoices' | 'subscription' | 'usage-limits' | 'usage'
 
 interface Props {
   orgId: number
@@ -447,12 +513,14 @@ export default function BillingPage({ orgId, onBack }: Props) {
           <TabButton active={tab === 'invoices'} icon={FileText} onClick={() => setTab('invoices')}>Invoices</TabButton>
           <TabButton active={tab === 'subscription'} icon={CreditCard} onClick={() => setTab('subscription')}>Subscription</TabButton>
           <TabButton active={tab === 'usage-limits'} icon={Gauge} onClick={() => setTab('usage-limits')}>Usage Limits</TabButton>
+          <TabButton active={tab === 'usage'} icon={Activity} onClick={() => setTab('usage')}>Usage</TabButton>
         </div>
         <div style={{ padding: 20 }}>
           {tab === 'overview' && <OverviewTab orgId={orgId} />}
           {tab === 'invoices' && <InvoicesTab orgId={orgId} onSelectInvoice={setSelectedInvoiceId} />}
           {tab === 'subscription' && <SubscriptionTab orgId={orgId} />}
           {tab === 'usage-limits' && <UsageLimitsTab orgId={orgId} />}
+          {tab === 'usage' && <UsageTab orgId={orgId} />}
         </div>
       </Card>
     </div>
@@ -481,20 +549,6 @@ function TabButton({ active, icon: Icon, onClick, children }: {
     >
       <Icon size={14} />
       {children}
-    </button>
-  )
-}
-
-export function BackLink({ label, onBack }: { label: string; onBack: () => void }) {
-  return (
-    <button
-      onClick={onBack}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 16,
-        fontSize: 12, fontWeight: 600, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer',
-      }}
-    >
-      ← {label}
     </button>
   )
 }

@@ -6,7 +6,8 @@ import {
 import { fetchPlatformOrgs, type PlatformOrgSummary } from '../organizations'
 import { fetchPlatformRoles, type RoleSummary } from '../roles'
 import StatusBadge from '../components/StatusBadge'
-import { LoadingState, ErrorState, EmptyState } from '../components/ui'
+import { LoadingState, ErrorState, EmptyState, Pagination } from '../components/ui'
+import { formatDateTime } from '../format'
 
 /* ── Shared visual language (matches OrganizationsPage.tsx/DockerPage.tsx) ── */
 const card: React.CSSProperties = {
@@ -32,36 +33,6 @@ const td: React.CSSProperties = {
 const selectStyle: React.CSSProperties = {
   fontSize: 12, padding: '7px 10px', borderRadius: 8,
   border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)',
-}
-
-function formatDateTime(iso: string | null): string {
-  if (!iso) return 'Not available'
-  return new Date(iso).toLocaleString(undefined, {
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
-  })
-}
-
-function Pagination({ page, totalPages, onPage }: { page: number; totalPages: number; onPage: (p: number) => void }) {
-  if (totalPages <= 1) return null
-  const btnBase: React.CSSProperties = {
-    fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 6,
-    border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer',
-  }
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '12px 0' }}>
-      <button onClick={() => onPage(page - 1)} disabled={page === 1}
-        style={{ ...btnBase, color: page === 1 ? 'var(--muted)' : 'var(--text2)', opacity: page === 1 ? 0.4 : 1 }}>
-        ← Prev
-      </button>
-      <span style={{ fontSize: 12, color: 'var(--muted)', minWidth: 90, textAlign: 'center' }}>
-        Page <span style={{ color: 'var(--text)', fontWeight: 700 }}>{page}</span> of {totalPages}
-      </span>
-      <button onClick={() => onPage(page + 1)} disabled={page === totalPages}
-        style={{ ...btnBase, color: page === totalPages ? 'var(--muted)' : 'var(--text2)', opacity: page === totalPages ? 0.4 : 1 }}>
-        Next →
-      </button>
-    </div>
-  )
 }
 
 function SortHeader({
@@ -245,7 +216,21 @@ export default function UsersPage({ onSelect }: Props) {
               </thead>
               <tbody>
                 {data.items.map(u => (
-                  <tr key={u.id} style={{ cursor: 'pointer' }} onClick={() => onSelect(u.id)} data-testid={`user-row-${u.id}`}>
+                  <tr
+                    key={u.id}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => onSelect(u.id)}
+                    // PR E2: additive keyboard-accessibility fix -- this
+                    // row was mouse-only before (no role, no tabIndex, no
+                    // key handler), same gap OrganizationTable.tsx's
+                    // equivalent row still has. onClick above is
+                    // unchanged; this only adds an equivalent path.
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(u.id) } }}
+                    aria-label={`View user ${u.email}`}
+                    data-testid={`user-row-${u.id}`}
+                  >
                     <td style={{ ...td, color: 'var(--text)', fontWeight: 600 }}>{u.email}</td>
                     <td style={td}><StatusBadge status={u.status} /></td>
                     <td style={td}>{u.global_roles.length ? u.global_roles.join(', ') : '—'}</td>

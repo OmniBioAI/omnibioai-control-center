@@ -26,8 +26,8 @@ export type PageKey =
   | 'organizations' | 'users' | 'teams' | 'roles'
   | 'infrastructure' | 'workflows' | 'tool-execution' | 'ai-models'
   | 'security-overview' | 'mfa-policy' | 'iam' | 'audit-logs' | 'sessions' | 'api-keys'
-  | 'billing' | 'licenses' | 'usage'
-  | 'rag' | 'pubmed' | 'plugins'
+  | 'billing'
+  | 'rag' | 'pubmed'
   | 'integrations' | 'settings'
 
 export interface NavItem {
@@ -93,9 +93,43 @@ export const NAVIGATION: NavSection[] = [
           { key: 'cloud', label: 'Cloud', functional: true, visible: hasAdminAccess },
         ],
       },
-      { key: 'workflows', label: 'Workflows', functional: false },
-      { key: 'tool-execution', label: 'Tool Execution', functional: false },
-      { key: 'ai-models', label: 'AI Models', functional: false },
+      // PR A3: Admin Console Capability Parity. functional: true because
+      // a real page now exists (WorkflowsPage), reusing
+      // omnibioai-workflow-bundles' own GET /v1/workflows,
+      // GET /v1/categories (both workflow.read-gated) and GET /v1/runs
+      // (workflow.execute-gated). Same hasAdminAccess() gate
+      // 'tool-execution'/'ai-models'/'infrastructure' above already
+      // use -- this only decides whether the nav entry renders; real
+      // authorization is entirely workflow-bundles' own, per-request.
+      // Note: GET /v1/runs has no organization-level filtering upstream
+      // today (tracked as an upstream follow-up, not something this nav
+      // gate can or should paper over) -- WorkflowsPage's Runs tab
+      // surfaces that explicitly rather than hiding it.
+      { key: 'workflows', label: 'Workflows', functional: true, visible: hasAdminAccess },
+      // PR A1: Admin Console Capability Parity. functional: true because
+      // a real page now exists (ToolExecutionPage), reusing
+      // omnibioai-tes's own GET /api/runs (self-scoped to the caller's
+      // organization, require_permission(WORKFLOW_EXECUTE)) and
+      // unauthenticated GET /api/tools[/capabilities]. Same
+      // hasAdminAccess() gate 'infrastructure' above already uses -- this
+      // only decides whether the nav entry renders; the real
+      // authorization is entirely omnibioai-tes's own, per-request, same
+      // "backend is the real gate" convention this file already documents
+      // for 'iam'/'billing'/'audit-logs'.
+      { key: 'tool-execution', label: 'Tool Execution', functional: true, visible: hasAdminAccess },
+      // PR A2: Admin Console Capability Parity. functional: true because
+      // a real page now exists (AIModelsPage), reusing
+      // omnibioai-model-registry's own GET /v1/models (grouped
+      // client-side into Registered Models vs. Model Versions -- no
+      // separate upstream endpoint for each) plus GET /health and
+      // GET /v1/auth/status for the Runtime Status tab. Same
+      // hasAdminAccess() gate 'tool-execution'/'infrastructure' above
+      // already use -- this only decides whether the nav entry renders;
+      // none of these three routes are gated at all on the
+      // model-registry side today (confirmed by reading its source),
+      // so there is no separate real authorization boundary this gate
+      // could be papering over.
+      { key: 'ai-models', label: 'AI Models', functional: true, visible: hasAdminAccess },
     ],
   },
   {
@@ -184,17 +218,63 @@ export const NAVIGATION: NavSection[] = [
       // entirely backend-side, per-org, via omnibioai-billing's own
       // app.core.iam.get_authorized_organization_id/get_authorized_invoice.
       { key: 'billing', label: 'Billing', functional: true, visible: hasOrganizationsAccess },
-      { key: 'licenses', label: 'Licenses', functional: false },
-      { key: 'usage', label: 'Usage', functional: false },
+      // PR B (Admin Console Billing/Usage consolidation): 'licenses' and
+      // 'usage' removed from this section, not flipped to functional.
+      // Both were Coming Soon placeholders that, on audit, turned out to
+      // already be covered:
+      //   - 'usage': BillingPage.tsx already had a Usage Limits tab
+      //     (PR14.6D); this PR adds a plain Usage tab alongside it (raw
+      //     consumption, GET /organizations/{id}/usage, previously
+      //     unproxied). A standalone nav destination for this would have
+      //     duplicated a page that already exists one click away.
+      //   - 'licenses': the only "licenses" concept anywhere in this
+      //     ecosystem is omnibioai-auth's legacy per-key desktop/
+      //     Electron activation system (app/api/routes_license.py,
+      //     LicenseValidateRequest.platform: web|desktop|both) --
+      //     Phase 1's own license-decommission work already targeted
+      //     that flow for retirement. It is not an org-seat/subscription
+      //     concept and building an Admin Console UI for it would be
+      //     resurrecting a superseded model, not consolidating one.
+      //     Organization-level plan/subscription management is exactly
+      //     what the 'billing' entry above (Subscription tab) already
+      //     is. See docs/pr-b-billing-usage-consolidation.md for the
+      //     full audit both of these decisions are based on.
     ],
   },
   {
     key: 'knowledge',
     label: 'Knowledge',
     items: [
-      { key: 'rag', label: 'RAG', functional: false },
-      { key: 'pubmed', label: 'PubMed', functional: false },
-      { key: 'plugins', label: 'Plugins', functional: false },
+      // PR A4: Admin Console Capability Parity. functional: true because
+      // a real page now exists (RAGPage), reusing omnibioai-rag's own
+      // GET /v1/studies and GET /v1/cache/stats (both answered via a
+      // control-center-held RAGBIO_API_KEY service credential, not the
+      // viewing admin's own token -- see rag.ts's module comment) plus
+      // GET /health. Both 'rag' and 'pubmed' point at the same page:
+      // RAG's only indexed corpus today is PubMed abstracts (confirmed
+      // by reading ragbio/api/server.py directly), there is no separate
+      // PubMed concept server-side to build a second page against.
+      // Same hasAdminAccess() gate 'tool-execution'/'ai-models'/
+      // 'workflows'/'infrastructure' above already use -- this only
+      // decides whether the nav entry renders; unlike those three,
+      // this page's underlying data isn't per-admin-authorized at all
+      // (see rag.ts), so this gate is the only real access control this
+      // page has, not a visibility layer in front of a separate backend
+      // check.
+      { key: 'rag', label: 'RAG', functional: true, visible: hasAdminAccess },
+      { key: 'pubmed', label: 'PubMed', functional: true, visible: hasAdminAccess },
+      // PR E2 (re-verified PR D §3.2's finding, unchanged): removed, not
+      // flipped to functional. The only "plugin" concept anywhere in
+      // this ecosystem is the GHCR omnibioai-plugin-* container-image
+      // family -- confirmed again by re-reading routes_docker.py's
+      // GET /docker/plugin-images directly (auto-discovers every
+      // plugins/*/plugin.json manifest, resolves each to its GHCR
+      // image, reports local presence) -- already fully live under
+      // Operations > Infrastructure > Docker > "Plugin Docker Images".
+      // A second nav entry here would duplicate that tab exactly, same
+      // failure mode PR B avoided for Licenses/Usage. See
+      // docs/pr-d-admin-placeholder-audit.md §3.2 for the original
+      // discovery.
     ],
   },
   {
@@ -202,7 +282,22 @@ export const NAVIGATION: NavSection[] = [
     label: 'Platform',
     items: [
       { key: 'integrations', label: 'Integrations', functional: false },
-      { key: 'settings', label: 'Settings', functional: false },
+      // PR E1: Admin Settings integration. functional: true because a
+      // real page now exists (PlatformSettingsPage), reusing
+      // omnibioai-auth's own GET /auth/config (GlobalConfig -- no
+      // permission required upstream, just a valid token, confirmed by
+      // reading app/api/routes_config.py directly; see
+      // docs/pr-d-admin-placeholder-audit.md §3.4 for the discovery
+      // that found this backend). Same hasAdminAccess() gate
+      // 'tool-execution'/'ai-models'/'workflows'/'rag' above already
+      // use -- this only decides whether the nav entry renders, not a
+      // visibility layer in front of a separate real permission (there
+      // isn't one for reads). Read-only in this PR: omnibioai-auth's own
+      // PUT /auth/config (manage_config-gated, can set a platform-wide
+      // LLM API key / cloud credentials) is deliberately not proxied or
+      // exposed yet -- see routes_platform_config_proxy.py's own module
+      // comment for that scope decision.
+      { key: 'settings', label: 'Settings', functional: true, visible: hasAdminAccess },
     ],
   },
 ]

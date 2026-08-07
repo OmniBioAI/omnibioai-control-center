@@ -76,6 +76,14 @@ describe('SubscriptionTab', () => {
     expect(await screen.findByText(/isn't accessible to you/)).toBeInTheDocument()
   })
 
+  it('shows a session-expired state on a 401, not "No subscription"', async () => {
+    vi.mocked(billing.fetchOrganizationSubscription).mockRejectedValue(new Error('/billing/organizations/42/subscription 401'))
+    render(<SubscriptionTab orgId={42} />)
+
+    expect(await screen.findByText('Session expired')).toBeInTheDocument()
+    expect(screen.queryByText('No subscription')).not.toBeInTheDocument()
+  })
+
   it('shows an error state with retry for an unexpected failure', async () => {
     vi.mocked(billing.fetchOrganizationSubscription).mockRejectedValueOnce(new Error('/billing/organizations/42/subscription 503'))
     vi.mocked(billing.fetchOrganizationSubscription).mockResolvedValueOnce(summaryWithFeatures)

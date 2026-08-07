@@ -24,6 +24,31 @@ from fastapi.responses import JSONResponse
 # PR14.6D adds the two subscription-scoped routes at the bottom
 # (subscription summary + usage-limits) -- same _proxy, same
 # authorization posture, no change to anything above.
+#
+# PR B (Admin Console Billing/Usage consolidation) adds one more route:
+# GET /organizations/{id}/usage (raw consumption by service/action/
+# resource -- app/schemas/billing.py's UsageSummaryResponse). This is
+# the one endpoint on omnibioai-billing's own reporting router
+# (app/routers/billing.py) that wasn't already proxied and wasn't
+# already shown anywhere in this app -- audited directly against that
+# router before adding it, not assumed. Three other unproxied endpoints
+# on that same router were deliberately NOT added here, because they
+# duplicate data this app already exposes through routes already
+# proxied above:
+#   - GET /organizations/{id}/costs (CostSummaryResponse) duplicates
+#     GET /organizations/{id}/cost-breakdown (already proxied,
+#     consumed by BillingPage.tsx's CostBreakdownChart) -- same
+#     service/action/resource cost breakdown, different endpoint shape.
+#   - GET /organizations/{id}/allowances (AllowanceUsageResponse)
+#     duplicates GET /organizations/{id}/subscription/usage-limits
+#     (already proxied, consumed by UsageLimitsTab) -- AllowanceUsageItem
+#     and SubscriptionUsageLimit are field-for-field identical schemas.
+#   - GET /organizations/{id}/cost-history (CostHistoryResponse, a cost
+#     time series) is answerable via the already-proxied cost-breakdown
+#     route's group_by=month option.
+# Proxying those three would itself be duplicating omnibioai-billing's
+# own (pre-existing, not this PR's to fix) internal overlap -- see
+# docs/pr-b-billing-usage-consolidation.md for the full audit.
 router = APIRouter()
 
 BILLING_URL = os.environ.get("BILLING_URL", "http://billing-service:8005")
@@ -55,6 +80,11 @@ async def _proxy(path: str, request: Request) -> JSONResponse:
 
 
 # ---------------- Organization-scoped billing reporting ----------------
+
+
+@router.get("/billing/organizations/{organization_id}/usage")
+async def get_organization_usage_proxy(organization_id: int, request: Request) -> JSONResponse:
+    return await _proxy(f"/billing/organizations/{organization_id}/usage", request)
 
 
 @router.get("/billing/organizations/{organization_id}/summary")

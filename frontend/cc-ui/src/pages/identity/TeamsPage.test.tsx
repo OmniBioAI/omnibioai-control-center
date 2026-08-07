@@ -89,6 +89,21 @@ describe('TeamsPage', () => {
     expect(await screen.findByText(/platform\/orgs 500/)).toBeInTheDocument()
   })
 
+  // PR E2: this page's ErrorState previously omitted onRetry, unlike
+  // every other page in this app that classifies/reports an error.
+  it('offers a retry action that re-fetches the organization list', async () => {
+    vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(true)
+    vi.mocked(organizations.fetchPlatformOrgs).mockRejectedValueOnce(new Error('/platform/orgs 500'))
+    vi.mocked(organizations.fetchPlatformOrgs).mockResolvedValueOnce(platformOrgs())
+    const user = userEvent.setup()
+    render(<TeamsPage />)
+    await screen.findByText(/platform\/orgs 500/)
+
+    await user.click(screen.getByRole('button', { name: /retry/i }))
+
+    await waitFor(() => expect(screen.getByLabelText('Select organization')).toBeInTheDocument())
+  })
+
   // ── Organization selection ─────────────────────────────────────────────
 
   it('lets the administrator switch organizations, re-scoping TeamsCard', async () => {

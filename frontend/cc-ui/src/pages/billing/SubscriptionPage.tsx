@@ -4,8 +4,9 @@ import {
   fetchOrganizationSubscription, fetchSubscriptionUsageLimits,
   type SubscriptionSummary, type SubscriptionUsageLimits, type SubscriptionFeature,
 } from '../../billing'
-import { Card, SectionHeader, StatCard, DataTable, LoadingState, ErrorState, EmptyState } from '../../components/ui'
-import { classify, formatDate, type LoadState } from './BillingPage'
+import { Card, SectionHeader, StatCard, DataTable, LoadingState, ErrorState, EmptyState, SessionExpiredState } from '../../components/ui'
+import { classify, type LoadState } from './BillingPage'
+import { formatDateOnly } from '../../format'
 
 // PR14.6D: Subscription + Usage Limits tabs, wired into BillingPage.tsx
 // alongside its existing Overview/Invoices tabs -- same "Organization >
@@ -13,9 +14,12 @@ import { classify, formatDate, type LoadState } from './BillingPage'
 // implemented as two more tabs on the page that already owns that
 // destination rather than two new top-level nav entries (no new
 // frontend architecture, per this PR's own scope). Reuses BillingPage.tsx's
-// classify/formatDate/LoadState (see that file's own export comment) --
-// not a second copy of the 403/404 "permission denied" classification
-// or date formatting.
+// classify/LoadState (see that file's own export comment) -- not a
+// second copy of the 403/404 "permission denied" classification. Dates
+// on this page are date-only (subscription start/renewal/end, usage
+// limits' as-of date) -- PR E2 moved this to the shared ../../format
+// module's formatDateOnly, same convention BillingPage.tsx itself now
+// uses.
 
 const SUBSCRIPTION_STATUS_COLOR: Record<string, string> = {
   trial: 'var(--blue, #0094ff)',
@@ -60,7 +64,8 @@ export function SubscriptionTab({ orgId }: { orgId: number }) {
       .catch((e: unknown) => {
         const message = e instanceof Error ? e.message : String(e)
         const kind = classify(message)
-        if (kind === 'denied-404') setState({ status: 'denied', reason: 'This organization has no active subscription.' })
+        if (kind === 'denied-401') setState({ status: 'session' })
+        else if (kind === 'denied-404') setState({ status: 'denied', reason: 'This organization has no active subscription.' })
         else if (kind === 'denied-403') setState({ status: 'denied', reason: "This organization's subscription isn't accessible to you." })
         else setState({ status: 'error', message })
       })
@@ -69,6 +74,7 @@ export function SubscriptionTab({ orgId }: { orgId: number }) {
   useEffect(load, [orgId])
 
   if (state.status === 'loading') return <LoadingState label="Loading subscription…" />
+  if (state.status === 'session') return <SessionExpiredState />
   if (state.status === 'denied') return <EmptyState icon={ShieldAlert} title="No subscription" description={state.reason} />
   if (state.status === 'error') return <ErrorState message={state.message} onRetry={load} />
 
@@ -77,15 +83,15 @@ export function SubscriptionTab({ orgId }: { orgId: number }) {
     <div>
       <SectionHeader
         title="Subscription"
-        description={`Started ${formatDate(data.start_date)}.`}
+        description={`Started ${formatDateOnly(data.start_date)}.`}
         actions={<SubscriptionStatusBadge status={data.status} />}
       />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 20 }}>
         <StatCard label="Current plan" value={data.plan_name} />
         <StatCard label="Billing interval" value={`${data.billing_interval} (${data.currency.toUpperCase()})`} />
-        <StatCard label="Renewal date" value={data.renewal_date ? formatDate(data.renewal_date) : 'No renewal scheduled'} />
-        <StatCard label="End date" value={data.end_date ? formatDate(data.end_date) : 'Not scheduled'} />
+        <StatCard label="Renewal date" value={data.renewal_date ? formatDateOnly(data.renewal_date) : 'No renewal scheduled'} />
+        <StatCard label="End date" value={data.end_date ? formatDateOnly(data.end_date) : 'Not scheduled'} />
       </div>
 
       <Card>
@@ -116,7 +122,8 @@ export function UsageLimitsTab({ orgId }: { orgId: number }) {
       .catch((e: unknown) => {
         const message = e instanceof Error ? e.message : String(e)
         const kind = classify(message)
-        if (kind === 'denied-404') setState({ status: 'denied', reason: 'This organization has no active subscription.' })
+        if (kind === 'denied-401') setState({ status: 'session' })
+        else if (kind === 'denied-404') setState({ status: 'denied', reason: 'This organization has no active subscription.' })
         else if (kind === 'denied-403') setState({ status: 'denied', reason: "This organization's usage limits aren't accessible to you." })
         else setState({ status: 'error', message })
       })
@@ -125,13 +132,14 @@ export function UsageLimitsTab({ orgId }: { orgId: number }) {
   useEffect(load, [orgId])
 
   if (state.status === 'loading') return <LoadingState label="Loading usage limits…" />
+  if (state.status === 'session') return <SessionExpiredState />
   if (state.status === 'denied') return <EmptyState icon={ShieldAlert} title="No subscription" description={state.reason} />
   if (state.status === 'error') return <ErrorState message={state.message} onRetry={load} />
 
   const { data } = state
   return (
     <div>
-      <SectionHeader title="Usage limits" description={`As of ${formatDate(data.as_of)}, for ${data.plan_name}.`} />
+      <SectionHeader title="Usage limits" description={`As of ${formatDateOnly(data.as_of)}, for ${data.plan_name}.`} />
       <Card>
         <DataTable
           rowKey={l => `${l.service}.${l.action}.${l.resource}`}

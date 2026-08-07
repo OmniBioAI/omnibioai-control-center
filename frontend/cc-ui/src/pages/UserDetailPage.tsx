@@ -7,13 +7,8 @@ import UserStatusAction from '../components/users/UserStatusAction'
 import UserMFASecurityCard from '../components/users/UserMFASecurityCard'
 import RoleAssignmentList from '../components/roles/RoleAssignmentList'
 import RoleSelector from '../components/roles/RoleSelector'
-
-function formatDateTime(iso: string | null): string {
-  if (!iso) return 'Not available'
-  return new Date(iso).toLocaleString(undefined, {
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
-  })
-}
+import { BackLink } from '../components/ui'
+import { formatDateTime } from '../format'
 
 const card: React.CSSProperties = {
   background: 'var(--surface)', border: '1px solid var(--border)',
@@ -45,20 +40,6 @@ function ErrBox({ msg }: { msg: string }) {
     }}>
       {msg}
     </div>
-  )
-}
-
-function BackLink({ onBack }: { onBack: () => void }) {
-  return (
-    <button
-      onClick={onBack}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 16,
-        fontSize: 12, fontWeight: 600, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer',
-      }}
-    >
-      ← Back to Users
-    </button>
   )
 }
 
@@ -110,7 +91,7 @@ export default function UserDetailPage({ userId, onBack }: Props) {
     // access just because the URL contains a user_id.
     return (
       <div>
-        <BackLink onBack={onBack} />
+        <BackLink label="Back to Users" onBack={onBack} />
         <ErrBox msg={err ?? 'User not found'} />
       </div>
     )
@@ -118,7 +99,7 @@ export default function UserDetailPage({ userId, onBack }: Props) {
 
   return (
     <div>
-      <BackLink onBack={onBack} />
+      <BackLink label="Back to Users" onBack={onBack} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
         <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)' }}>{user.email}</h2>
         <StatusBadge status={user.status} />

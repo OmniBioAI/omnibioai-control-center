@@ -331,7 +331,7 @@ describe('AdminApp auth gate', () => {
 
   // ── Phase 2: new shell-specific coverage ──────────────────────────────────
 
-  it('renders Coming Soon for an unimplemented module (e.g. Licenses)', async () => {
+  it('renders Coming Soon for an unimplemented module (e.g. Sessions)', async () => {
     vi.mocked(auth.getToken).mockReturnValue('token-admin5')
     vi.mocked(auth.ensureSession).mockResolvedValue(admin)
     vi.mocked(auth.getSessionUser).mockReturnValue(admin)
@@ -341,11 +341,16 @@ describe('AdminApp auth gate', () => {
     render(<AdminApp />)
     await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
 
-    // Billing was this module until PR14.5C activated it (see the
-    // dedicated "PR14.5C: Billing nav item + routing" block below) --
-    // Licenses/Usage remain unimplemented, so one of them now stands in
-    // as this test's still-Coming-Soon example.
-    clickNav('Licenses')
+    // Billing was this module until PR14.5C activated it, then
+    // Licenses/Usage stood in until PR B removed both nav items
+    // entirely, then Settings stood in until PR E1 (Admin Settings
+    // integration) activated it too -- reusing omnibioai-auth's own
+    // GET /auth/config, per PR D's discovery that a real backend for it
+    // already existed with no UI anywhere (see
+    // docs/pr-d-admin-placeholder-audit.md §3.4). Sessions has no
+    // backend anywhere in the ecosystem (PR D §3.1) and stands in now --
+    // update this test's example again if that ever changes.
+    clickNav('Sessions')
 
     expect(await screen.findByText('Coming soon')).toBeInTheDocument()
   })

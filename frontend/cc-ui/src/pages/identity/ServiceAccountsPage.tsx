@@ -8,16 +8,13 @@ import {
 } from '../../serviceAccounts'
 import { fetchMyOrg, fetchPlatformOrgDetail } from '../../organizations'
 import { hasPlatformAdminAccess } from '../../auth'
-import { Card, SectionHeader, LoadingState, ErrorState, EmptyState, ActionToolbar, Button, DataTable } from '../../components/ui'
+import { Card, SectionHeader, LoadingState, ErrorState, EmptyState, ActionToolbar, Button, DataTable, BackLink, SessionExpiredState } from '../../components/ui'
+import { formatDate } from '../../format'
 
 const fieldLabel: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: 'var(--text2)', marginBottom: 4, display: 'block' }
 const fieldStyle: React.CSSProperties = {
   fontSize: 13, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)',
   background: 'var(--bg)', color: 'var(--text)', width: '100%', boxSizing: 'border-box',
-}
-
-function formatDate(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleString() : '—'
 }
 
 function StatusText({ status }: { status: string }) {
@@ -206,14 +203,20 @@ function RevokeAction({ name, onConfirm }: { name: string; onConfirm: () => Prom
   )
 }
 
-type LoadState<T> = { status: 'loading' } | { status: 'denied'; reason: string } | { status: 'error'; message: string } | { status: 'ready'; items: T[] }
+type LoadState<T> = { status: 'loading' } | { status: 'session' } | { status: 'denied'; reason: string } | { status: 'error'; message: string } | { status: 'ready'; items: T[] }
 
 // GET /orgs/{org_id}/api-keys and .../oauth-clients both 404 for a
 // non-member (org existence/membership deliberately not distinguished)
 // and 403 for a member who lacks the specific permission -- see
 // discovery doc §3. Both render as a permission-denied variant here,
 // never as a generic ErrorState.
-function classify(message: string): 'denied-404' | 'denied-403' | 'error' {
+//
+// PR E: 'session' added for a 401 (a stale/invalid token, not a
+// permissions problem) -- previously fell into the generic 'error'
+// bucket, same misleading-session-as-permission-error class of bug PR
+// E2 fixed on ToolExecutionPage/AIModelsPage/WorkflowsPage/BillingPage.
+function classify(message: string): 'session' | 'denied-404' | 'denied-403' | 'error' {
+  if (message.endsWith(' 401')) return 'session'
   if (message.endsWith(' 404')) return 'denied-404'
   if (message.endsWith(' 403')) return 'denied-403'
   return 'error'
@@ -233,7 +236,8 @@ function ApiKeysSection({ orgId }: { orgId: number }) {
       .catch((e: unknown) => {
         const message = e instanceof Error ? e.message : String(e)
         const kind = classify(message)
-        if (kind === 'denied-404') setState({ status: 'denied', reason: "This organization's API keys aren't accessible to you." })
+        if (kind === 'session') setState({ status: 'session' })
+        else if (kind === 'denied-404') setState({ status: 'denied', reason: "This organization's API keys aren't accessible to you." })
         else if (kind === 'denied-403') setState({ status: 'denied', reason: "You don't have manage_api_keys for this organization." })
         else setState({ status: 'error', message })
       })
@@ -244,6 +248,7 @@ function ApiKeysSection({ orgId }: { orgId: number }) {
   const existingScopes = state.status === 'ready' ? state.items.flatMap(k => k.scopes) : []
 
   if (state.status === 'loading') return <LoadingState label="Loading API keys…" />
+  if (state.status === 'session') return <SessionExpiredState />
   if (state.status === 'denied') return <EmptyState icon={ShieldAlert} title="Permission denied" description={state.reason} />
   if (state.status === 'error') return <ErrorState message={state.message} onRetry={load} />
 
@@ -359,7 +364,8 @@ function OAuthClientsSection({ orgId }: { orgId: number }) {
       .catch((e: unknown) => {
         const message = e instanceof Error ? e.message : String(e)
         const kind = classify(message)
-        if (kind === 'denied-404') setState({ status: 'denied', reason: "This organization's service accounts aren't accessible to you." })
+        if (kind === 'session') setState({ status: 'session' })
+        else if (kind === 'denied-404') setState({ status: 'denied', reason: "This organization's service accounts aren't accessible to you." })
         else if (kind === 'denied-403') setState({ status: 'denied', reason: "You don't have manage_oauth_clients for this organization." })
         else setState({ status: 'error', message })
       })
@@ -370,6 +376,7 @@ function OAuthClientsSection({ orgId }: { orgId: number }) {
   const existingScopes = state.status === 'ready' ? state.items.flatMap(c => c.scopes) : []
 
   if (state.status === 'loading') return <LoadingState label="Loading service accounts…" />
+  if (state.status === 'session') return <SessionExpiredState />
   if (state.status === 'denied') return <EmptyState icon={ShieldAlert} title="Permission denied" description={state.reason} />
   if (state.status === 'error') return <ErrorState message={state.message} onRetry={load} />
 
@@ -511,7 +518,7 @@ export default function ServiceAccountsPage({ orgId, onBack, initialTab = 'oauth
 
   return (
     <div>
-      <BackLink onBack={onBack} />
+      <BackLink label="Back to Organizations" onBack={onBack} />
       <SectionHeader
         title="Service Accounts"
         description={`Organization-level API keys and OAuth service accounts for ${orgLabel}.`}
@@ -542,20 +549,6 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
       }}
     >
       {children}
-    </button>
-  )
-}
-
-function BackLink({ onBack }: { onBack: () => void }) {
-  return (
-    <button
-      onClick={onBack}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 16,
-        fontSize: 12, fontWeight: 600, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer',
-      }}
-    >
-      ← Back
     </button>
   )
 }
