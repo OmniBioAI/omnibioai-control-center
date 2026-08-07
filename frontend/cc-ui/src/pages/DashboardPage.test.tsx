@@ -20,7 +20,26 @@ const FULL_SUMMARY: dashboard.DashboardSummary = {
     cpu_pct: null, memory_pct: null,
   },
   operations: { health: 'UP', alerts: 1, active_services: 17, uptime: null },
-  business: { organizations: null, subscription: null, billing: null, credits: null },
+  business: {
+    organization_id: 7, organization_name: 'Acme Corp', plan_name: 'Enterprise',
+    subscription_status: 'active', usage_services_count: 3, billing_service_available: true,
+  },
+}
+
+const BUSINESS_UNAVAILABLE_SUMMARY: dashboard.DashboardSummary = {
+  ...FULL_SUMMARY,
+  business: {
+    organization_id: 7, organization_name: 'Acme Corp', plan_name: null,
+    subscription_status: null, usage_services_count: null, billing_service_available: false,
+  },
+}
+
+const BUSINESS_EMPTY_SUMMARY: dashboard.DashboardSummary = {
+  ...FULL_SUMMARY,
+  business: {
+    organization_id: null, organization_name: null, plan_name: null,
+    subscription_status: null, usage_services_count: null, billing_service_available: null,
+  },
 }
 
 describe('DashboardPage', () => {
@@ -40,6 +59,9 @@ describe('DashboardPage', () => {
     expect(screen.getByText('17/18')).toBeInTheDocument()        // Services
     expect(screen.getByText('Healthy')).toBeInTheDocument()      // Operations > Health
     expect(screen.getByText('2.4 TB')).toBeInTheDocument()       // Storage
+    expect(screen.getByText('Enterprise')).toBeInTheDocument()   // Business > Plan
+    expect(screen.getByText('active')).toBeInTheDocument()       // Business > Subscription
+    expect(screen.getByText('Available')).toBeInTheDocument()    // Business > Billing Service
   })
 
   it('renders "--" for every field the backend returned null for, never a fabricated number', async () => {
@@ -47,10 +69,12 @@ describe('DashboardPage', () => {
     render(<DashboardPage />)
     await screen.findByText('18')
 
-    // Active Sessions, Embedding Models, CPU, Memory, Uptime, and all of
-    // Business are null in FULL_SUMMARY -- each renders as an em dash.
+    // Active Sessions, Embedding Models, CPU, Memory, Uptime are null in
+    // FULL_SUMMARY -- each renders as an em dash. Business is fully
+    // populated in this fixture (PR C: no longer structurally
+    // placeholder), so it contributes none here.
     const dashes = screen.getAllByText('—')
-    expect(dashes.length).toBeGreaterThanOrEqual(9)
+    expect(dashes.length).toBeGreaterThanOrEqual(5)
   })
 
   it('shows every section heading', async () => {
@@ -71,13 +95,46 @@ describe('DashboardPage', () => {
     expect(screen.getAllByText('—').length).toBeGreaterThan(10)
   })
 
-  it('flags the Business section as preview data, never presented as real', async () => {
+  it('flags only the structurally-unavailable fields as preview data -- Business is no longer one of them', async () => {
     vi.mocked(dashboard.fetchDashboardSummary).mockResolvedValue(FULL_SUMMARY)
     render(<DashboardPage />)
     await screen.findByText('18')
 
+    // PR C: Business now has a real live source (routes_dashboard.py's
+    // _business_section()) -- it must never carry the "Preview data" tag
+    // again, unlike Active Sessions/Embedding Models/CPU/Memory/Uptime,
+    // which still have no live source anywhere in this backend.
     const previewTags = screen.getAllByText('Preview data')
-    // Business (4) + Active Sessions + Embedding Models + CPU + Memory + Uptime = 9
-    expect(previewTags.length).toBe(9)
+    expect(previewTags.length).toBe(5)
+  })
+
+  // ── Business widget (PR C) ───────────────────────────────────────────
+
+  it('shows the empty state (no organization membership) as "--"/"Unknown", not fabricated values', async () => {
+    vi.mocked(dashboard.fetchDashboardSummary).mockResolvedValue(BUSINESS_EMPTY_SUMMARY)
+    render(<DashboardPage />)
+    await screen.findByText('18')
+
+    // Plan and Usage are MetricCards (null -> em dash); Subscription and
+    // Billing Service are StatusCards (null -> "Unknown"), not fabricated
+    // as "Active" or similar.
+    expect(screen.getAllByText('Unknown').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('shows the billing service as Unavailable, distinct from a plain empty state', async () => {
+    vi.mocked(dashboard.fetchDashboardSummary).mockResolvedValue(BUSINESS_UNAVAILABLE_SUMMARY)
+    render(<DashboardPage />)
+    await screen.findByText('18')
+
+    expect(await screen.findByText('Unavailable')).toBeInTheDocument()
+  })
+
+  it('degrades the Business widget without throwing when the whole fetch fails', async () => {
+    vi.mocked(dashboard.fetchDashboardSummary).mockRejectedValue(new Error('network error'))
+    render(<DashboardPage />)
+
+    expect(await screen.findByText(/Couldn't load the platform summary/)).toBeInTheDocument()
+    expect(screen.getByText('Business')).toBeInTheDocument()
+    expect(screen.getAllByText('Unknown').length).toBeGreaterThanOrEqual(2)
   })
 })

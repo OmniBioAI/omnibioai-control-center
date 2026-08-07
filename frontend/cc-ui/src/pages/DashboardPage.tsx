@@ -10,6 +10,12 @@ import type { DashboardSummary } from '../dashboard'
 import { PageContainer, SectionHeader } from '../components/ui'
 import { AlertCard, DashboardGrid, HealthCard, MetricCard, StatusCard } from '../components/dashboard'
 
+function subscriptionTone(status: string | null): 'good' | 'bad' | 'neutral' {
+  if (status === 'active' || status === 'trial') return 'good'
+  if (status === 'suspended' || status === 'cancelled') return 'bad'
+  return 'neutral'
+}
+
 /**
  * PR10: Live Platform Dashboard. Replaces Phase 2's single hardcoded
  * stat grid with one real backend call (GET /dashboard/summary, see
@@ -125,11 +131,21 @@ export default function DashboardPage() {
         <MetricCard label="Uptime" value={ops?.uptime ?? null} icon={Clock} placeholder />
       </DashboardGrid>
 
-      <DashboardGrid title="Business">
-        <MetricCard label="Organizations" value={business?.organizations ?? null} icon={Building2} placeholder />
-        <MetricCard label="Subscription" value={business?.subscription ?? null} icon={CreditCard} placeholder />
-        <MetricCard label="Billing" value={business?.billing ?? null} icon={Receipt} placeholder />
-        <MetricCard label="Credits" value={business?.credits ?? null} icon={Wallet} placeholder />
+      <DashboardGrid title="Business" description="omnibioai-billing, your organization">
+        <MetricCard label="Plan" value={business?.plan_name ?? null} icon={CreditCard} />
+        <StatusCard
+          label="Subscription"
+          statusText={business?.subscription_status ?? null}
+          tone={subscriptionTone(business?.subscription_status ?? null)}
+          icon={Receipt}
+        />
+        <MetricCard label="Usage (services)" value={business?.usage_services_count ?? null} icon={Wallet} />
+        <StatusCard
+          label="Billing Service"
+          statusText={business?.billing_service_available == null ? null : business.billing_service_available ? 'Available' : 'Unavailable'}
+          tone={business?.billing_service_available == null ? 'neutral' : business.billing_service_available ? 'good' : 'bad'}
+          icon={ServerCog}
+        />
       </DashboardGrid>
     </PageContainer>
   )

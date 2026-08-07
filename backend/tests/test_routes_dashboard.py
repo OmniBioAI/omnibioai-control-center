@@ -312,12 +312,105 @@ class TestInfrastructureAndOperationsSection(unittest.TestCase):
         self.assertIsNone(resp.json()["infrastructure"]["containers_running"])
 
 
+MY_ORGS = [{"id": 7, "slug": "acme", "name": "Acme Corp", "plan": "beta", "status": "active"}]
+SUBSCRIPTION = {
+    "organization_id": 7, "billing_plan_id": 1, "plan_name": "Enterprise", "billing_interval": "monthly",
+    "currency": "usd", "status": "active", "start_date": "2026-01-01", "end_date": None,
+    "renewal_date": "2026-02-01", "features": [],
+}
+USAGE = {
+    "organization_id": 7, "period_start": "2026-08-01", "period_end": "2026-08-31",
+    "services": [
+        {"service": "tes", "action": "run", "resource": "compute_minutes", "unit": "minutes", "quantity": "120.0"},
+        {"service": "rag", "action": "query", "resource": "queries", "unit": "count", "quantity": "40"},
+    ],
+}
+_BUSINESS_NULL = {
+    "organization_id": None, "organization_name": None, "plan_name": None,
+    "subscription_status": None, "usage_services_count": None, "billing_service_available": None,
+}
+
+
 class TestBusinessSection(unittest.TestCase):
-    def test_always_placeholder(self) -> None:
-        with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client({})):
+    def test_populates_plan_and_subscription_for_callers_own_org(self) -> None:
+        routes = {
+            "/orgs": _resp(200, MY_ORGS),
+            "/subscription": _resp(200, SUBSCRIPTION),
+            "/usage": _resp(200, USAGE),
+        }
+        with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client(routes)):
             resp = client.get("/dashboard/summary", headers={"Authorization": "Bearer tok"})
         business = resp.json()["business"]
-        self.assertEqual(business, {"organizations": None, "subscription": None, "billing": None, "credits": None})
+        self.assertEqual(business["organization_id"], 7)
+        self.assertEqual(business["organization_name"], "Acme Corp")
+        self.assertEqual(business["plan_name"], "Enterprise")
+        self.assertEqual(business["subscription_status"], "active")
+        self.assertEqual(business["usage_services_count"], 2)
+        self.assertTrue(business["billing_service_available"])
+
+    def test_missing_authorization_never_fabricates_business(self) -> None:
+        with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client({})):
+            resp = client.get("/dashboard/summary")
+        self.assertEqual(resp.json()["business"], _BUSINESS_NULL)
+
+    def test_no_organization_membership_returns_all_null(self) -> None:
+        routes = {"/orgs": _resp(200, [])}
+        with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client(routes)):
+            resp = client.get("/dashboard/summary", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.json()["business"], _BUSINESS_NULL)
+
+    def test_no_active_subscription_distinguishes_from_billing_service_down(self) -> None:
+        # 404 (no subscription for this org) is NOT the same as the
+        # billing service being unreachable -- both must not collapse
+        # into the same "billing_service_available: null" the generic
+        # _get_json() helper would otherwise produce.
+        routes = {
+            "/orgs": _resp(200, MY_ORGS),
+            "/subscription": _resp(404, {"detail": "organization_id=7 has no active subscription"}),
+            "/usage": _resp(200, USAGE),
+        }
+        with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client(routes)):
+            resp = client.get("/dashboard/summary", headers={"Authorization": "Bearer tok"})
+        business = resp.json()["business"]
+        self.assertIsNone(business["plan_name"])
+        self.assertIsNone(business["subscription_status"])
+        self.assertTrue(business["billing_service_available"])
+        # Usage is independent of subscription -- still populated.
+        self.assertEqual(business["usage_services_count"], 2)
+
+    def test_billing_service_unreachable_sets_available_false(self) -> None:
+        async def _get(url, headers=None, params=None, timeout=None):
+            if "/orgs" in url:
+                return _resp(200, MY_ORGS)
+            if "/subscription" in url:
+                raise httpx.ConnectError("refused")
+            return _resp(404, {})
+
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(side_effect=_get)
+        mock_ctx = MagicMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+        with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.get("/dashboard/summary", headers={"Authorization": "Bearer tok"})
+        business = resp.json()["business"]
+        self.assertFalse(business["billing_service_available"])
+        self.assertIsNone(business["plan_name"])
+
+    def test_usage_failure_does_not_block_subscription_data(self) -> None:
+        # Partial-failure case: usage endpoint down/404, subscription
+        # still succeeds -- each upstream degrades independently, same
+        # convention every other section in this file already follows.
+        routes = {
+            "/orgs": _resp(200, MY_ORGS),
+            "/subscription": _resp(200, SUBSCRIPTION),
+            "/usage": _resp(503, {"error": "unavailable"}),
+        }
+        with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client(routes)):
+            resp = client.get("/dashboard/summary", headers={"Authorization": "Bearer tok"})
+        business = resp.json()["business"]
+        self.assertEqual(business["plan_name"], "Enterprise")
+        self.assertIsNone(business["usage_services_count"])
 
 
 class TestResponseShape(unittest.TestCase):

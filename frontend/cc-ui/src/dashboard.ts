@@ -68,11 +68,26 @@ export interface OperationsSummary {
   uptime: string | null
 }
 
+// PR C: replaces the PR10-era always-null placeholder shape
+// ({organizations, subscription, billing, credits}) -- that shape never
+// had a live source (routes_dashboard.py's own stale comment claimed no
+// billing system existed at all), and none of those four fields mapped
+// to anything real once PR B/PR14.4-14.7 built one. `organizations` is
+// dropped entirely rather than carried forward -- it would have
+// duplicated identity.organizations above, which already has a live
+// platform-wide count; `credits` is dropped because no such concept
+// exists anywhere in omnibioai-billing's schema, live or otherwise.
+// Field shapes mirror routes_dashboard.py's _business_section() exactly
+// -- this is the *caller's own* organization's billing (no platform-wide
+// aggregate exists), same convention that function's own docstring
+// documents.
 export interface BusinessSummary {
-  organizations: string | null
-  subscription: string | null
-  billing: string | null
-  credits: string | null
+  organization_id: number | null
+  organization_name: string | null
+  plan_name: string | null
+  subscription_status: string | null
+  usage_services_count: number | null
+  billing_service_available: boolean | null
 }
 
 export interface DashboardSummary {

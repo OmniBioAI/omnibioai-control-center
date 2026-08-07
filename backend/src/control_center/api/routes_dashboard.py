@@ -40,6 +40,14 @@ under-restrict. Instead:
     caller's own token carries platform.manage_infra, checked locally
     with the same verify_token() core/auth.py's require_permission uses,
     just without raising.
+  - Business (PR C, replacing a PR10-era hardcoded-null placeholder --
+    see _business_section()'s own docstring for the full history): the
+    caller's own Authorization header is forwarded to IAM's own /orgs
+    (membership-scoped, not /platform/orgs) to resolve which
+    organization to show, then to omnibioai-billing's own
+    /organizations/{id}/subscription and /organizations/{id}/usage --
+    same forward-and-let-the-upstream-decide posture as Identity/
+    Workflow above, no authorization decision made here either.
 
 Every section that isn't visible/reachable/configured for a given caller
 is `null` in the response, never fabricated -- the frontend renders
@@ -76,6 +84,7 @@ RAG_URL = os.environ.get("RAG_URL", "http://rag:8096")
 RAGBIO_API_KEY = os.environ.get("RAGBIO_API_KEY", "")
 WORKFLOW_BUNDLES_URL = os.environ.get("WORKFLOW_BUNDLES_URL", "http://workflow-bundles:8098")
 TES_URL = os.environ.get("TES_URL", "http://tes:8081")
+BILLING_URL = os.environ.get("BILLING_URL", "http://billing-service:8005")
 
 _TIMEOUT = 5.0
 
@@ -146,6 +155,85 @@ async def _identity_section(client: httpx.AsyncClient, authorization: Optional[s
         # RefreshToken is a DB model with no route exposing it). Always
         # null, not estimated.
         "active_sessions": None,
+    }
+
+
+_BUSINESS_NULL = {
+    "organization_id": None, "organization_name": None, "plan_name": None,
+    "subscription_status": None, "usage_services_count": None, "billing_service_available": None,
+}
+
+
+async def _business_section(client: httpx.AsyncClient, authorization: Optional[str]) -> dict:
+    """PR C: replaces the PR10-era hardcoded-null placeholder. That
+    placeholder's own comment claimed "no billing/subscription/credits
+    system exists anywhere in this workspace" -- true when PR10 shipped,
+    false since PR14.4-14.7 and PR B built and proxied exactly that
+    system (see routes_billing_proxy.py). This section reuses it
+    read-only, same as every other section in this file.
+
+    No platform-wide billing aggregate exists (omnibioai-billing's own
+    reporting API is entirely org-scoped -- confirmed by reading
+    app/routers/billing.py directly, see docs/pr-b-billing-usage-
+    consolidation.md), so unlike identity/ai_platform/knowledge/workflow
+    this section cannot show a platform total. It shows the *caller's
+    own* organization's billing instead -- same "my org" resolution
+    BillingPage.tsx's own useOrgLabel() already relies on client-side
+    (fetchMyOrg/fetchMyOrgs -> GET /orgs, IAM's own membership-scoped
+    listing, not the platform-admin-only /platform/orgs), just resolved
+    server-side here. A platform admin with no personal org membership
+    still sees null/"Preview data" here, same as everyone else that
+    section's own convention already covers -- this is not a
+    "fabricate a total" shortcut.
+
+    organization_id/organization_name/plan_name/subscription_status
+    come from the caller's first org membership + its subscription (both
+    proxied, independently re-verified by their own services, same
+    forwarded-Authorization pattern as every other section here).
+    usage_services_count is the count of distinct (service, action,
+    resource) dimensions with recorded consumption this period (GET
+    /organizations/{id}/usage, added by PR B) -- a count, not a
+    computed metric; no math happens in this file.
+    billing_service_available distinguishes "the billing service itself
+    is unreachable" from "this org has no subscription yet" (a 404) --
+    both would otherwise collapse to the same null via the generic
+    _get_json() helper, and conflating them would misrepresent an
+    outage as a normal empty state.
+    """
+    if not authorization:
+        return dict(_BUSINESS_NULL)
+
+    headers = {"Authorization": authorization}
+    my_orgs = await _get_json(client, f"{IAM_URL}/orgs", headers=headers)
+    if not isinstance(my_orgs, list) or not my_orgs:
+        return dict(_BUSINESS_NULL)
+
+    org = my_orgs[0]
+    org_id = org.get("id")
+    org_name = org.get("name")
+
+    try:
+        sub_resp = await client.get(
+            f"{BILLING_URL}/billing/organizations/{org_id}/subscription", headers=headers, timeout=_TIMEOUT,
+        )
+        billing_available = True
+        subscription = sub_resp.json() if sub_resp.status_code == 200 else None
+    except (httpx.HTTPError, ValueError):
+        billing_available = False
+        subscription = None
+
+    usage = await _get_json(client, f"{BILLING_URL}/billing/organizations/{org_id}/usage", headers=headers)
+    usage_services_count = (
+        len(usage["services"]) if isinstance(usage, dict) and isinstance(usage.get("services"), list) else None
+    )
+
+    return {
+        "organization_id": org_id,
+        "organization_name": org_name,
+        "plan_name": subscription.get("plan_name") if isinstance(subscription, dict) else None,
+        "subscription_status": subscription.get("status") if isinstance(subscription, dict) else None,
+        "usage_services_count": usage_services_count,
+        "billing_service_available": billing_available,
     }
 
 
@@ -293,11 +381,12 @@ def _infra_and_ops_section() -> tuple[dict, dict]:
 @router.get("/dashboard/summary")
 async def dashboard_summary(authorization: Optional[str] = Header(default=None)) -> JSONResponse:
     async with httpx.AsyncClient() as client:
-        identity, ai_platform, knowledge, workflow = await asyncio.gather(
+        identity, ai_platform, knowledge, workflow, business = await asyncio.gather(
             _identity_section(client, authorization),
             _ai_platform_section(client),
             _knowledge_section(client),
             _workflow_section(client, authorization),
+            _business_section(client, authorization),
         )
 
     if _has_permission(authorization, "platform.manage_infra"):
@@ -308,12 +397,6 @@ async def dashboard_summary(authorization: Optional[str] = Header(default=None))
             "gpu_utilization_pct", "storage_used_bytes", "storage_total_bytes", "cpu_pct", "memory_pct",
         )}
         operations = {"health": None, "alerts": None, "active_services": None, "uptime": None}
-
-    # Business: no billing/subscription/credits system exists anywhere in
-    # this workspace (confirmed absent, not merely unauthenticated) --
-    # always placeholders, same as Phase 2's dashboard already showed for
-    # Billing/Audit.
-    business = {"organizations": None, "subscription": None, "billing": None, "credits": None}
 
     return JSONResponse({
         "generated_at": datetime.now(timezone.utc).isoformat(),
