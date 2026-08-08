@@ -49,6 +49,7 @@ from sections.architecture import architecture_section_html
 from sections.projects import CAT_MAP, CAT_META, projects_section_html
 from sections.languages import LANG_TYPE, LANG_TYPE_META, languages_section_html
 from sections.coverage import coverage_section_html, collect_coverage
+from sections.git_status import git_status_section_html
 from sections.health import health_section_html
 from sections.usage import usage_section_html, gateway_traffic_section_html
 from sections.llms_cloud import llm_section_html, cloud_section_html, cost_tracking_placeholder_section_html
@@ -153,6 +154,7 @@ _load_env_file(DEFAULT_COMPOSE_PATH.parent / ".env")
 SIDEBAR_NAV_SPEC: List[Tuple[str, str, Optional[List[Tuple[str, str]]]]] = [
     ("arch",         "Architecture",      None),
     ("projects",     "Projects",          [("summary", "Code Summary"), ("languages", "Languages"), ("coverage", "Code Coverage")]),
+    ("gitstatus",    "Ecosystem Status",  None),
     ("health",       "Health Status",     [("overview", "Overview"), ("services", "Services"), ("storage", "Disk & Mounts"), ("gpu", "GPU"), ("activity", "Activity"), ("audit", "Audit Trail"), ("errors", "Errors")]),
     ("usage",        "Usage",             [("product", "Product Usage"), ("gateway", "API Gateway")]),
     ("llmscloud",    "LLMs & Cloud",      [("llms", "LLMs"), ("cloud", "Cloud"), ("cost", "Cost Tracking")]),
@@ -184,6 +186,7 @@ def build_report(out_html: Path, title: str, timestamp: str,
         ("languages", "Languages",    languages_section_html(language_totals, grand)),
         ("coverage",  "Code Coverage", coverage_section_html(coverage_df, timestamp)),
     ], group_id="projects", render_nav=False)
+    gitstatus_html = git_status_section_html(ecosystem_root)
     hlth_html     = health_section_html(health, control_center_url, sentry_org, sentry_project_slugs)
     llms_html     = llm_section_html(control_center_url)
     cloud_html    = cloud_section_html(control_center_url)
@@ -322,6 +325,7 @@ def build_report(out_html: Path, title: str, timestamp: str,
     <div class="content-pane">
       <div id="tab-arch"   class="tab-panel active">{arch_html}</div>
       <div id="tab-projects" class="tab-panel">{projects_tab_html}</div>
+      <div id="tab-gitstatus" class="tab-panel">{gitstatus_html}</div>
       <div id="tab-health" class="tab-panel">{hlth_html}</div>
       <div id="tab-usage"  class="tab-panel">{usage_tab_html}</div>
       <div id="tab-llmscloud" class="tab-panel">{llmscloud_html}</div>
