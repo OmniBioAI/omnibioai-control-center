@@ -9,6 +9,7 @@ The Control Center is a FastAPI service that aggregates health status across all
 ## What It Does
 
 - **Health monitoring** — TCP, HTTP, and disk checks across all ecosystem services
+- **Enterprise Admin Console** — a separate frontend build served at `admin.omnibioai.org`: Organizations, Users, Teams, Roles & Permissions, MFA Policy, IAM/SSO Management, Audit Logs, API Keys/Service Accounts, Billing, Workflows, Tool Execution, AI Models, RAG/PubMed, Settings — see [Admin Console](#admin-console) below
 - **Ecosystem report** — interactive HTML report (architecture · projects · languages · coverage · health) served at `/`; `/dashboard` redirects here (its live per-service cards and generate button were folded into the report's header status chip and Admin tab)
 - **JSON API** — machine-readable health summary at `/summary` for CI/CD and external monitoring
 - **Scheduled report generation** — auto-regenerates the ecosystem report every N hours (configurable via REPORT_SCHEDULE_HOURS)
@@ -171,22 +172,51 @@ omnibioai-control-center/
 │   │   │   ├── routes_health.py    # GET /health
 │   │   │   ├── routes_services.py  # GET /services
 │   │   │   ├── routes_summary.py   # GET /summary
-│   │   │   ├── routes_report.py    # GET /report
-│   │   │   ├── routes_llm.py       # GET /llms, /cloud, /knowledge-base, /storage
-│   │   │   └── routes_reference.py # GET /reference
+│   │   │   ├── routes_report.py    # GET /report, /report/generate, /report/status, /report/data
+│   │   │   ├── routes_config.py    # GET /config, POST /config/service
+│   │   │   ├── routes_cron.py      # /cron/jobs + pause/resume/schedule
+│   │   │   ├── routes_docker.py    # /docker/*
+│   │   │   ├── routes_known_issues.py  # /known-issues CRUD
+│   │   │   ├── routes_llm.py       # GET /llms, /knowledge-base
+│   │   │   ├── routes_cloud.py     # GET /cloud
+│   │   │   ├── routes_reference.py # GET /reference
+│   │   │   ├── routes_storage.py   # GET /storage
+│   │   │   ├── routes_infra.py     # GET /gpu, /celery, /database, /license, /usage,
+│   │   │   │                       # /gateway-traffic, /audit-trail, /activity,
+│   │   │   │                       # /image-freshness, /integrity
+│   │   │   ├── routes_dashboard.py # GET /dashboard/summary (Overview page stat cards)
+│   │   │   ├── routes_auth_proxy.py    # /auth/login, /auth/refresh, /auth/logout, /auth/validate
+│   │   │   │                           # — same-origin relay to auth-service
+│   │   │   └── routes_{org,user,role,team,service_accounts,org_sso,org_mfa,audit,
+│   │   │       billing,tes,model_registry,workflow_bundles,rag,platform_config}_proxy.py
+│   │   │                           # Admin Console enterprise proxy layer (15 files) —
+│   │   │                           # see "Admin Console" below
 │   │   ├── checks/
-│   │   │   ├── http.py             # HTTP health checks
-│   │   │   ├── tcp.py              # TCP health checks (MySQL, Redis)
-│   │   │   └── disk.py             # Disk usage checks
+│   │   │   ├── http.py / tcp.py / disk.py          # Core checks — HTTP, TCP (MySQL/Redis), disk
+│   │   │   ├── cron_jobs.py        # Host-crontab status + pause/resume/reschedule logic
+│   │   │   ├── known_issues.py     # Known-issue store (known_issues.json)
+│   │   │   └── gpu.py / celery_status.py / database_status.py / license_status.py /
+│   │   │       usage_status.py / audit_trail.py / gateway_traffic.py /
+│   │   │       image_freshness.py / integrity.py / activity.py
+│   │   │                           # Infra/observability checks backing routes_infra.py
 │   │   ├── core/
 │   │   │   ├── runner.py           # Dispatches checks per service type
-│   │   │   └── settings.py         # Loads control_center.yaml
+│   │   │   ├── settings.py         # Loads control_center.yaml
+│   │   │   ├── auth.py             # require_admin — JWT role gate for write endpoints
+│   │   │   └── jwt_verify.py       # Local JWT verification (HS256 + RS256/JWKS)
+│   │   ├── notifications/
+│   │   │   └── discord.py          # Discord webhook alerts (known issues, GPU temp)
 │   │   └── utils/
 │   │       └── summary_client.py   # Fetches /summary for report generation
-│   └── tests/
-│       ├── test_checks.py          # Unit tests — tcp/http/disk
-│       ├── test_runner.py          # Unit tests — runner + settings
-│       └── test_summary_client.py  # Unit tests — health data parsing
+│   └── tests/                      # 886 tests — see "Running Tests" below
+│
+├── frontend/cc-ui/src/
+│   ├── apps/
+│   │   ├── ControlApp.tsx          # Ops console root — built when VITE_APP_MODE=control
+│   │   ├── AdminApp.tsx            # Admin Console root — built when VITE_APP_MODE=admin
+│   │   └── AuthGate.tsx            # Shared login/session state machine (both apps)
+│   ├── navigation.ts               # Single source of truth for Admin Console's sectioned nav
+│   └── pages/, components/         # Page and component implementations
 │
 ├── compose/
 │   └── docker-compose.control-center.yml
@@ -194,7 +224,10 @@ omnibioai-control-center/
 │   ├── control_center.yaml         # Active configuration
 │   └── control_center.example.yaml # Reference configuration
 └── docker/
-    └── Dockerfile
+    ├── Dockerfile
+    └── nginx/
+        ├── control-center.conf     # Host-based split: control.omnibioai.org / admin.omnibioai.org
+        └── api-proxy.conf          # Shared API proxy rules, included by both server blocks
 ```
 
 ---
@@ -233,6 +266,7 @@ omnibioai-control-center/
 | `/reference`           | GET    | Reference genome registry (12 organisms) |
 | `/knowledge-base`      | GET    | AI knowledge base stats (PubMed + FAISS) |
 | `/storage`             | GET    | Disk usage + per-organism index sizes |
+| `/dashboard/summary`   | GET    | Overview page stat cards (both Admin Console and ops console) |
 | `/gpu`                 | GET    | GPU temperature/utilization via `nvidia-smi` |
 | `/celery`              | GET    | Celery worker + recent task-queue status |
 | `/database`            | GET    | MySQL/Redis/Neo4j data-layer connectivity |
@@ -245,6 +279,8 @@ omnibioai-control-center/
 | `/integrity`           | GET    | Configured symlink/mount integrity checks |
 
 "Admin-gated" endpoints require a valid JWT carrying the `admin` role, checked twice independently: once by nginx's `auth_request` (any valid JWT) and once inside the app itself via `require_admin` (the specific role) — so an nginx misconfiguration alone can't expose a write endpoint. All other endpoints above are fully open, no auth required.
+
+This table covers the original ops-console surface. A separate, larger set of `/orgs/*`, `/platform/*`, `/billing/*`, `/tes/*`, `/model-registry/*`, `/workflow-bundles/*`, `/rag/*`, and `/auth/config` proxy routes backs the Admin Console — see [Admin Console → Enterprise proxy routes](#enterprise-proxy-routes) below rather than duplicating all ~35 of them here; each is gated by whatever permission its owning service already requires (`omnibioai-auth`'s `manage_all_orgs`/org-membership checks, `omnibioai-billing`'s org-scoped IAM, etc.) — Control Center's own `require_admin`/nginx layer above doesn't apply to them.
 
 ### `/health`
 
@@ -537,6 +573,119 @@ The report generates gracefully even if the Control Center is offline or coverag
 
 ---
 
+## Admin Console
+
+**One repository, two frontend builds, two domains.** `control.omnibioai.org`
+serves the ops console described above (Health, Docker, Ecosystem Report,
+Config, LLMs, Cloud — no enterprise administration UI at all, not hidden,
+genuinely absent from that build's JavaScript). `admin.omnibioai.org` serves
+a separate enterprise administration SPA covering Organizations, Users,
+Teams, Roles & Permissions, Security (MFA Policy, IAM/SSO Management, Audit
+Logs, API Keys/Service Accounts), Billing, Workflows, Tool Execution, AI
+Models, RAG/PubMed, and platform Settings.
+
+Same repository, same FastAPI backend, same auth system, same permission
+checks either way — the domain only decides which pre-built frontend
+bundle nginx serves. **The build split is a deployment/UX optimization,
+never an authorization boundary**: every `require_permission`/
+`require_admin` check and every org-membership check in `omnibioai-auth`
+is unchanged regardless of which domain a request came from, and nothing
+about the serving hostname is itself authenticated. Full design record:
+`docs/admin-console-build.md`.
+
+### Build
+
+`src/main.tsx` picks a root component at build time from `VITE_APP_MODE`:
+
+```
+VITE_APP_MODE=admin   npm run build:admin    → src/apps/AdminApp.tsx   → dist-admin/
+VITE_APP_MODE=control npm run build:control  → src/apps/ControlApp.tsx → dist-control/
+```
+
+`AdminApp.tsx` is the original, full-featured app; `ControlApp.tsx` imports
+only the six ops pages and has no reference anywhere to
+`OrganizationsPage`, `UsersPage`, or any `components/organizations`/
+`components/roles`/`components/teams` code. Vite/Rollup constant-folds and
+tree-shakes the unused branch at build time (verified against real output
+— `dist-control`'s bundle is ~45KB smaller, and the losing app's strings
+don't appear in it at all), so this is a genuinely smaller bundle, not
+hidden-but-shipped UI. Both apps share `AuthGate.tsx` (session/login state
+machine) and `Header.tsx`.
+
+### Navigation (25 functional pages)
+
+Single source of truth: `frontend/cc-ui/src/navigation.ts`.
+
+| Section | Page(s) | Notes |
+|---|---|---|
+| — | Overview | Stat cards via `/dashboard/summary` |
+| Administration | Organizations, Users, Teams, Roles & Permissions | |
+| Operations | Infrastructure (Health, Docker, Ecosystem Report, Config, LLMs, Cloud) | The 6 pre-existing ops pages, grouped under one expandable parent |
+| | Workflows, Tool Execution, AI Models | Proxy `omnibioai-workflow-bundles`, `omnibioai-tes`, `omnibioai-model-registry` directly — authorization is entirely each upstream service's own, per-request |
+| Security | Security Overview, MFA Policy, IAM/SSO Management, Audit Logs, API Keys/Service Accounts | |
+| | Sessions | **Placeholder (`functional: false`)** — no session-list/revoke backend exists yet |
+| Business | Billing | Proxies `omnibioai-billing`'s existing read APIs |
+| Knowledge | RAG, PubMed | Both point at one page — RAG's only indexed corpus today is PubMed abstracts |
+| Platform | Settings | Read-only view of `omnibioai-auth`'s `GET /auth/config`; the corresponding `PUT` (platform-wide LLM/cloud credentials) is deliberately not proxied yet |
+| | Integrations | **Placeholder (`functional: false`)** — no integration/CRUD entity exists yet |
+
+Placeholder items still appear in the nav (rendered as "Coming Soon," per
+this app's own convention — never hidden) rather than being removed.
+Every `functional: true` page is wired to a real backend; none renders a
+`<ComingSoon/>` fallthrough while claiming to be functional (re-verified
+in `docs/pr-e-admin-console-production-hardening.md`).
+
+### Enterprise proxy routes
+
+Every Admin Console page is backed by a thin `routes_*_proxy.py` layer —
+Control Center holds no organization/user/role/billing data of its own,
+it forwards to the service that owns it:
+
+| Router | Example paths | Proxies to (env var) |
+|---|---|---|
+| `routes_org_proxy.py` | `/orgs`, `/orgs/{id}`, `/orgs/{id}/members`, `/platform/orgs` | `IAM_URL` → auth-service |
+| `routes_user_proxy.py` | `/platform/users`, `/platform/users/{id}`, `/platform/users/{id}/mfa/reset` | `IAM_URL` → auth-service |
+| `routes_role_proxy.py` | `/platform/roles`, `/orgs/{id}/roles`, `/organizations/{id}/permissions` | `IAM_URL` → auth-service |
+| `routes_team_proxy.py` | `/orgs/{id}/teams`, `/orgs/{id}/teams/{id}/members` | `IAM_URL` → auth-service |
+| `routes_service_accounts_proxy.py` | `/orgs/{id}/api-keys`, `/orgs/{id}/oauth-clients`, `/platform/permissions` | `IAM_URL` → auth-service |
+| `routes_org_sso_proxy.py` | `/orgs/{id}/sso`, `/orgs/{id}/sso/override` | `IAM_URL` → auth-service |
+| `routes_org_mfa_proxy.py` | `/orgs/{id}/mfa-policy`, `/orgs/{id}/mfa-policy/override` | `IAM_URL` → auth-service |
+| `routes_audit_proxy.py` | `/platform/audit-events` | `IAM_URL` → auth-service |
+| `routes_platform_config_proxy.py` | `/auth/config` (read-only) | `IAM_URL` → auth-service |
+| `routes_billing_proxy.py` | `/billing/organizations/{id}/usage`, `/summary`, `/invoices`, `/cost-breakdown`, `/subscription` | `BILLING_URL` → billing-service |
+| `routes_tes_proxy.py` | `/tes/tools`, `/tes/tools/capabilities`, `/tes/runs` | `TES_URL` → tes |
+| `routes_model_registry_proxy.py` | `/model-registry/models`, `/health`, `/auth-status` | `MODEL_REGISTRY_URL` → model-registry |
+| `routes_workflow_bundles_proxy.py` | `/workflow-bundles/workflows`, `/categories`, `/runs` | `WORKFLOW_BUNDLES_URL` → workflow-bundles |
+| `routes_rag_proxy.py` | `/rag/studies`, `/rag/cache-stats`, `/rag/health` | `RAG_URL` → rag |
+
+Auth forwarding, a uniform 10s timeout, and error mapping
+(`httpx.RequestError` → 503, non-JSON upstream body → same status +
+`{"error": ...}`) are consistent across all 15 files — audited
+line-by-line in `docs/pr-e-admin-console-production-hardening.md`. No
+secret (`RAGBIO_API_KEY`, etc.) is ever echoed into a response or logged;
+each is injected only into the outbound `Authorization` header.
+
+### Deployment status
+
+**PR14.7B (merged):** `dist-admin`/`dist-control` are wired into an actual
+nginx serving image (`docker/nginx/{control-center.conf,api-proxy.conf}` +
+a dedicated `control-center-web` container), host-based on the `Host`
+header, verified on `localhost:5174`. `control-center`'s FastAPI process
+itself is unchanged — it never serves static files itself.
+
+**PR14.7C (prepared, not yet applied):** the Cloudflare Tunnel cutover
+that makes both domains reachable externally —
+`control.omnibioai.org`'s ingress moving from `:7070` direct-to-backend to
+`:5174`, plus a new `admin.omnibioai.org` → `:5174` rule. Blocked on two
+things outside a coding agent's reach: root access on the tunnel host to
+edit `/etc/cloudflared/config.yml`, and a DNS record for
+`admin.omnibioai.org` (none exists yet — Cloudflare Tunnel ingress rules
+alone don't create DNS). Cloudflare Access policy coverage for the new
+hostname is separately not yet done either. See `docs/admin-console-build.md`
+for the exact target-state diagram and rollout prerequisites.
+
+---
+
 ## Running Tests
 
 ```bash
@@ -576,6 +725,23 @@ pytest tests/ -v
 | `test_routes_cron.py` | `/cron/jobs` and its admin-gated mutation routes |
 | `test_check_known_issues.py` | Known-issue load/create/update/delete logic, including UUID backfill |
 | `test_routes_known_issues.py` | `/known-issues` CRUD routes, read-open/write-admin-gated |
+| `test_jwt_verify.py` | `core/jwt_verify.py` — HS256 + RS256/JWKS verification, revocation, `alg`-header dispatch |
+| `test_routes_dashboard.py` | `/dashboard/summary` — Overview page stat cards |
+| `test_routes_auth_proxy.py` | `/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/validate` proxy relay + cookie forwarding |
+| `test_routes_org_proxy.py` | `/orgs`, `/platform/orgs` proxy routes |
+| `test_routes_user_proxy.py` | `/platform/users` proxy routes, including MFA reset |
+| `test_routes_role_proxy.py` | `/platform/roles`, `/orgs/{id}/roles`, `/organizations/{id}/roles` proxy routes |
+| `test_routes_team_proxy.py` | `/orgs/{id}/teams` proxy routes |
+| `test_routes_service_accounts_proxy.py` | `/orgs/{id}/api-keys`, `/orgs/{id}/oauth-clients` proxy routes |
+| `test_routes_org_sso_proxy.py` | `/orgs/{id}/sso` proxy routes |
+| `test_routes_org_mfa_proxy.py` | `/orgs/{id}/mfa-policy` proxy routes |
+| `test_routes_audit_proxy.py` | `/platform/audit-events` proxy route |
+| `test_routes_platform_config_proxy.py` | `/auth/config` read-only proxy route |
+| `test_routes_billing_proxy.py` | `/billing/*` proxy routes (usage, summary, invoices, cost-breakdown, subscription) |
+| `test_routes_tes_proxy.py` | `/tes/*` proxy routes |
+| `test_routes_model_registry_proxy.py` | `/model-registry/*` proxy routes |
+| `test_routes_workflow_bundles_proxy.py` | `/workflow-bundles/*` proxy routes |
+| `test_routes_rag_proxy.py` | `/rag/*` proxy routes |
 
 Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem fixtures, no real external services). The `checks/*.py` and `routes_docker.py`/`routes_llm.py` suites additionally mock `subprocess` (docker/nvidia-smi CLI calls) and network clients (`httpx`, `redis`, `pymysql`, `neo4j`, `celery`) at the call site — no real database, broker, GPU, or Docker daemon is required at test time.
 
@@ -617,7 +783,7 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 | Ecosystem report — Languages | ✓ Stable |
 | Ecosystem report — Coverage | ✓ Stable |
 | Ecosystem report — Health tab | ✓ Stable |
-| Unit tests | ✓ Stable — 529 tests, 99.84% coverage (98% gate met) |
+| Unit tests | ✓ Stable — 886 tests, 99.79% coverage (98% gate met) |
 | Docker Compose deployment | ✓ Stable |
 | Prometheus metrics (/metrics) | ✓ Stable |
 | Scheduled report generation | ✓ Stable |
@@ -648,6 +814,12 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 | GPU health detection (/gpu) | ✓ Stable |
 | Audit Trail (/audit-trail) | ✓ Stable |
 | CVE Trend | ✓ Stable |
+| Admin Console — Organizations, Users, Teams, Roles & Permissions | ✓ Stable |
+| Admin Console — Security (MFA Policy, IAM/SSO, Audit Logs, API Keys/Service Accounts) | ✓ Stable |
+| Admin Console — Billing, Workflows, Tool Execution, AI Models, RAG/PubMed, Settings | ✓ Stable |
+| Admin Console — Sessions, Integrations | Placeholder (`functional: false`, "Coming Soon") |
+| Admin Console dual-build (`dist-admin`/`dist-control`, nginx host-based split) | ✓ Stable — verified on `localhost:5174` |
+| Admin Console external domain cutover (`admin.omnibioai.org` via Cloudflare Tunnel) | Prepared, not yet applied — needs DNS record + tunnel-host access |
 | Historical tracking | Planned |
 | Alert hooks (Slack, email) | Planned |
 | `/auth/login` audit trail | Planned — needs deliberate design, see Planned Enhancements |
