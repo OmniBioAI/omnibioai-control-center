@@ -866,6 +866,106 @@ function CoverageTab({ data }: { data: ReportData }) {
   )
 }
 
+// ── Tab: Ecosystem (Git) Status ─────────────────────────────────────────────────
+function gitBand(r: { clean: boolean }) { return r.clean ? 'clean' : 'dirty' }
+
+function GitStatusTab({ data }: { data: ReportData }) {
+  const rows = data.gitStatus ?? []
+  const tbl = useTable(rows as unknown as Record<string, unknown>[], 'repo')
+
+  const filtered = useMemo(() => {
+    let d = rows.slice()
+    if (tbl.search) {
+      const q = tbl.search.toLowerCase()
+      d = d.filter(r => r.repo.toLowerCase().includes(q) || r.branch.toLowerCase().includes(q))
+    }
+    if (tbl.filterVal) {
+      d = d.filter(r => gitBand(r) === tbl.filterVal)
+    }
+    const { sortKey, sortDir } = tbl
+    d.sort((a, b) => {
+      const av = (a as unknown as Record<string, unknown>)[sortKey]
+      const bv = (b as unknown as Record<string, unknown>)[sortKey]
+      if (av == null && bv == null) return 0
+      if (av == null) return sortDir
+      if (bv == null) return -sortDir
+      return av < bv ? sortDir : av > bv ? -sortDir : 0
+    })
+    return d
+  }, [rows, tbl.search, tbl.filterVal, tbl.sortKey, tbl.sortDir])
+
+  const pages = Math.ceil(filtered.length / tbl.perPage)
+  const paged = filtered.slice((tbl.page - 1) * tbl.perPage, tbl.page * tbl.perPage)
+
+  const total = rows.length
+  const clean = rows.filter(r => r.clean).length
+  const dirty = total - clean
+  const nonMain = rows.filter(r => r.nonMain).length
+
+  const SortTh = ({ col, label, right = false }: { col: string; label: string; right?: boolean }) => (
+    <th onClick={() => tbl.toggleSort(col)} style={thStyle(tbl.sortKey === col, right)}>
+      {label}{tbl.sortKey === col ? (tbl.sortDir === 1 ? ' ↑' : ' ↓') : ''}
+    </th>
+  )
+
+  return (
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
+        <KpiCard label="repos scanned" value={total} sub="ecosystem root" />
+        <KpiCard label="clean" value={clean} sub="working tree" color={C.green} />
+        <KpiCard label="dirty" value={dirty} sub="needs attention" color={dirty ? C.red : C.text} />
+        <KpiCard label="non-main branch" value={nonMain} sub="not on main/master" color={nonMain ? C.amber : C.text} />
+      </div>
+
+      <SectionCard title="git working-tree status" sub="every repo under the ecosystem root · same check as `bash omnibioai-utils/ecosystem_status.sh` · click headers to sort">
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+          <input
+            value={tbl.search} onChange={e => { tbl.setSearch(e.target.value); tbl.setPage(1) }}
+            placeholder="search repo or branch…" style={{ flex: 1, minWidth: 140, padding: '6px 10px', fontSize: 12, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }}
+          />
+          <select value={tbl.filterVal} onChange={e => { tbl.setFilterVal(e.target.value); tbl.setPage(1) }}
+            style={{ padding: '6px 10px', fontSize: 12, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }}>
+            <option value="">all statuses</option>
+            <option value="clean">clean</option>
+            <option value="dirty">dirty</option>
+          </select>
+          <span style={{ fontSize: 11, color: C.muted, alignSelf: 'center' }}>{filtered.length} items</span>
+        </div>
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <SortTh col="repo" label="repository" />
+                <SortTh col="branch" label="branch" />
+                <th style={thStyle(false)}>status</th>
+                <th style={thStyle(false)}>details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paged.map(r => (
+                <tr key={r.repo} style={{ borderTop: `1px solid ${C.border}` }}>
+                  <td style={{ padding: '8px 12px', fontWeight: 600, fontSize: 12, color: C.text }}>{r.repo}</td>
+                  <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontSize: 11, color: r.nonMain ? C.amber : C.muted }}>{r.branch}</td>
+                  <td style={{ padding: '8px 12px' }}>
+                    {r.clean
+                      ? <Badge label="✓ clean" color={C.green} bg={`${C.green}22`} />
+                      : <Badge label="✗ dirty" color={C.red} bg={`${C.red}22`} />}
+                  </td>
+                  <td style={{ padding: '8px 12px', fontSize: 11, color: C.muted }}>{r.details || '—'}</td>
+                </tr>
+              ))}
+              {paged.length === 0 && (
+                <tr><td colSpan={4} style={{ textAlign: 'center', color: C.muted, padding: 20, fontSize: 12 }}>no repos found</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <Pagination page={tbl.page} pages={pages} total={filtered.length} perPage={tbl.perPage} onPage={tbl.setPage} onPerPage={n => { tbl.setPerPage(n); tbl.setPage(1) }} />
+      </SectionCard>
+    </div>
+  )
+}
+
 // ── Tab 5: Health Status ───────────────────────────────────────────────────────
 const SVC_ICONS: Record<string, string> = { mysql: '🗄️', redis: '⚡', http: '🌐', tcp: '🔌' }
 
@@ -1061,13 +1161,14 @@ function HealthTab({ refreshKey }: { refreshKey: number }) {
 }
 
 // ── Main EcosystemPage ─────────────────────────────────────────────────────────
-type SubTab = 'architecture' | 'projects' | 'languages' | 'coverage' | 'health'
+type SubTab = 'architecture' | 'projects' | 'languages' | 'coverage' | 'gitStatus' | 'health'
 
 const SUBTABS: { id: SubTab; label: string }[] = [
   { id: 'architecture', label: 'Architecture' },
   { id: 'projects',     label: 'Projects' },
   { id: 'languages',    label: 'Languages' },
   { id: 'coverage',     label: 'Code Coverage' },
+  { id: 'gitStatus',    label: 'Ecosystem Status' },
   { id: 'health',       label: 'Health Status' },
 ]
 
@@ -1128,7 +1229,7 @@ export default function EcosystemPage({ refreshKey }: { refreshKey: number }) {
     } catch { /* ignore */ }
   }
 
-  const needsReport = (subTab === 'projects' || subTab === 'languages' || subTab === 'coverage') && !reportData
+  const needsReport = (subTab === 'projects' || subTab === 'languages' || subTab === 'coverage' || subTab === 'gitStatus') && !reportData
 
   return (
     <div style={{ background: C.bg, borderRadius: 14, padding: 20, margin: '-24px -28px -48px', minHeight: 'calc(100vh - 100px)', color: C.text }}>
@@ -1183,6 +1284,7 @@ export default function EcosystemPage({ refreshKey }: { refreshKey: number }) {
       {!needsReport && subTab === 'projects'  && reportData && <ProjectsTab data={reportData} />}
       {!needsReport && subTab === 'languages' && reportData && <LanguagesTab data={reportData} />}
       {!needsReport && subTab === 'coverage'  && reportData && <CoverageTab data={reportData} />}
+      {!needsReport && subTab === 'gitStatus' && reportData && <GitStatusTab data={reportData} />}
     </div>
   )
 }

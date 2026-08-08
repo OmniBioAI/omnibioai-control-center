@@ -63,7 +63,15 @@ def _row_for_repo(repo_path: Path) -> Dict[str, Any]:
     }
 
 
-def _collect_rows(ecosystem_root: Path) -> List[Dict[str, Any]]:
+def collect_git_status(ecosystem_root: Path) -> List[Dict[str, Any]]:
+    """Per-repo git working-tree status across every repo under
+    `ecosystem_root` -- branch, clean/dirty, and modified/untracked/
+    unpushed counts. Same scan `omnibioai-utils/ecosystem_status.sh`
+    performs. Public: `git_status_section_html` (this report's own HTML
+    tab) and `generate_report.py`'s `report_data.json` export (consumed
+    by the React Admin Console's EcosystemPage) both call this directly,
+    so the two never drift out of sync with each other.
+    """
     repo_dirs = sorted(
         p for p in ecosystem_root.iterdir()
         if p.is_dir() and p.name not in _EXCLUDE_DIRS and (p / ".git").is_dir()
@@ -75,12 +83,10 @@ def _collect_rows(ecosystem_root: Path) -> List[Dict[str, Any]]:
 
 
 def git_status_section_html(ecosystem_root: Path) -> str:
-    """Per-repo git working-tree status across every repo under
-    `ecosystem_root` -- branch, clean/dirty, and (modified/untracked/
-    unpushed) detail. Same scan `omnibioai-utils/ecosystem_status.sh`
-    performs; this is that script's output rendered as a report tab.
+    """Per-repo git working-tree status rendered as this report's own
+    HTML tab -- see `collect_git_status` for the underlying scan.
     """
-    rows = _collect_rows(ecosystem_root)
+    rows = collect_git_status(ecosystem_root)
 
     total = len(rows)
     clean = sum(1 for r in rows if r["clean"])

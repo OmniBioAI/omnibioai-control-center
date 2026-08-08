@@ -126,12 +126,18 @@ export interface CoverageRow {
   stmts: number | null; missed: number | null; branches: number | null; failUnder: number | null
 }
 
+export interface GitStatusRow {
+  repo: string; branch: string; nonMain: boolean; clean: boolean
+  modified: number; untracked: number; unpushed: number; details: string
+}
+
 export interface ReportData {
   generated_at: string
   grand: { files: number; code: number; comment: number; blank: number }
   projects: ProjectRow[]
   languages: LanguageRow[]
   coverage: CoverageRow[]
+  gitStatus: GitStatusRow[]
 }
 
 export async function fetchReportData(): Promise<ReportData> {
