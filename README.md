@@ -464,6 +464,7 @@ The report is a single interactive HTML file with a left sidebar-nav layout (not
 | Projects | Code Summary | Code line distribution across repositories |
 | | Languages | Language breakdown across the ecosystem |
 | | Code Coverage | Per-repo pytest coverage with progress bars |
+| Ecosystem Status | — | Per-repo git working-tree status (branch, clean/dirty, modified/untracked/unpushed) across every repo under the ecosystem root — same scan as `bash omnibioai-utils/ecosystem_status.sh`. Also surfaced as its own tab on the Admin Console's Ecosystem Report page (`EcosystemPage.tsx`), both reading the same `gitStatus` array from `/report/data` |
 | Health Status | Overview | KPI summary + status donut + per-service latency bars |
 | | Services | Live per-service health cards |
 | | Disk & Mounts | Disk usage checks + symlink/mount integrity |

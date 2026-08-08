@@ -49,7 +49,7 @@ from sections.architecture import architecture_section_html
 from sections.projects import CAT_MAP, CAT_META, projects_section_html
 from sections.languages import LANG_TYPE, LANG_TYPE_META, languages_section_html
 from sections.coverage import coverage_section_html, collect_coverage
-from sections.git_status import git_status_section_html
+from sections.git_status import collect_git_status, git_status_section_html
 from sections.health import health_section_html
 from sections.usage import usage_section_html, gateway_traffic_section_html
 from sections.llms_cloud import llm_section_html, cloud_section_html, cost_tracking_placeholder_section_html
@@ -486,6 +486,22 @@ window.addEventListener('hashchange', function(){{ sbnavApplyHash(); }});
             "failUnder": float(fail_u) if (fail_u    is not None and fail_u   == fail_u)   else None,
         })
 
+    # collect_git_status() was already run once above for gitstatus_html;
+    # re-running it here (rather than threading its result through) keeps
+    # this JSON block symmetric with projects_json/languages_json/
+    # coverage_json, each of which re-derives from its own already-computed
+    # input above -- the scan itself is a few seconds across ~35 local
+    # repos, not worth the extra plumbing to avoid.
+    git_status_json = [
+        {
+            "repo": r["repo"], "branch": r["branch"], "nonMain": r["non_main"],
+            "clean": r["clean"], "modified": r["modified"],
+            "untracked": r["untracked"], "unpushed": r["unpushed"],
+            "details": r["details"],
+        }
+        for r in collect_git_status(ecosystem_root)
+    ]
+
     json_out = out_html.with_name("report_data.json")
     json_out.write_text(json.dumps({
         "generated_at": timestamp,
@@ -493,6 +509,7 @@ window.addEventListener('hashchange', function(){{ sbnavApplyHash(); }});
         "projects":  projects_json,
         "languages": languages_json,
         "coverage":  coverage_json,
+        "gitStatus": git_status_json,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
