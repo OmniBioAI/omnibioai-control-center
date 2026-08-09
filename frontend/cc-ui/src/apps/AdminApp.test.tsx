@@ -100,6 +100,8 @@ vi.mock('../pages/identity/ServiceAccountsPage', () => ({
 }))
 // PR11.4b.
 vi.mock('../pages/audit/AuditLogsPage', () => ({ default: () => <div data-testid="AuditLogsPage" /> }))
+// PR-C (Control Center Sessions Integration).
+vi.mock('../pages/security/SessionsPage', () => ({ default: () => <div data-testid="SessionsPage" /> }))
 // PR14.5C.
 vi.mock('../pages/billing/BillingPage', () => ({
   default: ({ orgId }: { orgId: number }) => <div data-testid="BillingPage" data-org-id={orgId} />,
@@ -331,7 +333,7 @@ describe('AdminApp auth gate', () => {
 
   // ── Phase 2: new shell-specific coverage ──────────────────────────────────
 
-  it('renders Coming Soon for an unimplemented module (e.g. Sessions)', async () => {
+  it('renders Coming Soon for an unimplemented module (e.g. Integrations)', async () => {
     vi.mocked(auth.getToken).mockReturnValue('token-admin5')
     vi.mocked(auth.ensureSession).mockResolvedValue(admin)
     vi.mocked(auth.getSessionUser).mockReturnValue(admin)
@@ -344,13 +346,13 @@ describe('AdminApp auth gate', () => {
     // Billing was this module until PR14.5C activated it, then
     // Licenses/Usage stood in until PR B removed both nav items
     // entirely, then Settings stood in until PR E1 (Admin Settings
-    // integration) activated it too -- reusing omnibioai-auth's own
-    // GET /auth/config, per PR D's discovery that a real backend for it
-    // already existed with no UI anywhere (see
-    // docs/pr-d-admin-placeholder-audit.md §3.4). Sessions has no
-    // backend anywhere in the ecosystem (PR D §3.1) and stands in now --
-    // update this test's example again if that ever changes.
-    clickNav('Sessions')
+    // integration) activated it too, then Sessions stood in until PR-C
+    // (Control Center Sessions Integration) activated it, reusing
+    // omnibioai-auth's own self-service /sessions endpoints (Phase 4
+    // PR-A). Integrations has no backend anywhere in the ecosystem and
+    // stands in now -- update this test's example again if that ever
+    // changes.
+    clickNav('Integrations')
 
     expect(await screen.findByText('Coming soon')).toBeInTheDocument()
   })
@@ -677,6 +679,51 @@ describe('AdminApp auth gate', () => {
 
     expect(await screen.findByTestId('AuditLogsPage')).toBeInTheDocument()
     expect(screen.queryByText('Coming soon')).not.toBeInTheDocument()
+  })
+
+  // ── PR-C (Control Center Sessions Integration) ────────────────────────
+
+  it('reaches Sessions via the sidebar, no longer Coming Soon', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-sessions1')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    clickNav('Sessions')
+
+    expect(await screen.findByTestId('SessionsPage')).toBeInTheDocument()
+    expect(screen.queryByText('Coming soon')).not.toBeInTheDocument()
+  })
+
+  it('offers Sessions to an org-only user with no global admin role (self-service, not platform-admin-gated)', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-sessions2')
+    vi.mocked(auth.ensureSession).mockResolvedValue(orgOnlyUser)
+    vi.mocked(auth.getSessionUser).mockReturnValue(orgOnlyUser)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(false)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    clickNav('Sessions')
+    expect(await screen.findByTestId('SessionsPage')).toBeInTheDocument()
+  })
+
+  it('shows exactly one Sessions navigation entry in the sidebar (no duplicate)', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-sessions3')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    expect(screen.getAllByText('Sessions')).toHaveLength(1)
   })
 
   it('signing out via the profile menu returns to the login screen', async () => {

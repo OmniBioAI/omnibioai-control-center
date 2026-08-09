@@ -16,6 +16,16 @@ interface Props {
 const KNOWN: Record<string, { bg: string; color: string }> = {
   active: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
   suspended: { bg: 'var(--red-bg)', color: 'var(--red)' },
+  // PR-C (Control Center Sessions Integration): 'revoked' is the same
+  // "blocked/terminated" semantic 'suspended' already renders (same
+  // red), just a different word for a session instead of an
+  // organization/user -- not a new visual language. 'expired' is a
+  // passive, non-actioned outcome (nobody blocked it, it just aged
+  // out), rendered amber like every other "needs attention but not a
+  // hard failure" state elsewhere in this app (WorkflowsPage.tsx's
+  // banner, SubscriptionPage.tsx's own 'suspended' variant).
+  revoked: { bg: 'var(--red-bg)', color: 'var(--red)' },
+  expired: { bg: 'var(--amber-bg)', color: 'var(--amber)' },
 }
 
 export default function StatusBadge({ status }: Props) {
