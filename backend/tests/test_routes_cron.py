@@ -70,8 +70,10 @@ class TestCronJobsRoute(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
 
     def test_returns_all_jobs(self) -> None:
+        # 16, not 15 -- coverage-ondemand-watcher (cron_jobs.py) is a new
+        # entry, the host-side half of POST /coverage/ecosystem/generate.
         data = client.get("/cron/jobs").json()
-        self.assertEqual(len(data["jobs"]), 15)
+        self.assertEqual(len(data["jobs"]), 16)
 
     def test_uses_workspace_root_env_var(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

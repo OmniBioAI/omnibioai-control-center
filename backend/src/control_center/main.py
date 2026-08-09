@@ -762,6 +762,92 @@ def coverage_status() -> JSONResponse:
     return JSONResponse(state)
 
 
+# ==============================================================================
+# Coverage collection — full ecosystem, on demand (host-triggered)
+# ==============================================================================
+#
+# Distinct from /coverage/generate above, which stays exactly as-is:
+# in-container, self-scoped to omnibioai-control-center only, since that's
+# the one repo this container can honestly test itself (see that
+# section's own comment). These two endpoints trigger the FULL,
+# unscoped run_coverage_host.py run across every tracked repo -- the
+# same script, the same scope, as the existing "coverage-nightly" host
+# crontab job (cron_jobs.py's CRON_JOBS list), just on demand instead of
+# only at 2am.
+#
+# This container can't run that itself -- run_coverage_host.py's own
+# docstring: it must run on the host because it needs every repo's own
+# Python deps already installed, which only the host has; none of this
+# ecosystem's ~17 other service containers have pytest installed at all
+# (confirmed live), and the script invokes `sys.executable -m pytest`,
+# i.e. whichever interpreter runs it, not a per-repo venv. So instead of
+# running it directly, these just drop/read a trigger file on the
+# /workspace mount already shared with the host.
+# scripts/coverage_ondemand_watcher.py, cron-invoked every minute on the
+# host (registered as its own entry in cron_jobs.py's CRON_JOBS list --
+# same mechanism, same file, as every other job there, not a new
+# artifact), picks up the trigger, runs run_coverage_host.py, and writes
+# the result back to the same mount. See that script's own docstring for
+# the full trigger/running/result.json protocol.
+
+_COVERAGE_ONDEMAND_DIR = _workspace_root() / "omnibioai-work" / "out" / "coverage" / ".ondemand"
+_COVERAGE_ONDEMAND_TRIGGER = _COVERAGE_ONDEMAND_DIR / "trigger"
+_COVERAGE_ONDEMAND_RUNNING = _COVERAGE_ONDEMAND_DIR / "running"
+_COVERAGE_ONDEMAND_RESULT = _COVERAGE_ONDEMAND_DIR / "result.json"
+
+
+@app.post("/coverage/ecosystem/generate")
+def coverage_ecosystem_generate(_admin: dict = Depends(require_permission("platform.manage_content"))) -> JSONResponse:
+    """Requests a full-ecosystem coverage run (every tracked repo, not
+    just this one) -- see module comment above for why this drops a
+    trigger file instead of running run_coverage_host.py directly.
+    Returns 409 if a run is already pending pickup or already in
+    flight."""
+    log.info("coverage_ecosystem_generate_requested")
+    _COVERAGE_ONDEMAND_DIR.mkdir(parents=True, exist_ok=True)
+    if _COVERAGE_ONDEMAND_TRIGGER.exists() or _COVERAGE_ONDEMAND_RUNNING.exists():
+        return JSONResponse({"error": "Coverage collection already in progress"}, status_code=409)
+    _COVERAGE_ONDEMAND_TRIGGER.write_text(datetime.now(timezone.utc).isoformat())
+    return JSONResponse({"status": "started"})
+
+
+@app.get("/coverage/ecosystem/status")
+def coverage_ecosystem_status() -> JSONResponse:
+    """Poll job state -- synthesized from the trigger/running/result.json
+    files coverage_ondemand_watcher.py reads/writes on the host, into
+    the same {status, started_at, finished_at, message} shape
+    /report/status's in-process _JobState already produces, so the
+    frontend polls this exactly like that one -- no new frontend
+    pattern needed for this endpoint pair."""
+    if _COVERAGE_ONDEMAND_RUNNING.exists():
+        started = datetime.fromtimestamp(_COVERAGE_ONDEMAND_RUNNING.stat().st_mtime, tz=timezone.utc).isoformat()
+        return JSONResponse({
+            "status": "running", "started_at": started, "finished_at": None,
+            "message": "Collecting coverage…",
+        })
+    if _COVERAGE_ONDEMAND_TRIGGER.exists():
+        # Requested but not yet picked up by the host watcher -- up to
+        # ~1 minute, since it's cron-invoked every minute, not a
+        # standing process.
+        started = datetime.fromtimestamp(_COVERAGE_ONDEMAND_TRIGGER.stat().st_mtime, tz=timezone.utc).isoformat()
+        return JSONResponse({
+            "status": "running", "started_at": started, "finished_at": None,
+            "message": "Waiting for host watcher (runs every minute)…",
+        })
+    if _COVERAGE_ONDEMAND_RESULT.exists():
+        try:
+            result = _json_mod.loads(_COVERAGE_ONDEMAND_RESULT.read_text())
+        except Exception:
+            result = {}
+        return JSONResponse({
+            "status": result.get("status", "idle"),
+            "started_at": None,
+            "finished_at": result.get("finished_at"),
+            "message": result.get("message", ""),
+        })
+    return JSONResponse({"status": "idle", "started_at": None, "finished_at": None, "message": ""})
+
+
 @app.get("/report/data")
 def report_data() -> JSONResponse:
     """Return structured JSON data for the React frontend (projects, languages, coverage)."""

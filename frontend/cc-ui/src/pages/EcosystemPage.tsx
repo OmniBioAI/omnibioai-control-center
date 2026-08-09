@@ -3,7 +3,10 @@ import {
   PieChart, Pie, Cell, Tooltip,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer,
 } from 'recharts'
-import { fetchSummary, fetchReportData, fetchReportStatus, triggerGenerate } from '../api'
+import {
+  fetchSummary, fetchReportData, fetchReportStatus, triggerGenerate,
+  fetchCoverageEcosystemStatus, triggerCoverageEcosystem,
+} from '../api'
 import type { SummaryResponse, ServiceResult, DiskResult, ReportData } from '../api'
 
 // ── Dark theme tokens ──────────────────────────────────────────────────────────
@@ -702,9 +705,50 @@ function covColor(pct: number | null) {
   return pct >= 95 ? C.green : pct >= 85 ? C.amber : C.red
 }
 
-function CoverageTab({ data }: { data: ReportData }) {
+function CoverageTab({ data, onCollected }: { data: ReportData; onCollected: () => void }) {
   const { coverage } = data
   const tbl = useTable(coverage as unknown as Record<string, unknown>[], 'pct')
+
+  // Full-ecosystem coverage collection, host-triggered (see api.ts's
+  // triggerCoverageEcosystem/fetchCoverageEcosystemStatus docstring for
+  // why this needs a host round-trip control-center's own backend
+  // container can't perform itself). Local to this tab, not lifted to
+  // EcosystemPage's own generating/progressMsg/pollStatus -- that state
+  // is for the report generation job, an entirely separate backend job
+  // this one deliberately doesn't share, even though both poll the same
+  // way.
+  const [collecting, setCollecting] = useState(false)
+  const [collectMsg, setCollectMsg] = useState('')
+
+  const pollCoverageStatus = useCallback(async () => {
+    try {
+      const s = await fetchCoverageEcosystemStatus()
+      if (s.status === 'running') {
+        setCollecting(true)
+        setCollectMsg(s.message || 'Collecting coverage…')
+        setTimeout(pollCoverageStatus, 3000)
+      } else if (s.status === 'error') {
+        setCollecting(false)
+        setCollectMsg(`Error: ${s.message}`)
+      } else if (s.status === 'done') {
+        setCollecting(false)
+        setCollectMsg('Done')
+        onCollected()
+      } else {
+        setCollecting(false)
+        setCollectMsg('')
+      }
+    } catch { /* ignore */ }
+  }, [onCollected])
+
+  const handleCollect = async () => {
+    try {
+      await triggerCoverageEcosystem()
+      setCollecting(true)
+      setCollectMsg('Requested — picked up by the host watcher within a minute…')
+      setTimeout(pollCoverageStatus, 3000)
+    } catch { /* ignore */ }
+  }
 
   const filtered = useMemo(() => {
     let d = (coverage as unknown as Record<string, unknown>[]).slice()
@@ -757,6 +801,22 @@ function CoverageTab({ data }: { data: ReportData }) {
 
   return (
     <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, marginBottom: 12 }}>
+        {collectMsg && (
+          <span style={{ fontSize: 11, color: collectMsg.startsWith('Error') ? C.red : C.muted }}>{collectMsg}</span>
+        )}
+        <button
+          onClick={handleCollect}
+          disabled={collecting}
+          style={{
+            fontSize: 12, fontWeight: 600, padding: '7px 14px', border: `1px solid ${C.teal}`,
+            borderRadius: 8, background: collecting ? C.surface : C.teal, color: collecting ? C.teal : '#000',
+            cursor: collecting ? 'not-allowed' : 'pointer', opacity: collecting ? 0.7 : 1,
+          }}
+        >
+          {collecting ? 'Collecting…' : '⊕ Generate Coverage'}
+        </button>
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 16 }}>
         <KpiCard label="repos scanned" value={coverage.length} sub="full ecosystem" />
         <KpiCard label="with data" value={withData.length} sub="coverage collected" />
@@ -1232,7 +1292,19 @@ export default function EcosystemPage({ refreshKey }: { refreshKey: number }) {
   const needsReport = (subTab === 'projects' || subTab === 'languages' || subTab === 'coverage' || subTab === 'gitStatus') && !reportData
 
   return (
-    <div style={{ background: C.bg, borderRadius: 14, padding: 20, margin: '-24px -28px -48px', minHeight: 'calc(100vh - 100px)', color: C.text }}>
+    // No negative margin here (this page used to carry `margin: '-24px
+    // -28px -48px'`) -- it was presumably meant to cancel some parent
+    // padding, but nothing in the actual AppShell/renderPage chain has
+    // any: every other page's content starts flush at the sidebar's
+    // right edge (x = sidebar width, confirmed by measuring the live
+    // DOM) with zero extra gutter, relying only on its own interior
+    // padding for spacing, same as this div's own `padding: 20` below.
+    // The negative margin shifted this div 28px further left than that
+    // baseline, and its own 20px padding only clawed back 20 of those
+    // 28 -- a net 8px past the sidebar boundary, clipping the leading
+    // edge of "Ecosystem Report"/"Architecture overview..." on every
+    // sub-tab of this page (they all share this one wrapper).
+    <div style={{ background: C.bg, borderRadius: 14, padding: 20, minHeight: 'calc(100vh - 100px)', color: C.text }}>
       {/* Hero */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 20, paddingBottom: 16, borderBottom: `1px solid ${C.border}` }}>
         <div>
@@ -1280,7 +1352,7 @@ export default function EcosystemPage({ refreshKey }: { refreshKey: number }) {
       {needsReport && <GenerateCta onGenerate={handleGenerate} generating={generating} />}
       {!needsReport && subTab === 'projects'  && reportData && <ProjectsTab data={reportData} />}
       {!needsReport && subTab === 'languages' && reportData && <LanguagesTab data={reportData} />}
-      {!needsReport && subTab === 'coverage'  && reportData && <CoverageTab data={reportData} />}
+      {!needsReport && subTab === 'coverage'  && reportData && <CoverageTab data={reportData} onCollected={loadData} />}
       {!needsReport && subTab === 'gitStatus' && reportData && <GitStatusTab data={reportData} />}
     </div>
   )

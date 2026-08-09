@@ -121,6 +121,21 @@ CRON_JOBS: list[dict[str, str]] = [
         "script_path": "omnibioai-utils/check_plugin_image_sync.sh",
         "log_path": "work/backups/omnibioai-plugin-sync-check.log",
     },
+    {
+        # Every-minute poller, not a once-a-day job like everything else
+        # on this list -- picks up the trigger file
+        # POST /coverage/ecosystem/generate writes on the shared
+        # /workspace mount and runs run_coverage_host.py (the same
+        # script "coverage-nightly" above runs on its own 2am schedule)
+        # on demand instead of only then. See
+        # scripts/coverage_ondemand_watcher.py's own docstring for the
+        # full trigger/running/result.json protocol.
+        "id": "coverage-ondemand-watcher",
+        "name": "Coverage Collection (On-Demand Watcher)",
+        "schedule": "* * * * *",
+        "script_path": "omnibioai-control-center/scripts/coverage_ondemand_watcher.py",
+        "log_path": "work/backups/omnibioai-coverage-ondemand.log",
+    },
 ]
 
 _TAIL_LINES = 40

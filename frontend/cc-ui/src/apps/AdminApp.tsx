@@ -162,7 +162,6 @@ function AdminDashboard() {
   // separate fetch or local "logged in as" state needed here.
   const user = getSessionUser()
   const [overallStatus, setOverallStatus] = useState<'UP' | 'WARN' | 'DOWN' | null>(null)
-  const [reportExists, setReportExists] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
 
@@ -183,7 +182,6 @@ function AdminDashboard() {
     if (!canSeeOps) return
     try {
       const s = await fetchReportStatus()
-      setReportExists(s.report_exists)
       if (s.status === 'running') {
         setGenerating(true)
         setTimeout(pollReport, 2000)
@@ -313,7 +311,6 @@ function AdminDashboard() {
         <StatusAndReportActions
           status={overallStatus}
           generating={generating}
-          reportExists={reportExists}
           onRefresh={() => setRefreshKey(k => k + 1)}
           onGenerate={handleGenerate}
         />
@@ -538,11 +535,10 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
  * bumps the same refreshKey every ops page's own fetch effect already
  * depended on before Phase 2. */
 function StatusAndReportActions({
-  status, generating, reportExists, onRefresh, onGenerate,
+  status, generating, onRefresh, onGenerate,
 }: {
   status: 'UP' | 'WARN' | 'DOWN' | null
   generating: boolean
-  reportExists: boolean
   onRefresh: () => void
   onGenerate: () => void
 }) {
@@ -584,16 +580,6 @@ function StatusAndReportActions({
       >
         {generating ? 'Generating…' : '⊕ Generate Report'}
       </button>
-      {reportExists && (
-        <a
-          href="/"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ fontSize: 12, fontWeight: 600, color: 'var(--accent)' }}
-        >
-          View Report ↗
-        </a>
-      )}
     </>
   )
 }

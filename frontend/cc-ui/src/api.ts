@@ -157,6 +157,34 @@ export async function triggerGenerate(): Promise<void> {
   if (!r.ok && r.status !== 409) throw new Error(`/report/generate ${r.status}`)
 }
 
+// Full-ecosystem coverage collection, host-triggered -- distinct from
+// the report generation above. control-center's backend runs in a
+// container and can't run scripts/run_coverage_host.py itself (needs
+// every repo's deps already installed on the host); POST .../generate
+// just drops a trigger file the host-side coverage_ondemand_watcher.py
+// (cron-invoked every minute) picks up and runs. Same
+// {status, started_at, finished_at, message} shape ReportStatus above
+// already has, minus the report_exists/report_generated_at fields that
+// were specific to that endpoint -- so the polling logic below mirrors
+// pollReport's shape exactly.
+export interface CoverageEcosystemStatus {
+  status: 'idle' | 'running' | 'done' | 'error'
+  started_at: string | null
+  finished_at: string | null
+  message: string
+}
+
+export async function fetchCoverageEcosystemStatus(): Promise<CoverageEcosystemStatus> {
+  const r = await apiFetch(`${BASE}/coverage/ecosystem/status`)
+  if (!r.ok) throw new Error(`/coverage/ecosystem/status ${r.status}`)
+  return r.json()
+}
+
+export async function triggerCoverageEcosystem(): Promise<void> {
+  const r = await apiFetch(`${BASE}/coverage/ecosystem/generate`, { method: 'POST' })
+  if (!r.ok && r.status !== 409) throw new Error(`/coverage/ecosystem/generate ${r.status}`)
+}
+
 export async function addService(name: string, type: string, url: string): Promise<void> {
   const r = await apiFetch(`${BASE}/config/service`, {
     method: 'POST',
