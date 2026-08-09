@@ -118,7 +118,12 @@ export default function SidebarNav({ active, onNavigate, mobileOpen, onCloseMobi
           </div>
         </div>
 
-        <nav style={{ flex: 1, overflowY: 'auto', paddingBottom: 12 }}>
+        {/* minHeight: 0 overrides the flex-item default of min-height: auto --
+            without it, this column-flex child refuses to shrink below its own
+            content's natural height, so overflowY never actually engages and
+            the nav list just overflows aside's fixed 100vh box instead of
+            scrolling internally. */}
+        <nav style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingBottom: 12 }}>
           {NAVIGATION.map(section => {
             const visibleItems = section.items.filter(isNavItemVisible)
             if (visibleItems.length === 0) return null

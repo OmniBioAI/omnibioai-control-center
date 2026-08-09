@@ -1240,22 +1240,19 @@ export default function EcosystemPage({ refreshKey }: { refreshKey: number }) {
           <p style={{ fontSize: 13, color: C.muted }}>Architecture overview and project health metrics</p>
           {lastGen && <p style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>Last generated: {new Date(lastGen).toLocaleString()}</p>}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-          {progressMsg && <span style={{ fontSize: 11, color: generating ? C.muted : C.red }}>{progressMsg}</span>}
-          <button
-            onClick={handleGenerate}
-            disabled={generating}
-            style={{
-              fontSize: 12, fontWeight: 600, padding: '7px 16px', border: `1px solid ${C.teal}`,
-              borderRadius: 8, background: generating ? C.surface : C.teal, color: generating ? C.teal : '#000',
-              cursor: generating ? 'not-allowed' : 'pointer', opacity: generating ? 0.7 : 1,
-              display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s',
-            }}
-          >
-            {generating && <span style={{ width: 11, height: 11, border: `2px solid ${C.teal}55`, borderTopColor: C.teal, borderRadius: '50%', animation: 'spin 0.8s linear infinite', display: 'inline-block', flexShrink: 0 }} />}
-            {generating ? 'Generating…' : '⊕ Generate Report'}
-          </button>
-        </div>
+        {/* The Generate Report button that used to live here was removed --
+            AppShell's TopAppBar extraActions slot (AdminApp.tsx's
+            StatusAndReportActions) already renders one globally, on every
+            page, via its own independent generating/handleGenerate state.
+            Having both meant two unsynchronized controls for the same
+            triggerGenerate() action visible at once on this page. This
+            page's own generating/handleGenerate/progressMsg state is kept
+            -- GenerateCta's empty-state button below still needs it. */}
+        {progressMsg && (
+          <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+            <span style={{ fontSize: 11, color: generating ? C.muted : C.red }}>{progressMsg}</span>
+          </div>
+        )}
       </div>
 
       {/* Sub-tab bar */}
