@@ -30,6 +30,7 @@ import SSOSettingsPage from '../pages/identity/SSOSettingsPage'
 import ServiceAccountsPage from '../pages/identity/ServiceAccountsPage'
 import BillingPage from '../pages/billing/BillingPage'
 import AuditLogsPage from '../pages/audit/AuditLogsPage'
+import SessionsPage from '../pages/security/SessionsPage'
 import SecurityDashboardPage from '../pages/security/SecurityDashboardPage'
 import OrganizationMFAPolicyPage from '../pages/security/OrganizationMFAPolicyPage'
 import AuthGate from './AuthGate'
@@ -430,6 +431,14 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
     case 'audit-logs':
       if (!ctx.canSeeAuditLogs) return null
       return <AuditLogsPage />
+
+    // PR-C: self-service, flat, no org-picker/deep-link and no gate --
+    // same shape as 'overview' above (no `ctx.canSeeX` check either).
+    // omnibioai-auth's GET /sessions already scopes every response to
+    // the caller's own account server-side; there is no separate
+    // permission this gate could usefully stand in front of.
+    case 'sessions':
+      return <SessionsPage />
 
     // PR11.2: same gate as 'organizations' -- see navigation.ts.
     case 'teams':

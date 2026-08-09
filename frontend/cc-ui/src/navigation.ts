@@ -187,7 +187,16 @@ export const NAVIGATION: NavSection[] = [
       // only thing that matters for security; this only decides
       // whether the nav entry renders.
       { key: 'audit-logs', label: 'Audit Logs', functional: true, visible: hasPlatformAdminAccess },
-      { key: 'sessions', label: 'Sessions', functional: false },
+      // PR-C (Control Center Sessions Integration): promoted from Coming
+      // Soon to a real page (SessionsPage). Unlike 'audit-logs' above
+      // (platform-admin-only backend data), this is self-service --
+      // omnibioai-auth's GET /sessions (Phase 4 PR-A) scopes every
+      // response to the caller's own `sub` claim server-side, there is
+      // no separate permission to gate here. No `visible` at all,
+      // same as 'overview' -- anyone who reached this console
+      // (hasConsoleAccess in AdminApp.tsx) already has an account whose
+      // own sessions are meaningfully theirs to see.
+      { key: 'sessions', label: 'Sessions', functional: true },
       // PR11.4: Service Accounts & API Keys Management UI. functional:
       // true because a real page now exists (ServiceAccountsPage,
       // reached via an organization picker -- API keys/OAuth clients

@@ -47,6 +47,13 @@ export default defineConfig({
       // control-center's own backend (routes_billing_proxy.py) to reach
       // omnibioai-billing, same reasoning as every entry above.
       '/billing': { target: 'http://localhost:7070', changeOrigin: true },
+      // PR-C -- Sessions page (SessionsPage.tsx), proxied through
+      // control-center's own backend (routes_sessions_proxy.py) to
+      // omnibioai-auth's self-service /sessions endpoints, same
+      // reasoning as every entry above. Same production nginx gap class
+      // PR13's/PR E's own comments here already warned about if this
+      // entry were skipped.
+      '/sessions': { target: 'http://localhost:7070', changeOrigin: true },
       // PR E (Admin Console Production Hardening) -- PR A1-A4 added
       // these four routers (routes_tes_proxy.py, routes_model_registry_
       // proxy.py, routes_workflow_bundles_proxy.py, routes_rag_proxy.py)
