@@ -74,7 +74,15 @@ async def _proxy(path: str, request: Request, *, use_service_key: bool) -> JSONR
             headers["Authorization"] = auth_header
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        # /rag/studies specifically: RAG now caches this response (see
+        # ragbio/cache/redis_cache.py's get_studies/set_studies), but a
+        # cache miss (first call, or once per RAG_CACHE_TTL/1h window)
+        # still takes RAG's own observed ~11s to scan its abstract
+        # store -- the previous 10s timeout here 503'd that call
+        # outright even though RAG would have answered a second later.
+        # 20s gives that cold path real margin without the request
+        # hanging indefinitely if RAG is genuinely down.
+        async with httpx.AsyncClient(timeout=20) as client:
             r = await client.get(
                 f"{RAG_URL}{path}",
                 params=request.query_params,
