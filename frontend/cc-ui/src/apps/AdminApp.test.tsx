@@ -876,4 +876,51 @@ describe('AdminApp auth gate', () => {
     fireEvent.click(screen.getByText('View all teams'))
     expect(await screen.findByTestId('TeamsPage')).toHaveAttribute('data-initial-org-id', '42')
   })
+
+  // ── PR-B7 (Infrastructure parent navigation) ────────────────────────────
+  // 'infrastructure' (navigation.ts) is a group -- it has `children`, not a
+  // page of its own -- so renderPage() only has cases for its six children
+  // (Health/Docker/Ecosystem Report/Config/LLMs/Cloud), none for
+  // 'infrastructure' itself. Before this fix, clicking the parent row set
+  // active = 'infrastructure', which fell through to the default case and
+  // rendered <ComingSoon title="Infrastructure" />, same as any genuinely
+  // unbuilt module. SidebarNav.test.tsx covers the component-level fix
+  // (the parent row no longer calls onNavigate); this covers the same
+  // scenario end-to-end through AdminApp, which is what actually renders
+  // ComingSoon.
+
+  it('does not show Coming Soon when the Infrastructure parent is clicked, and stays on the current page', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-infra1')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    clickNav('Infrastructure')
+
+    expect(screen.queryByText('Coming soon')).not.toBeInTheDocument()
+    // The group parent isn't a destination -- Overview (DashboardPage) is
+    // still the active page, nothing navigated away from it.
+    expect(screen.getByTestId('DashboardPage')).toBeInTheDocument()
+  })
+
+  it('still reaches an Infrastructure child after clicking the inert parent first', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-infra2')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    clickNav('Infrastructure')
+    clickNav('Docker')
+
+    expect(await screen.findByTestId('DockerPage')).toBeInTheDocument()
+    expect(screen.queryByText('Coming soon')).not.toBeInTheDocument()
+  })
 })

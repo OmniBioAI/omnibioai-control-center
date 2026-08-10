@@ -50,9 +50,18 @@ function NavRow({ item, active, onNavigate, depth }: {
 }) {
   const Icon = ICONS[item.key]
   const isActive = item.key === active
+  // PR-B7: a parent with `children` (today, only 'infrastructure') is a
+  // navigation group, not a destination -- it has no page of its own in
+  // AdminApp.tsx's renderPage(), so navigating to it fell through to the
+  // generic default case and rendered <ComingSoon />. Its children (Health,
+  // Docker, ...) are rendered as their own sibling NavRows right below it
+  // and stay independently clickable; only the group row itself becomes a
+  // non-navigating label here.
+  const isGroup = Boolean(item.children?.length)
   return (
     <button
-      onClick={() => onNavigate(item.key)}
+      onClick={isGroup ? undefined : () => onNavigate(item.key)}
+      aria-disabled={isGroup || undefined}
       style={{
         display: 'flex', alignItems: 'center', gap: 9,
         width: '100%', textAlign: 'left',
@@ -61,6 +70,7 @@ function NavRow({ item, active, onNavigate, depth }: {
         color: isActive ? 'var(--accent)' : 'var(--text2)',
         background: isActive ? 'var(--accent-dim)' : 'transparent',
         borderLeft: isActive ? '3px solid var(--accent)' : '3px solid transparent',
+        cursor: isGroup ? 'default' : 'pointer',
       }}
     >
       {!depth && Icon && <Icon size={15} />}
