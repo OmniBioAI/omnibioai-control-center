@@ -45,6 +45,7 @@ vi.mock('../pages/EcosystemPage', () => ({ default: () => <div data-testid="Ecos
 vi.mock('../pages/ConfigPage', () => ({ default: () => <div data-testid="ConfigPage" /> }))
 vi.mock('../pages/LlmPage', () => ({ default: () => <div data-testid="LlmPage" /> }))
 vi.mock('../pages/CloudPage', () => ({ default: () => <div data-testid="CloudPage" /> }))
+vi.mock('../pages/IntegrationsPage', () => ({ default: () => <div data-testid="IntegrationsPage" /> }))
 // OrganizationsPage's onSelect is exercised (not just its presence) --
 // PR11.3 reuses this exact component as the org picker for the 'iam'
 // destination, and PR11.4 for 'api-keys' too, so the mock exposes a
@@ -334,8 +335,25 @@ describe('AdminApp auth gate', () => {
 
   // ── Phase 2: new shell-specific coverage ──────────────────────────────────
 
-  it('renders Coming Soon for an unimplemented module (e.g. Integrations)', async () => {
-    vi.mocked(auth.getToken).mockReturnValue('token-admin5')
+  // Billing was the "unimplemented module" example here until PR14.5C
+  // activated it, then Licenses/Usage stood in until PR B removed both
+  // nav items entirely, then Settings stood in until PR E1 (Admin
+  // Settings integration) activated it too, then Sessions stood in
+  // until PR-C activated it, then Integrations stood in until this PR
+  // (PR-B6) activated it -- reusing control-center's own new GET
+  // /integrations (routes_integrations.py), env-var-derived status for
+  // the three third-party integrations discovery found evidence for.
+  // As of this PR, navigation.ts has no remaining `functional: false`
+  // entry -- there is no real nav item left to demonstrate the
+  // ComingSoon fallback with; AdminApp.tsx's own `default:` switch case
+  // stays in place for a future placeholder, untested here for the same
+  // reason it was untestable-via-a-real-item before Billing/Settings/
+  // Sessions/Integrations were each, in turn, the one example available.
+
+  // ── PR-B6 (Control Center Integrations) ────────────────────────────────
+
+  it('shows the Integrations nav item for an admin user', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-integrations1')
     vi.mocked(auth.ensureSession).mockResolvedValue(admin)
     vi.mocked(auth.getSessionUser).mockReturnValue(admin)
     vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
@@ -344,18 +362,36 @@ describe('AdminApp auth gate', () => {
     render(<AdminApp />)
     await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
 
-    // Billing was this module until PR14.5C activated it, then
-    // Licenses/Usage stood in until PR B removed both nav items
-    // entirely, then Settings stood in until PR E1 (Admin Settings
-    // integration) activated it too, then Sessions stood in until PR-C
-    // (Control Center Sessions Integration) activated it, reusing
-    // omnibioai-auth's own self-service /sessions endpoints (Phase 4
-    // PR-A). Integrations has no backend anywhere in the ecosystem and
-    // stands in now -- update this test's example again if that ever
-    // changes.
+    expect(screen.getByText('Integrations')).toBeInTheDocument()
+  })
+
+  it('hides the Integrations nav item for a non-admin user, same gate as Cloud/Settings', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-integrations2')
+    vi.mocked(auth.ensureSession).mockResolvedValue(orgOnlyUser)
+    vi.mocked(auth.getSessionUser).mockReturnValue(orgOnlyUser)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(false)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    expect(screen.queryByText('Integrations')).not.toBeInTheDocument()
+  })
+
+  it('reaches Integrations via the sidebar, no longer Coming Soon', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-integrations3')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
     clickNav('Integrations')
 
-    expect(await screen.findByText('Coming soon')).toBeInTheDocument()
+    expect(await screen.findByTestId('IntegrationsPage')).toBeInTheDocument()
+    expect(screen.queryByText('Coming soon')).not.toBeInTheDocument()
   })
 
   // ── PR11.3: IAM / SSO Management nav item + routing ────────────────────

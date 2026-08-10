@@ -26,6 +26,15 @@ const KNOWN: Record<string, { bg: string; color: string }> = {
   // banner, SubscriptionPage.tsx's own 'suspended' variant).
   revoked: { bg: 'var(--red-bg)', color: 'var(--red)' },
   expired: { bg: 'var(--amber-bg)', color: 'var(--amber)' },
+  // PR-B6 (Integrations status): 'configured' is the same "present and
+  // working" semantic 'active' already renders (same green), just a
+  // different word for an env-var-derived integration than an
+  // organization/user/session. 'not_configured' is a neutral, non-
+  // actioned absence, not an error -- the same fallback color unknown
+  // statuses already get, made explicit here so it self-documents
+  // rather than relying on the KNOWN-miss fallback below.
+  configured: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
+  not_configured: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
 }
 
 export default function StatusBadge({ status }: Props) {

@@ -20,6 +20,7 @@ import AIModelsPage from '../pages/operations/AIModelsPage'
 import WorkflowsPage from '../pages/operations/WorkflowsPage'
 import RAGPage from '../pages/operations/RAGPage'
 import PlatformSettingsPage from '../pages/PlatformSettingsPage'
+import IntegrationsPage from '../pages/IntegrationsPage'
 import OrganizationsPage from '../pages/OrganizationsPage'
 import OrganizationDetailPage from '../pages/OrganizationDetailPage'
 import UsersPage from '../pages/UsersPage'
@@ -530,6 +531,12 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
       return ctx.selectedBillingOrgId != null
         ? <BillingPage orgId={ctx.selectedBillingOrgId} onBack={() => ctx.setSelectedBillingOrgId(null)} />
         : <OrganizationsPage onSelect={ctx.setSelectedBillingOrgId} />
+
+    // PR-B6: no org picker -- every integration this page reads is
+    // genuinely platform-wide (a deployment env var), not org-scoped.
+    // Same canSeeOps gate 'cloud'/'settings' above already use.
+    case 'integrations':
+      return ctx.canSeeOps ? <IntegrationsPage /> : null
 
     // PR E1: no org picker -- omnibioai-auth's GlobalConfig is
     // platform-wide, not org-scoped. Same canSeeOps gate the other

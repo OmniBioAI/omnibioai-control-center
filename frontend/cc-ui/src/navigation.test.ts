@@ -78,3 +78,45 @@ describe('navigation: Interactions placement', () => {
     expect(interactionsItem.children).toBeUndefined()
   })
 })
+
+// PR-B6. Same reasoning as the Sessions/Interactions blocks above.
+
+describe('navigation: Integrations placement', () => {
+  it('has exactly one "integrations" entry across the entire tree', () => {
+    const found: { sectionKey: string; parentKey?: string }[] = []
+    for (const section of NAVIGATION) {
+      for (const item of section.items) {
+        if (item.key === 'integrations') found.push({ sectionKey: section.key })
+        for (const child of item.children ?? []) {
+          if (child.key === 'integrations') found.push({ sectionKey: section.key, parentKey: item.key })
+        }
+      }
+    }
+    expect(found).toHaveLength(1)
+  })
+
+  it('places "integrations" under the Platform section, functional and hasAdminAccess-gated', () => {
+    const platformSection = NAVIGATION.find(s => s.key === 'platform')
+    expect(platformSection).toBeDefined()
+
+    const integrationsItem = platformSection!.items.find(i => i.key === 'integrations')
+    expect(integrationsItem).toBeDefined()
+    expect(integrationsItem!.functional).toBe(true)
+    // Same gate 'cloud'/'settings' use -- GET /integrations requires no
+    // permission at all upstream (see routes_integrations.py), so this
+    // gate is the only real access control this page has.
+    expect(integrationsItem!.visible).toBeDefined()
+  })
+
+  it('is a top-level Platform item alongside Settings, not nested under it', () => {
+    const platformSection = NAVIGATION.find(s => s.key === 'platform')!
+    const integrationsItem = platformSection.items.find(i => i.key === 'integrations')!
+    expect(integrationsItem.children).toBeUndefined()
+  })
+
+  it('no longer renders as Coming Soon', () => {
+    const platformSection = NAVIGATION.find(s => s.key === 'platform')!
+    const integrationsItem = platformSection.items.find(i => i.key === 'integrations')!
+    expect(integrationsItem.functional).not.toBe(false)
+  })
+})
