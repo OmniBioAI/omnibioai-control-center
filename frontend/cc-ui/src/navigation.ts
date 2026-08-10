@@ -305,7 +305,22 @@ export const NAVIGATION: NavSection[] = [
     key: 'platform',
     label: 'Platform',
     items: [
-      { key: 'integrations', label: 'Integrations', functional: false },
+      // PR-B6: functional: true because a real page now exists
+      // (IntegrationsPage, reusing control-center's own new GET
+      // /integrations -- routes_integrations.py, env-var-derived
+      // status for the three third-party integrations discovery found
+      // actual evidence for: Sentry and the two Discord webhook
+      // targets. Same hasAdminAccess() gate 'cloud'/'rag'/'settings'
+      // above already use -- this only decides whether the nav entry
+      // renders; GET /integrations requires no permission at all
+      // upstream (same posture as GET /cloud), so this gate is the
+      // only real access control this page has, not a visibility layer
+      // in front of a separate backend check. Deliberately does not
+      // cover GlobalConfig's LLM/cloud provider (already the Settings
+      // page below) or compute backends (already the Cloud page) --
+      // building either here would duplicate an existing page, the
+      // same failure mode PR B avoided for Licenses/Usage.
+      { key: 'integrations', label: 'Integrations', functional: true, visible: hasAdminAccess },
       // PR E1: Admin Settings integration. functional: true because a
       // real page now exists (PlatformSettingsPage), reusing
       // omnibioai-auth's own GET /auth/config (GlobalConfig -- no

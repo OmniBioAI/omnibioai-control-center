@@ -50,6 +50,7 @@ from control_center.api.routes_rag_proxy import router as rag_proxy_router
 from control_center.api.routes_platform_config_proxy import router as platform_config_proxy_router
 from control_center.api.routes_platform_interactions_proxy import router as platform_interactions_proxy_router
 from control_center.api.routes_cloud import router as cloud_router
+from control_center.api.routes_integrations import router as integrations_router
 from control_center.core.auth import require_permission
 from control_center.api.routes_config import router as config_router
 from control_center.api.routes_cron import router as cron_router
@@ -149,6 +150,10 @@ app.include_router(known_issues_router)
 app.include_router(llm_router)
 app.include_router(infra_router)
 app.include_router(cloud_router)
+# PR-B6: same ungated posture as cloud_router directly above -- see
+# routes_integrations.py's own module comment for why (booleans/labels
+# only, no internal topology, no credential values).
+app.include_router(integrations_router)
 app.include_router(reference_router)
 app.include_router(router_storage)
 app.include_router(auth_proxy_router)
