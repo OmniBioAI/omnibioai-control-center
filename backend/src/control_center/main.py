@@ -48,6 +48,7 @@ from control_center.api.routes_model_registry_proxy import router as model_regis
 from control_center.api.routes_workflow_bundles_proxy import router as workflow_bundles_proxy_router
 from control_center.api.routes_rag_proxy import router as rag_proxy_router
 from control_center.api.routes_platform_config_proxy import router as platform_config_proxy_router
+from control_center.api.routes_platform_interactions_proxy import router as platform_interactions_proxy_router
 from control_center.api.routes_cloud import router as cloud_router
 from control_center.core.auth import require_permission
 from control_center.api.routes_config import router as config_router
@@ -166,6 +167,7 @@ app.include_router(model_registry_proxy_router)
 app.include_router(workflow_bundles_proxy_router)
 app.include_router(rag_proxy_router)
 app.include_router(platform_config_proxy_router)
+app.include_router(platform_interactions_proxy_router)
 # No blanket permission dependency here, unlike summary/docker/config/
 # services above -- routes_dashboard.py's own docstring explains why:
 # each section of its one response is authorized independently, either

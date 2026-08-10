@@ -25,7 +25,7 @@ export type PageKey =
   | 'health' | 'docker' | 'ecosystem' | 'config' | 'llms' | 'cloud'
   | 'organizations' | 'users' | 'teams' | 'roles'
   | 'infrastructure' | 'workflows' | 'tool-execution' | 'ai-models'
-  | 'security-overview' | 'mfa-policy' | 'iam' | 'audit-logs' | 'sessions' | 'api-keys'
+  | 'security-overview' | 'mfa-policy' | 'iam' | 'audit-logs' | 'sessions' | 'interactions' | 'api-keys'
   | 'billing'
   | 'rag' | 'pubmed'
   | 'integrations' | 'settings'
@@ -197,6 +197,21 @@ export const NAVIGATION: NavSection[] = [
       // (hasConsoleAccess in AdminApp.tsx) already has an account whose
       // own sessions are meaningfully theirs to see.
       { key: 'sessions', label: 'Sessions', functional: true },
+      // PR-B5-B (Control Center Interaction Admin View). functional: true
+      // because a real page now exists (InteractionsPage), reusing
+      // omnibioai-auth's GET /platform/interactions (PR-B5-A) via
+      // routes_platform_interactions_proxy.py. Gated by
+      // hasPlatformAdminAccess, the same gate 'audit-logs' above uses and
+      // for the identical reason -- the backend route this page reads is
+      // gated by manage_all_orgs specifically (no dedicated interactions
+      // permission exists, and this PR doesn't add one), so
+      // hasPlatformAdminAccess is the one gate that actually matches who
+      // can reach real data here. Placed in Security next to Audit Logs
+      // (its closest technical precedent: paginated, filtered, platform-
+      // admin-only, free-form JSON metadata) rather than a new section --
+      // see this PR's own report for the open question of whether a
+      // dedicated "Activity" section would fit better long-term.
+      { key: 'interactions', label: 'Interactions', functional: true, visible: hasPlatformAdminAccess },
       // PR11.4: Service Accounts & API Keys Management UI. functional:
       // true because a real page now exists (ServiceAccountsPage,
       // reached via an organization picker -- API keys/OAuth clients

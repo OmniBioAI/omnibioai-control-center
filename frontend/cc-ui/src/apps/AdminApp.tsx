@@ -31,6 +31,7 @@ import ServiceAccountsPage from '../pages/identity/ServiceAccountsPage'
 import BillingPage from '../pages/billing/BillingPage'
 import AuditLogsPage from '../pages/audit/AuditLogsPage'
 import SessionsPage from '../pages/security/SessionsPage'
+import InteractionsPage from '../pages/InteractionsPage'
 import SecurityDashboardPage from '../pages/security/SecurityDashboardPage'
 import OrganizationMFAPolicyPage from '../pages/security/OrganizationMFAPolicyPage'
 import AuthGate from './AuthGate'
@@ -123,6 +124,9 @@ function AdminDashboard() {
   // manage_all_orgs-gated, not org-scoped, so this is a flat platform-
   // wide page (no org-picker/deep-link, unlike 'iam'/'api-keys').
   const canSeeAuditLogs = hasPlatformAdminAccess()
+  // PR-B5-B: same reasoning as canSeeAuditLogs -- GET /platform/
+  // interactions is manage_all_orgs-gated, not org-scoped.
+  const canSeeInteractions = hasPlatformAdminAccess()
   // PR11.5.6: same reasoning as canSeeAuditLogs -- GET /platform/users,
   // GET /platform/orgs, GET /platform/audit-events (everything the
   // Security Dashboard reads) are all manage_all_orgs-gated.
@@ -320,7 +324,7 @@ function AdminDashboard() {
       ) : undefined}
     >
       {renderPage(active, {
-        canSeeOps, canSeeOrganizations, canSeeUsers, canSeeAuditLogs, canSeeSecurityOverview, refreshKey,
+        canSeeOps, canSeeOrganizations, canSeeUsers, canSeeAuditLogs, canSeeInteractions, canSeeSecurityOverview, refreshKey,
         selectedOrgId, setSelectedOrgId, selectedUserId, setSelectedUserId,
         teamsOrgHint, rolesOrgHint, onViewTeams: handleViewTeams, onViewRoles: handleViewRoles,
         selectedSsoOrgId, setSelectedSsoOrgId, navigateToSsoSettings,
@@ -338,6 +342,7 @@ interface RenderCtx {
   canSeeOrganizations: boolean
   canSeeUsers: boolean
   canSeeAuditLogs: boolean
+  canSeeInteractions: boolean
   canSeeSecurityOverview: boolean
   refreshKey: number
   selectedOrgId: number | null
@@ -439,6 +444,13 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
     // permission this gate could usefully stand in front of.
     case 'sessions':
       return <SessionsPage />
+
+    // PR-B5-B: flat platform-wide page, no org-picker/deep-link -- same
+    // shape as 'audit-logs' above (interactions span every organization,
+    // filtered in-page), unlike 'sessions' immediately above (self-service).
+    case 'interactions':
+      if (!ctx.canSeeInteractions) return null
+      return <InteractionsPage />
 
     // PR11.2: same gate as 'organizations' -- see navigation.ts.
     case 'teams':

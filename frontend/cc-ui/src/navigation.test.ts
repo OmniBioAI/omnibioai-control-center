@@ -42,3 +42,39 @@ describe('navigation: Sessions placement', () => {
     expect(auditItem.children).toBeUndefined()
   })
 })
+
+// PR-B5-B (Control Center Interaction Admin View). Same reasoning as the
+// Sessions block above.
+
+describe('navigation: Interactions placement', () => {
+  it('has exactly one "interactions" entry across the entire tree', () => {
+    const found: { sectionKey: string; parentKey?: string }[] = []
+    for (const section of NAVIGATION) {
+      for (const item of section.items) {
+        if (item.key === 'interactions') found.push({ sectionKey: section.key })
+        for (const child of item.children ?? []) {
+          if (child.key === 'interactions') found.push({ sectionKey: section.key, parentKey: item.key })
+        }
+      }
+    }
+    expect(found).toHaveLength(1)
+  })
+
+  it('places "interactions" under the Security section, functional and gated', () => {
+    const securitySection = NAVIGATION.find(s => s.key === 'security')
+    expect(securitySection).toBeDefined()
+
+    const interactionsItem = securitySection!.items.find(i => i.key === 'interactions')
+    expect(interactionsItem).toBeDefined()
+    expect(interactionsItem!.functional).toBe(true)
+    // Same gate audit-logs uses -- GET /platform/interactions is
+    // manage_all_orgs-gated, not org-scoped or self-service.
+    expect(interactionsItem!.visible).toBeDefined()
+  })
+
+  it('is a top-level Security item alongside Audit Logs, not nested under it', () => {
+    const securitySection = NAVIGATION.find(s => s.key === 'security')!
+    const interactionsItem = securitySection.items.find(i => i.key === 'interactions')!
+    expect(interactionsItem.children).toBeUndefined()
+  })
+})

@@ -102,6 +102,7 @@ vi.mock('../pages/identity/ServiceAccountsPage', () => ({
 vi.mock('../pages/audit/AuditLogsPage', () => ({ default: () => <div data-testid="AuditLogsPage" /> }))
 // PR-C (Control Center Sessions Integration).
 vi.mock('../pages/security/SessionsPage', () => ({ default: () => <div data-testid="SessionsPage" /> }))
+vi.mock('../pages/InteractionsPage', () => ({ default: () => <div data-testid="InteractionsPage" /> }))
 // PR14.5C.
 vi.mock('../pages/billing/BillingPage', () => ({
   default: ({ orgId }: { orgId: number }) => <div data-testid="BillingPage" data-org-id={orgId} />,
@@ -724,6 +725,53 @@ describe('AdminApp auth gate', () => {
     await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
 
     expect(screen.getAllByText('Sessions')).toHaveLength(1)
+  })
+
+  // ── PR-B5-B (Control Center Interaction Admin View) ───────────────────
+
+  it('reaches Interactions via the sidebar, no longer Coming Soon', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-interactions1')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    clickNav('Interactions')
+
+    expect(await screen.findByTestId('InteractionsPage')).toBeInTheDocument()
+    expect(screen.queryByText('Coming soon')).not.toBeInTheDocument()
+  })
+
+  it('hides the Interactions nav item for a user who is not a platform admin', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-interactions2')
+    vi.mocked(auth.ensureSession).mockResolvedValue(orgOnlyUser)
+    vi.mocked(auth.getSessionUser).mockReturnValue(orgOnlyUser)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(false)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(false)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    expect(screen.queryByText('Interactions')).not.toBeInTheDocument()
+  })
+
+  it('shows exactly one Interactions navigation entry in the sidebar (no duplicate)', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-interactions3')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    expect(screen.getAllByText('Interactions')).toHaveLength(1)
   })
 
   it('signing out via the profile menu returns to the login screen', async () => {
