@@ -73,3 +73,42 @@ async def update_team_members_proxy(org_id: int, team_id: int, request: Request)
 @router.delete("/orgs/{org_id}/teams/{team_id}")
 async def delete_team_proxy(org_id: int, team_id: int, request: Request) -> Response:
     return await _proxy("DELETE", f"/orgs/{org_id}/teams/{team_id}", request)
+
+
+# Team Management v0.8.0 Step 5. omnibioai-auth's per-member endpoints
+# (Steps 1-4) had no proxy route here at all until now -- the routes
+# above predate them (Phase 3 PR3C). Same "thin relay, no authorization
+# decision made here" posture as every route above: rename_team's
+# require_org_permission_or_platform_admin(MANAGE_TEAMS) and
+# require_team_manage_permission's org-manage_teams-or-team-admin check
+# (Step 4) both live entirely in omnibioai-auth, unmodified by this file.
+
+
+@router.patch("/orgs/{org_id}/teams/{team_id}")
+async def rename_team_proxy(org_id: int, team_id: int, request: Request) -> Response:
+    return await _proxy("PATCH", f"/orgs/{org_id}/teams/{team_id}", request)
+
+
+@router.get("/orgs/{org_id}/teams/{team_id}/members")
+async def get_team_members_proxy(org_id: int, team_id: int, request: Request) -> Response:
+    return await _proxy("GET", f"/orgs/{org_id}/teams/{team_id}/members", request)
+
+
+@router.post("/orgs/{org_id}/teams/{team_id}/invite")
+async def invite_team_member_proxy(org_id: int, team_id: int, request: Request) -> Response:
+    return await _proxy("POST", f"/orgs/{org_id}/teams/{team_id}/invite", request)
+
+
+@router.put("/orgs/{org_id}/teams/{team_id}/members/{user_id}/role")
+async def update_team_member_role_proxy(org_id: int, team_id: int, user_id: int, request: Request) -> Response:
+    return await _proxy("PUT", f"/orgs/{org_id}/teams/{team_id}/members/{user_id}/role", request)
+
+
+@router.delete("/orgs/{org_id}/teams/{team_id}/members/{user_id}")
+async def remove_team_member_proxy(org_id: int, team_id: int, user_id: int, request: Request) -> Response:
+    return await _proxy("DELETE", f"/orgs/{org_id}/teams/{team_id}/members/{user_id}", request)
+
+
+@router.post("/orgs/{org_id}/teams/{team_id}/leave")
+async def leave_team_proxy(org_id: int, team_id: int, request: Request) -> Response:
+    return await _proxy("POST", f"/orgs/{org_id}/teams/{team_id}/leave", request)

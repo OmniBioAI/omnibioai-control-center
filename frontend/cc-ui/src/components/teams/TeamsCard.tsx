@@ -1,27 +1,28 @@
 import { useEffect, useState } from 'react'
-import { createTeam, deleteTeam, listTeams, updateTeamMembers, type Team } from '../../teams'
+import { createTeam, deleteTeam, listTeams, type Team } from '../../teams'
 import { fetchOrgMembers, type OrgMember } from '../../organizations'
 import TeamRow from './TeamRow'
 
-// Phase 3 PR3C. Rendered by OrganizationDetailPage.tsx in both the
+// Phase 3 PR3C, updated Team Management v0.8.0 Step 5 (description field
+// on the create form; member editing moved into TeamRow/TeamMembersPanel,
+// see those files). Rendered by OrganizationDetailPage.tsx in both the
 // platform-admin and org-admin views, near MembersRolesCard -- same
 // placement convention, same independent-fetch/graceful-degradation
 // shape, but a different authorization boundary underneath: GET
 // /orgs/{org_id}/teams only requires bare org membership (any member can
 // view teams, per omnibioai-auth's existing get_org_membership_or_
-// platform_admin dependency -- unmodified by this PR), unlike GET
+// platform_admin dependency -- unmodified by this change), unlike GET
 // /orgs/{org_id}/members which requires manage_org. That's why this card
 // hides entirely only if the *teams* fetch itself fails (a true non-
 // member, or an org that doesn't exist) -- a plain member who can list
-// teams but can't load the member roster (no manage_org) still sees
-// their teams, just with "User #id" instead of an email, and no working
-// "Edit Members" control (nothing to build a picker from). Every
-// mutating control (create/delete/edit members) is rendered
-// unconditionally regardless of the viewer's guessed role -- the backend
-// (require_org_permission_or_platform_admin(MANAGE_TEAMS), unmodified) is
-// what actually decides whether an attempt succeeds; a 403 surfaces
-// inline, the same "frontend hiding is not authorization" posture PR3B
-// already established.
+// teams but can't load the org member roster (no manage_org) still sees
+// their teams, just with "User #id" instead of an email inside
+// TeamMembersPanel, and a free-text invite field instead of a picker.
+// Every mutating control (create/delete/rename/manage members) is
+// rendered unconditionally regardless of the viewer's guessed role -- the
+// backend is what actually decides whether an attempt succeeds; a 403
+// surfaces inline, the same "frontend hiding is not authorization"
+// posture PR3B already established.
 interface Props {
   orgId: number
 }
@@ -56,6 +57,7 @@ export default function TeamsCard({ orgId }: Props) {
   const [hidden, setHidden] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [newName, setNewName] = useState('')
+  const [newDescription, setNewDescription] = useState('')
   const [creating, setCreating] = useState(false)
 
   const loadTeams = () => {
@@ -79,11 +81,12 @@ export default function TeamsCard({ orgId }: Props) {
     setCreating(true)
     setErr(null)
     try {
-      await createTeam(orgId, { name })
+      await createTeam(orgId, { name, description: newDescription.trim() || undefined })
       setNewName('')
+      setNewDescription('')
       loadTeams()
     } catch (e) {
-      setErr(String(e))
+      setErr(e instanceof Error ? e.message : String(e))
     } finally {
       setCreating(false)
     }
@@ -94,14 +97,24 @@ export default function TeamsCard({ orgId }: Props) {
       <div style={label}>Teams</div>
       {err && <ErrBox msg={err} />}
 
-      <form onSubmit={handleCreate} style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+      <form onSubmit={handleCreate} style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         <input
           value={newName}
           onChange={e => setNewName(e.target.value)}
           placeholder="New team name"
           aria-label="New team name"
           style={{
-            flex: 1, fontSize: 12, padding: '7px 10px', borderRadius: 6,
+            flex: 1, minWidth: 140, fontSize: 12, padding: '7px 10px', borderRadius: 6,
+            border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)',
+          }}
+        />
+        <input
+          value={newDescription}
+          onChange={e => setNewDescription(e.target.value)}
+          placeholder="Description (optional)"
+          aria-label="New team description"
+          style={{
+            flex: 1, minWidth: 160, fontSize: 12, padding: '7px 10px', borderRadius: 6,
             border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)',
           }}
         />
@@ -128,12 +141,10 @@ export default function TeamsCard({ orgId }: Props) {
           {teams.map(t => (
             <TeamRow
               key={t.id}
+              orgId={orgId}
               team={t}
-              members={members}
-              onUpdateMembers={async userIds => {
-                await updateTeamMembers(orgId, t.id, userIds)
-                loadTeams()
-              }}
+              orgMembers={members}
+              onChanged={loadTeams}
               onDelete={async () => {
                 await deleteTeam(orgId, t.id)
                 loadTeams()
