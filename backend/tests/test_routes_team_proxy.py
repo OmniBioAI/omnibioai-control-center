@@ -4,12 +4,16 @@ tests/test_routes_team_proxy.py
 Unit tests for:
   - control_center.api.routes_team_proxy
     (GET/POST /orgs/{org_id}/teams, PUT /orgs/{org_id}/teams/{team_id}/members,
-    DELETE /orgs/{org_id}/teams/{team_id})
+    DELETE /orgs/{org_id}/teams/{team_id}, and -- Team Management v0.8.0
+    Step 5 -- PATCH /orgs/{org_id}/teams/{team_id}, GET .../members,
+    POST .../invite, PUT .../members/{user_id}/role,
+    DELETE .../members/{user_id}, POST .../leave)
 
 Mirrors test_routes_role_proxy.py's exact conventions -- these routes are a
 thin relay, no authorization decision is made here (that's entirely
 omnibioai-auth's job, via require_org_permission_or_platform_admin/
-get_org_membership_or_platform_admin, both pre-existing and unmodified).
+get_org_membership_or_platform_admin/require_team_manage_permission, all
+pre-existing and unmodified).
 """
 
 from __future__ import annotations
@@ -191,6 +195,155 @@ class TestDeleteTeamProxy(unittest.TestCase):
         upstream = _mock_response(404, {"detail": "Team not found"})
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.delete("/orgs/7/teams/999999", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 404)
+
+
+class TestRenameTeamProxy(unittest.TestCase):
+    def test_forwards_patch_body_and_method(self) -> None:
+        upstream = _mock_response(200, {"id": 1, "organization_id": 7, "name": "New Name", "member_user_ids": []})
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.patch("/orgs/7/teams/1", json={"name": "New Name"}, headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 200)
+        call_args = mock_ctx.__aenter__.return_value.request.call_args
+        self.assertEqual(call_args.args[0], "PATCH")
+        self.assertTrue(call_args.args[1].endswith("/orgs/7/teams/1"))
+        self.assertIn(b"New Name", call_args.kwargs["content"])
+
+    def test_forwards_403_for_non_manager(self) -> None:
+        upstream = _mock_response(403, {"detail": "Forbidden"})
+        with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.patch("/orgs/7/teams/1", json={"name": "New Name"}, headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 403)
+
+
+class TestGetTeamMembersProxy(unittest.TestCase):
+    def test_forwards_success_response(self) -> None:
+        upstream = _mock_response(200, [{"user_id": 3, "role": "admin", "invited_by_user_id": None, "joined_at": None}])
+        with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.get("/orgs/7/teams/1/members", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()[0]["role"], "admin")
+
+    def test_forwards_404_for_nonexistent_team(self) -> None:
+        upstream = _mock_response(404, {"detail": "Team not found"})
+        with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.get("/orgs/7/teams/999999/members", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 404)
+
+
+class TestInviteTeamMemberProxy(unittest.TestCase):
+    def test_forwards_post_body_and_status(self) -> None:
+        upstream = _mock_response(201, {"user_id": 9, "role": "member", "invited_by_user_id": 3, "joined_at": "2026-08-11T00:00:00"})
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.post(
+                "/orgs/7/teams/1/invite", json={"email": "new@acme.test", "role": "member"},
+                headers={"Authorization": "Bearer tok"},
+            )
+        self.assertEqual(resp.status_code, 201)
+        call_args = mock_ctx.__aenter__.return_value.request.call_args
+        self.assertEqual(call_args.args[0], "POST")
+        self.assertTrue(call_args.args[1].endswith("/orgs/7/teams/1/invite"))
+        self.assertIn(b"new@acme.test", call_args.kwargs["content"])
+
+    def test_forwards_400_for_org_outsider(self) -> None:
+        upstream = _mock_response(400, {"detail": "User is not a member of this organization: new@acme.test"})
+        with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.post(
+                "/orgs/7/teams/1/invite", json={"email": "new@acme.test"}, headers={"Authorization": "Bearer tok"},
+            )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_forwards_404_for_unknown_account(self) -> None:
+        upstream = _mock_response(404, {"detail": "No account exists for that email yet"})
+        with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.post(
+                "/orgs/7/teams/1/invite", json={"email": "ghost@acme.test"}, headers={"Authorization": "Bearer tok"},
+            )
+        self.assertEqual(resp.status_code, 404)
+
+
+class TestUpdateTeamMemberRoleProxy(unittest.TestCase):
+    def test_forwards_put_body_and_method(self) -> None:
+        upstream = _mock_response(200, {"user_id": 9, "role": "admin", "invited_by_user_id": 3, "joined_at": None})
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.put(
+                "/orgs/7/teams/1/members/9/role", json={"role": "admin"}, headers={"Authorization": "Bearer tok"},
+            )
+        self.assertEqual(resp.status_code, 200)
+        call_args = mock_ctx.__aenter__.return_value.request.call_args
+        self.assertEqual(call_args.args[0], "PUT")
+        self.assertTrue(call_args.args[1].endswith("/orgs/7/teams/1/members/9/role"))
+        self.assertIn(b"admin", call_args.kwargs["content"])
+
+    def test_forwards_400_for_last_admin_demotion(self) -> None:
+        upstream = _mock_response(400, {"detail": "Cannot demote the last team admin"})
+        with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.put(
+                "/orgs/7/teams/1/members/9/role", json={"role": "member"}, headers={"Authorization": "Bearer tok"},
+            )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_forwards_403_for_non_manager(self) -> None:
+        upstream = _mock_response(403, {"detail": "Forbidden"})
+        with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.put(
+                "/orgs/7/teams/1/members/9/role", json={"role": "admin"}, headers={"Authorization": "Bearer tok"},
+            )
+        self.assertEqual(resp.status_code, 403)
+
+
+class TestRemoveTeamMemberProxy(unittest.TestCase):
+    def test_forwards_method_and_preserves_204_empty_body(self) -> None:
+        upstream = _mock_no_content_response(204)
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.delete("/orgs/7/teams/1/members/9", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 204)
+        self.assertEqual(resp.content, b"")
+        call_args = mock_ctx.__aenter__.return_value.request.call_args
+        self.assertEqual(call_args.args[0], "DELETE")
+        self.assertTrue(call_args.args[1].endswith("/orgs/7/teams/1/members/9"))
+
+    def test_forwards_400_for_last_admin_removal(self) -> None:
+        upstream = _mock_response(400, {"detail": "Cannot remove the last team admin"})
+        with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.delete("/orgs/7/teams/1/members/9", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_forwards_403_for_non_manager(self) -> None:
+        upstream = _mock_response(403, {"detail": "Forbidden"})
+        with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.delete("/orgs/7/teams/1/members/9", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 403)
+
+
+class TestLeaveTeamProxy(unittest.TestCase):
+    def test_forwards_method_and_preserves_204_empty_body(self) -> None:
+        upstream = _mock_no_content_response(204)
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.post("/orgs/7/teams/1/leave", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 204)
+        self.assertEqual(resp.content, b"")
+        call_args = mock_ctx.__aenter__.return_value.request.call_args
+        self.assertEqual(call_args.args[0], "POST")
+        self.assertTrue(call_args.args[1].endswith("/orgs/7/teams/1/leave"))
+
+    def test_forwards_400_for_last_admin_leave(self) -> None:
+        upstream = _mock_response(
+            400, {"detail": "The last team admin cannot leave -- transfer ownership or delete the team instead"},
+        )
+        with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.post("/orgs/7/teams/1/leave", headers={"Authorization": "Bearer tok"})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_forwards_404_for_non_member(self) -> None:
+        upstream = _mock_response(404, {"detail": "Not a member of this team"})
+        with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.post("/orgs/7/teams/1/leave", headers={"Authorization": "Bearer tok"})
         self.assertEqual(resp.status_code, 404)
 
 
