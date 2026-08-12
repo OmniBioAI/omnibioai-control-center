@@ -178,5 +178,39 @@ class HipaaReportPdfEndpointTestCase(ComplianceRouterTestCase):
         self.assertEqual(self.build_report_mock.await_count, 1)
 
 
+class HipaaReportCsvEndpointTestCase(ComplianceRouterTestCase):
+    def test_platform_admin_gets_csv(self) -> None:
+        r = client.get("/compliance/hipaa-report/csv", params=self._params(), headers=_auth(sub="1", permissions=[MANAGE_ALL_ORGS]))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.headers["content-type"], "text/csv; charset=utf-8")
+        self.assertIn("KUMC Research", r.text)
+        self.assertIn("## Section 1: Executive Summary", r.text)
+
+    def test_content_disposition_filename(self) -> None:
+        r = client.get("/compliance/hipaa-report/csv", params=self._params(), headers=_auth(sub="1", permissions=[MANAGE_ALL_ORGS]))
+        self.assertIn('filename="hipaa-report-org1-2026-08-01-to-2026-08-31.csv"', r.headers["content-disposition"])
+
+    def test_org_admin_without_manage_all_orgs_denied(self) -> None:
+        headers = _auth(sub="1", permissions=[], org_id=1, org_role=["org_admin"])
+        r = client.get("/compliance/hipaa-report/csv", params=self._params(), headers=headers)
+        self.assertEqual(r.status_code, 403)
+
+    def test_missing_token_returns_401(self) -> None:
+        r = client.get("/compliance/hipaa-report/csv", params=self._params())
+        self.assertEqual(r.status_code, 401)
+
+    def test_from_date_after_to_date_returns_400(self) -> None:
+        params = self._params(from_date="2026-08-31", to_date="2026-08-01")
+        r = client.get("/compliance/hipaa-report/csv", params=params, headers=_auth(sub="1", permissions=[MANAGE_ALL_ORGS]))
+        self.assertEqual(r.status_code, 400)
+
+    def test_csv_reuses_json_cache_entry(self) -> None:
+        headers = _auth(sub="1", permissions=[MANAGE_ALL_ORGS])
+        client.get("/compliance/hipaa-report", params=self._params(), headers=headers)
+        r = client.get("/compliance/hipaa-report/csv", params=self._params(), headers=headers)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.build_report_mock.await_count, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

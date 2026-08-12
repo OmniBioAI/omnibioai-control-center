@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import Response
 
 from control_center.analytics import cache
-from control_center.compliance import pdf, service
+from control_center.compliance import csv_export, pdf, service
 from control_center.core.auth import require_permission
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
@@ -112,5 +112,30 @@ async def hipaa_report_pdf(
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/hipaa-report/csv")
+async def hipaa_report_csv(
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    org_id: int = Query(...),
+    authorization: Optional[str] = Header(default=None),
+    admin: dict = Depends(_require_platform_admin),
+) -> Response:
+    _validate_range(from_date, to_date)
+    context = await _build_cached_report(
+        org_id=org_id, from_date=from_date, to_date=to_date,
+        generated_by=_generated_by(admin), authorization=authorization,
+    )
+    # Cheap (plain string formatting, no layout engine) unlike the PDF
+    # route above -- no run_in_executor needed here.
+    csv_text = csv_export.render_report_csv(context)
+
+    filename = f"{_filename_stem(org_id, from_date, to_date)}.csv"
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
