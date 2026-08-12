@@ -42,6 +42,7 @@ from control_center.api.routes_audit_proxy import router as audit_proxy_router
 from control_center.api.routes_sessions_proxy import router as sessions_proxy_router
 from control_center.api.routes_org_sso_proxy import router as org_sso_proxy_router
 from control_center.api.routes_org_mfa_proxy import router as org_mfa_proxy_router
+from control_center.api.routes_org_saml_proxy import router as org_saml_proxy_router
 from control_center.api.routes_billing_proxy import router as billing_proxy_router
 from control_center.api.routes_tes_proxy import router as tes_proxy_router
 from control_center.api.routes_model_registry_proxy import router as model_registry_proxy_router
@@ -168,6 +169,7 @@ app.include_router(audit_proxy_router)
 app.include_router(sessions_proxy_router)
 app.include_router(org_sso_proxy_router)
 app.include_router(org_mfa_proxy_router)
+app.include_router(org_saml_proxy_router)
 app.include_router(billing_proxy_router)
 app.include_router(tes_proxy_router)
 app.include_router(model_registry_proxy_router)

@@ -115,6 +115,44 @@ describe('navigation: Compliance Report placement', () => {
   })
 })
 
+// PR9 (SAML Admin UI). Same reasoning as the Sessions/Interactions/
+// Compliance Report blocks above.
+
+describe('navigation: SAML Settings placement', () => {
+  it('has exactly one "saml" entry across the entire tree', () => {
+    const found: { sectionKey: string; parentKey?: string }[] = []
+    for (const section of NAVIGATION) {
+      for (const item of section.items) {
+        if (item.key === 'saml') found.push({ sectionKey: section.key })
+        for (const child of item.children ?? []) {
+          if (child.key === 'saml') found.push({ sectionKey: section.key, parentKey: item.key })
+        }
+      }
+    }
+    expect(found).toHaveLength(1)
+  })
+
+  it('places "saml" under the Security section, functional and gated the same way as "iam"/"mfa-policy"', () => {
+    const securitySection = NAVIGATION.find(s => s.key === 'security')
+    expect(securitySection).toBeDefined()
+
+    const samlItem = securitySection!.items.find(i => i.key === 'saml')
+    const iamItem = securitySection!.items.find(i => i.key === 'iam')
+    expect(samlItem).toBeDefined()
+    expect(samlItem!.functional).toBe(true)
+    // manage_sso is org-scoped -- same hasOrganizationsAccess gate 'iam'
+    // (OIDC SSO) already uses, since PR8/auth#49 deliberately reused
+    // manage_sso for SAML rather than a new manage_saml permission.
+    expect(samlItem!.visible).toBe(iamItem!.visible)
+  })
+
+  it('is a top-level Security item alongside IAM / SSO Management, not nested under it', () => {
+    const securitySection = NAVIGATION.find(s => s.key === 'security')!
+    const samlItem = securitySection.items.find(i => i.key === 'saml')!
+    expect(samlItem.children).toBeUndefined()
+  })
+})
+
 // PR-B6. Same reasoning as the Sessions/Interactions blocks above.
 
 describe('navigation: Integrations placement', () => {

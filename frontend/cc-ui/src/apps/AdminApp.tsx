@@ -37,6 +37,7 @@ import AnalyticsDashboard from '../pages/AnalyticsDashboard'
 import ComplianceReport from '../pages/ComplianceReport'
 import SecurityDashboardPage from '../pages/security/SecurityDashboardPage'
 import OrganizationMFAPolicyPage from '../pages/security/OrganizationMFAPolicyPage'
+import SAMLSettingsPage from '../pages/identity/SAMLSettingsPage'
 import AuthGate from './AuthGate'
 
 /**
@@ -108,6 +109,12 @@ function mfaPolicyOrgIdFromPath(): number | null {
   const m = window.location.pathname.match(/^\/security\/mfa-policy\/(\d+)$/)
   return m ? Number(m[1]) : null
 }
+// PR9: /security/saml/{orgId} deep-links straight into that org's SAML
+// settings, same convention as /security/mfa-policy/{orgId} above.
+function samlOrgIdFromPath(): number | null {
+  const m = window.location.pathname.match(/^\/security\/saml\/(\d+)$/)
+  return m ? Number(m[1]) : null
+}
 // PR14.5C: /billing/{orgId} deep-links straight into that org's billing
 // dashboard, same convention as /iam/{orgId}'s own SSO deep-link above.
 // Invoice detail (a level deeper still) is intentionally not URL-
@@ -153,6 +160,7 @@ function AdminDashboard() {
     if (window.location.pathname.startsWith('/iam/service-accounts')) return 'api-keys'
     if (window.location.pathname.startsWith('/iam')) return 'iam'
     if (window.location.pathname.startsWith('/security/mfa-policy')) return 'mfa-policy'
+    if (window.location.pathname.startsWith('/security/saml')) return 'saml'
     if (window.location.pathname.startsWith('/billing')) return 'billing'
     return 'overview'
   })
@@ -161,6 +169,7 @@ function AdminDashboard() {
   const [selectedSsoOrgId, setSelectedSsoOrgId] = useState<number | null>(() => ssoOrgIdFromPath())
   const [selectedServiceAccountsOrgId, setSelectedServiceAccountsOrgId] = useState<number | null>(() => serviceAccountsOrgIdFromPath())
   const [selectedMfaPolicyOrgId, setSelectedMfaPolicyOrgId] = useState<number | null>(() => mfaPolicyOrgIdFromPath())
+  const [selectedSamlOrgId, setSelectedSamlOrgId] = useState<number | null>(() => samlOrgIdFromPath())
   const [selectedBillingOrgId, setSelectedBillingOrgId] = useState<number | null>(() => billingOrgIdFromPath())
   // Not URL-persisted -- a lighter-weight UX detail than the deep-linked
   // org id itself, same "keep it simple" precedent the rest of this
@@ -229,12 +238,13 @@ function AdminDashboard() {
       : active === 'iam' ? (selectedSsoOrgId != null ? `/iam/${selectedSsoOrgId}` : '/iam')
       : active === 'api-keys' ? (selectedServiceAccountsOrgId != null ? `/iam/service-accounts/${selectedServiceAccountsOrgId}` : '/iam/service-accounts')
       : active === 'mfa-policy' ? (selectedMfaPolicyOrgId != null ? `/security/mfa-policy/${selectedMfaPolicyOrgId}` : '/security/mfa-policy')
+      : active === 'saml' ? (selectedSamlOrgId != null ? `/security/saml/${selectedSamlOrgId}` : '/security/saml')
       : active === 'billing' ? (selectedBillingOrgId != null ? `/billing/${selectedBillingOrgId}` : '/billing')
       : '/'
     if (window.location.pathname !== path) {
       window.history.pushState(null, '', path)
     }
-  }, [active, selectedOrgId, selectedUserId, selectedSsoOrgId, selectedServiceAccountsOrgId, selectedMfaPolicyOrgId, selectedBillingOrgId])
+  }, [active, selectedOrgId, selectedUserId, selectedSsoOrgId, selectedServiceAccountsOrgId, selectedMfaPolicyOrgId, selectedSamlOrgId, selectedBillingOrgId])
 
   useEffect(() => {
     const onPopState = () => {
@@ -253,6 +263,9 @@ function AdminDashboard() {
       } else if (window.location.pathname.startsWith('/security/mfa-policy')) {
         setActive('mfa-policy')
         setSelectedMfaPolicyOrgId(mfaPolicyOrgIdFromPath())
+      } else if (window.location.pathname.startsWith('/security/saml')) {
+        setActive('saml')
+        setSelectedSamlOrgId(samlOrgIdFromPath())
       } else if (window.location.pathname.startsWith('/billing')) {
         setActive('billing')
         setSelectedBillingOrgId(billingOrgIdFromPath())
@@ -263,6 +276,7 @@ function AdminDashboard() {
         setSelectedSsoOrgId(null)
         setSelectedServiceAccountsOrgId(null)
         setSelectedMfaPolicyOrgId(null)
+        setSelectedSamlOrgId(null)
         setSelectedBillingOrgId(null)
       }
     }
@@ -277,6 +291,7 @@ function AdminDashboard() {
     if (key !== 'iam') setSelectedSsoOrgId(null)
     if (key !== 'api-keys') setSelectedServiceAccountsOrgId(null)
     if (key !== 'mfa-policy') setSelectedMfaPolicyOrgId(null)
+    if (key !== 'saml') setSelectedSamlOrgId(null)
     if (key !== 'billing') setSelectedBillingOrgId(null)
     // A plain sidebar click (not a "View teams/roles" link) always starts
     // from TeamsPage/RolesPage's own default, not a stale hint left over
@@ -345,6 +360,7 @@ function AdminDashboard() {
         selectedServiceAccountsOrgId, setSelectedServiceAccountsOrgId, navigateToServiceAccounts,
         serviceAccountsInitialTab,
         selectedMfaPolicyOrgId, setSelectedMfaPolicyOrgId,
+        selectedSamlOrgId, setSelectedSamlOrgId,
         selectedBillingOrgId, setSelectedBillingOrgId,
       })}
     </AppShell>
@@ -378,6 +394,8 @@ interface RenderCtx {
   serviceAccountsInitialTab: 'oauth-clients' | 'api-keys'
   selectedMfaPolicyOrgId: number | null
   setSelectedMfaPolicyOrgId: (id: number | null) => void
+  selectedSamlOrgId: number | null
+  setSelectedSamlOrgId: (id: number | null) => void
   selectedBillingOrgId: number | null
   setSelectedBillingOrgId: (id: number | null) => void
 }
@@ -519,6 +537,16 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
       return ctx.selectedMfaPolicyOrgId != null
         ? <OrganizationMFAPolicyPage orgId={ctx.selectedMfaPolicyOrgId} onBack={() => ctx.setSelectedMfaPolicyOrgId(null)} />
         : <OrganizationsPage onSelect={ctx.setSelectedMfaPolicyOrgId} />
+
+    // PR9: SAML config is per-org, so this destination is a "pick an
+    // org, then manage its SAML settings" flow, same list -> detail
+    // shape as 'iam'/'mfa-policy' immediately above (and the identical
+    // hasOrganizationsAccess gate) -- see navigation.ts's own comment.
+    case 'saml':
+      if (!ctx.canSeeOrganizations) return null
+      return ctx.selectedSamlOrgId != null
+        ? <SAMLSettingsPage orgId={ctx.selectedSamlOrgId} onBack={() => ctx.setSelectedSamlOrgId(null)} />
+        : <OrganizationsPage onSelect={ctx.setSelectedSamlOrgId} />
 
     // PR11.4: API keys/OAuth clients are per-org, so this destination is
     // a "pick an org, then manage its service accounts" flow, same

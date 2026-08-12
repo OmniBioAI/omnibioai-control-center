@@ -25,7 +25,7 @@ export type PageKey =
   | 'health' | 'docker' | 'ecosystem' | 'config' | 'llms' | 'cloud'
   | 'organizations' | 'users' | 'teams' | 'roles'
   | 'infrastructure' | 'workflows' | 'tool-execution' | 'ai-models'
-  | 'security-overview' | 'mfa-policy' | 'iam' | 'audit-logs' | 'sessions' | 'interactions' | 'api-keys' | 'compliance-report'
+  | 'security-overview' | 'mfa-policy' | 'iam' | 'saml' | 'audit-logs' | 'sessions' | 'interactions' | 'api-keys' | 'compliance-report'
   | 'analytics'
   | 'billing'
   | 'rag' | 'pubmed'
@@ -175,6 +175,18 @@ export const NAVIGATION: NavSection[] = [
       // per-org, once a specific org's SSO settings are opened (see
       // docs/admin-console-pr11-sso-discovery.md).
       { key: 'iam', label: 'IAM / SSO Management', functional: true, visible: hasOrganizationsAccess },
+      // PR9: SAML Admin UI. Same "pick an org, then manage its
+      // configuration" shape as 'iam'/'mfa-policy' immediately above,
+      // and the identical hasOrganizationsAccess gate -- GET/POST/PATCH/
+      // DELETE /orgs/{org_id}/saml is manage_sso-gated, org-scoped, same
+      // permission 'iam' already reuses (PR8/auth#49 deliberately
+      // reused manage_sso rather than a new manage_saml). Placed as its
+      // own destination, not folded into 'iam', since SAML and OIDC are
+      // two independent, separately-configured identity providers on
+      // the backend (OrganizationSAMLConfig vs OrganizationSSOConfig,
+      // no shared row) -- SSOSettingsPage.tsx never reads or writes
+      // this data either.
+      { key: 'saml', label: 'SAML Settings', functional: true, visible: hasOrganizationsAccess },
       // PR11.4b: Enterprise Identity Audit Trail Foundation.
       // functional: true because a real page now exists
       // (AuditLogsPage). Gated by hasPlatformAdminAccess, not
