@@ -95,6 +95,10 @@ class FakeRedis:
             result |= self._sets.get(key, set())
         return result
 
+    def smembers(self, key: str) -> set:
+        self._maybe_raise("smembers")
+        return set(self._sets.get(key, set()))
+
     def expire(self, key: str, seconds: int) -> bool:
         self._maybe_raise("expire")
         self._ttls[key] = seconds

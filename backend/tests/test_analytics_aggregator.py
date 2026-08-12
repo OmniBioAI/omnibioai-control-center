@@ -8,7 +8,7 @@ mock call counts.
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime
 from unittest.mock import patch
 
 from control_center.analytics import aggregator
@@ -236,6 +236,43 @@ class TestReadUserActivity(AggregatorTestCase):
     def test_redis_error_returns_empty_dict(self) -> None:
         self.fake.raise_on = {"hgetall"}
         self.assertEqual(aggregator.read_user_activity(1, "2026-01-15"), {})
+
+
+class TestReadActiveUserIds(AggregatorTestCase):
+    def test_empty_dates_returns_empty_set(self) -> None:
+        self.assertEqual(aggregator.read_active_user_ids([]), set())
+
+    def test_single_date_returns_smembers(self) -> None:
+        aggregator.apply_interaction_event(_event())
+        self.assertEqual(aggregator.read_active_user_ids(["2026-01-15"], org_id=1), {"42"})
+
+    def test_multiple_dates_unions(self) -> None:
+        aggregator.apply_interaction_event(_event(event_id="a", user_id=1, timestamp=datetime(2026, 1, 1)))
+        aggregator.apply_interaction_event(_event(event_id="b", user_id=2, timestamp=datetime(2026, 1, 2)))
+        result = aggregator.read_active_user_ids(["2026-01-01", "2026-01-02"], org_id=1)
+        self.assertEqual(result, {"1", "2"})
+
+    def test_redis_error_returns_empty_set(self) -> None:
+        self.fake.raise_on = {"smembers"}
+        self.assertEqual(aggregator.read_active_user_ids(["2026-01-15"]), set())
+
+    def test_redis_error_on_multi_date_union_returns_empty_set(self) -> None:
+        self.fake.raise_on = {"sunion"}
+        self.assertEqual(aggregator.read_active_user_ids(["2026-01-01", "2026-01-02"]), set())
+
+
+class TestReadKnownServices(AggregatorTestCase):
+    def test_no_events_returns_empty_list(self) -> None:
+        self.assertEqual(aggregator.read_known_services(1), [])
+
+    def test_records_and_sorts_service_names(self) -> None:
+        aggregator.apply_interaction_event(_event(event_id="a", service="rag"))
+        aggregator.apply_interaction_event(_event(event_id="b", service="workflow-bundles", event_type="workflow.completed"))
+        self.assertEqual(aggregator.read_known_services(1), ["rag", "workflow-bundles"])
+
+    def test_redis_error_returns_empty_list(self) -> None:
+        self.fake.raise_on = {"smembers"}
+        self.assertEqual(aggregator.read_known_services(1), [])
 
 
 class TestPlatformLatencyPercentiles(AggregatorTestCase):
