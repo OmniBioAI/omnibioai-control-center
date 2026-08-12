@@ -232,6 +232,23 @@ export function hasOrganizationsAccess(): boolean {
   return hasAdminAccess() || hasPlatformAdminAccess() || cachedUser?.orgId != null
 }
 
+// Usage Analytics v1 (PR-D). UX-only mirror of the backend's own
+// require_analytics_scope (control_center.analytics.permissions) --
+// platform_admin (manage_all_orgs) / org_admin (orgRoles contains
+// "org_admin") / team_admin (teamRole === "admin") may see the nav
+// entry and the page; a regular member sees neither. The backend
+// dependency re-checks this independently (and org/team-scopes every
+// response) on every single request -- this only decides whether
+// AnalyticsDashboard.tsx is worth rendering at all, same caveat every
+// other has*Access() function in this file already carries.
+export function canSeeAnalytics(): boolean {
+  return (
+    hasPlatformAdminAccess() ||
+    (cachedUser?.orgRoles.includes('org_admin') ?? false) ||
+    cachedUser?.teamRole === 'admin'
+  )
+}
+
 // Fired whenever a gated request comes back 401 (missing/expired/invalid
 // token) so App.tsx can drop back to the login screen without every
 // call site needing to know about auth.
