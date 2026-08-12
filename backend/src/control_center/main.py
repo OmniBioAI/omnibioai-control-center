@@ -50,6 +50,7 @@ from control_center.api.routes_rag_proxy import router as rag_proxy_router
 from control_center.api.routes_platform_config_proxy import router as platform_config_proxy_router
 from control_center.api.routes_platform_interactions_proxy import router as platform_interactions_proxy_router
 from control_center.analytics.router import router as analytics_router
+from control_center.compliance.router import router as compliance_router
 from control_center.api.routes_cloud import router as cloud_router
 from control_center.api.routes_integrations import router as integrations_router
 from control_center.core.auth import require_permission
@@ -189,6 +190,11 @@ app.include_router(dashboard_router)
 # reason: a single blanket permission here would either over- or
 # under-restrict across the different roles analytics needs to serve.
 app.include_router(analytics_router)
+# HIPAA Basic Compliance Report v0.8.0: no blanket router-level permission
+# dependency here either, same reasoning as analytics_router immediately
+# above -- each route already requires manage_all_orgs individually
+# (compliance/router.py's own _require_platform_admin).
+app.include_router(compliance_router)
 
 
 # ==============================================================================
