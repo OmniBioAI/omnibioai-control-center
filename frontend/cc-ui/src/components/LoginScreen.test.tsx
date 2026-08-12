@@ -26,7 +26,7 @@ describe('LoginScreen', () => {
     const user = userEvent.setup()
     const sessionUser: auth.SessionUser = {
       userId: '1', email: 'admin@omnibioai.org', roles: ['admin'],
-      permissions: ['manage_config'], orgId: null, orgRoles: [], schemaVersion: 2,
+      permissions: ['manage_config'], orgId: null, orgRoles: [], teamId: null, teamRole: null, schemaVersion: 2,
     }
     vi.mocked(auth.login).mockResolvedValue(sessionUser)
     const onSuccess = vi.fn()

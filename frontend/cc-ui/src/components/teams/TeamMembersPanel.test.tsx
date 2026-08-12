@@ -39,7 +39,7 @@ function sessionAs(userId: number | null) {
   vi.mocked(auth.getSessionUser).mockReturnValue(
     userId == null ? null : {
       userId: String(userId), email: 'x@acme.test', roles: [], permissions: [],
-      orgId: '42', orgRoles: [], schemaVersion: 2,
+      orgId: '42', orgRoles: [], teamId: null, teamRole: null, schemaVersion: 2,
     },
   )
 }

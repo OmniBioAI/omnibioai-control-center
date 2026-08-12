@@ -328,6 +328,202 @@ describe('logout', () => {
   })
 })
 
+// ── Mode B Phase 2: Workspace Switcher ──────────────────────────────────────
+
+describe('switchTeam', () => {
+  it('POSTs /auth/switch-team with team_id and no X-Team-Id/X-Workspace-Id header', async () => {
+    const newToken = makeToken({ sub: '1', exp: nowSeconds() + 900 })
+    const fetchMock = mockFetchByUrl({
+      '/auth/switch-team': jsonResponse({ access_token: newToken, refresh_token: 'refresh-new' }),
+      '/auth/validate': jsonResponse({ ...validUser, team_id: '7', team_role: 'admin' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await auth.switchTeam(7)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/auth/switch-team',
+      expect.objectContaining({ body: JSON.stringify({ team_id: 7 }) }),
+    )
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    const headers = init.headers as Record<string, string>
+    expect(headers['X-Team-Id']).toBeUndefined()
+    expect(headers['X-Workspace-Id']).toBeUndefined()
+  })
+
+  it('sends team_id: null (not omitted) for "switch to personal workspace"', async () => {
+    const newToken = makeToken({ sub: '1', exp: nowSeconds() + 900 })
+    vi.stubGlobal('fetch', mockFetchByUrl({
+      '/auth/switch-team': jsonResponse({ access_token: newToken, refresh_token: 'r' }),
+      '/auth/validate': jsonResponse({ ...validUser, team_id: null, team_role: null }),
+    }))
+
+    await auth.switchTeam(null)
+
+    const fetchMock = vi.mocked(fetch)
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/auth/switch-team',
+      expect.objectContaining({ body: JSON.stringify({ team_id: null }) }),
+    )
+  })
+
+  it('on success, persists the new access token and rehydrates teamId/teamRole', async () => {
+    const newToken = makeToken({ sub: '1', exp: nowSeconds() + 900 })
+    vi.stubGlobal('fetch', mockFetchByUrl({
+      '/auth/switch-team': jsonResponse({ access_token: newToken, refresh_token: 'r' }),
+      '/auth/validate': jsonResponse({ ...validUser, team_id: '7', team_role: 'admin' }),
+    }))
+
+    const user = await auth.switchTeam(7)
+
+    expect(localStorage.getItem('omnibioai_access_token')).toBe(newToken)
+    expect(user.teamId).toBe('7')
+    expect(user.teamRole).toBe('admin')
+    expect(auth.getSessionUser()?.teamId).toBe('7')
+  })
+
+  it('Team A -> Team B: teamId updates to the newly selected team', async () => {
+    const tokenB = makeToken({ sub: '1', exp: nowSeconds() + 900 })
+    vi.stubGlobal('fetch', mockFetchByUrl({
+      '/auth/switch-team': jsonResponse({ access_token: tokenB, refresh_token: 'r2' }),
+      '/auth/validate': jsonResponse({ ...validUser, team_id: '2', team_role: 'member' }),
+    }))
+
+    const user = await auth.switchTeam(2)
+    expect(user.teamId).toBe('2')
+  })
+
+  it('Team -> Personal: teamId becomes null', async () => {
+    const newToken = makeToken({ sub: '1', exp: nowSeconds() + 900 })
+    vi.stubGlobal('fetch', mockFetchByUrl({
+      '/auth/switch-team': jsonResponse({ access_token: newToken, refresh_token: 'r' }),
+      '/auth/validate': jsonResponse({ ...validUser, team_id: null, team_role: null }),
+    }))
+
+    const user = await auth.switchTeam(null)
+    expect(user.teamId).toBeNull()
+    expect(user.teamRole).toBeNull()
+  })
+
+  it('Personal -> Team: teamId becomes the selected team', async () => {
+    const newToken = makeToken({ sub: '1', exp: nowSeconds() + 900 })
+    vi.stubGlobal('fetch', mockFetchByUrl({
+      '/auth/switch-team': jsonResponse({ access_token: newToken, refresh_token: 'r' }),
+      '/auth/validate': jsonResponse({ ...validUser, team_id: '5', team_role: 'viewer' }),
+    }))
+
+    const user = await auth.switchTeam(5)
+    expect(user.teamId).toBe('5')
+  })
+
+  it('401: reports unauthorized and throws a session-expired message, without leaking which team/org', async () => {
+    localStorage.setItem('omnibioai_access_token', 'stale-token')
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      status: 401, ok: false, json: async () => ({ detail: 'Invalid refresh token' }),
+    } as unknown as Response)))
+
+    let thrown: Error | null = null
+    try {
+      await auth.switchTeam(7)
+    } catch (e) {
+      thrown = e as Error
+    }
+    expect(thrown?.message).toMatch(/session has expired/i)
+    // reportUnauthorized() already clears the token -- same forced-logout
+    // path every other 401 in this app goes through.
+    expect(localStorage.getItem('omnibioai_access_token')).toBeNull()
+  })
+
+  it('403: throws a generic denial message that does not name the org/team boundary', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      status: 403, ok: false, json: async () => ({ detail: 'Not a member of this team' }),
+    } as unknown as Response)))
+
+    let thrown: Error | null = null
+    try {
+      await auth.switchTeam(7)
+    } catch (e) {
+      thrown = e as Error
+    }
+    expect(thrown?.message).not.toMatch(/not a member/i)
+    expect(thrown?.message).not.toMatch(/organization/i)
+    expect(thrown?.message).toBeTruthy()
+  })
+
+  it('404: throws the same generic denial message as 403 -- does not reveal existence', async () => {
+    let thrown403: Error | null = null
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 403, ok: false, json: async () => ({}) } as unknown as Response)))
+    try { await auth.switchTeam(7) } catch (e) { thrown403 = e as Error }
+
+    let thrown404: Error | null = null
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 404, ok: false, json: async () => ({ detail: 'Team not found' }) } as unknown as Response)))
+    try { await auth.switchTeam(7) } catch (e) { thrown404 = e as Error }
+
+    expect(thrown404?.message).toBe(thrown403?.message)
+  })
+
+  it('network failure: throws a generic connectivity message, does not clear the session', async () => {
+    localStorage.setItem('omnibioai_access_token', 'still-valid-token')
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch') }))
+
+    let thrown: Error | null = null
+    try {
+      await auth.switchTeam(7)
+    } catch (e) {
+      thrown = e as Error
+    }
+    expect(thrown).not.toBeNull()
+    // Unlike a 401, a network blip is not a session problem -- the
+    // previously valid token must survive it (same fail-open posture
+    // silent refresh's own network-failure path already has).
+    expect(localStorage.getItem('omnibioai_access_token')).toBe('still-valid-token')
+  })
+
+  it('successful switch followed by a validate failure throws rather than silently succeeding', async () => {
+    const newToken = makeToken({ sub: '1', exp: nowSeconds() + 900 })
+    let call = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      call += 1
+      if (url === '/auth/switch-team') {
+        return jsonResponse({ access_token: newToken, refresh_token: 'r' }) as unknown as Response
+      }
+      // /auth/validate network failure right after a successful switch.
+      throw new TypeError('Failed to fetch')
+    }))
+
+    let thrown: Error | null = null
+    try {
+      await auth.switchTeam(7)
+    } catch (e) {
+      thrown = e as Error
+    }
+    expect(thrown).not.toBeNull()
+    expect(call).toBeGreaterThanOrEqual(2)
+    // The new token is still persisted (switch itself did succeed) even
+    // though this call couldn't confirm it -- not rolled back, matching
+    // validateSession's own existing fail-open behavior for a network
+    // blip.
+    expect(localStorage.getItem('omnibioai_access_token')).toBe(newToken)
+  })
+})
+
+describe('logout clears team state', () => {
+  it('getSessionUser().teamId is gone after logout (cachedUser fully cleared, not merged)', async () => {
+    const accessToken = makeToken({ sub: '1', exp: nowSeconds() + 900 })
+    vi.stubGlobal('fetch', mockFetchByUrl({
+      '/auth/login': jsonResponse({ access_token: accessToken, refresh_token: 'refresh-abc' }),
+      '/auth/validate': jsonResponse({ ...validUser, team_id: '7', team_role: 'admin' }),
+    }))
+    await auth.login('admin@omnibioai.org', 'password')
+    expect(auth.getSessionUser()?.teamId).toBe('7')
+
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ message: 'Logged out' }) as unknown as Response))
+    await auth.logout()
+
+    expect(auth.getSessionUser()).toBeNull()
+  })
+})
+
 describe('clearToken', () => {
   it('clears cached session state (getSessionUser)', async () => {
     const accessToken = makeToken({ sub: '1', exp: nowSeconds() + 900 })

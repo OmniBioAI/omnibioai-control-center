@@ -6,7 +6,7 @@ import type { SessionUser } from '../auth'
 
 const user: SessionUser = {
   userId: '2', email: 'no-perms@omnibioai.org', roles: ['user'],
-  permissions: [], orgId: null, orgRoles: [], schemaVersion: 2,
+  permissions: [], orgId: null, orgRoles: [], teamId: null, teamRole: null, schemaVersion: 2,
 }
 
 describe('AccessDenied', () => {

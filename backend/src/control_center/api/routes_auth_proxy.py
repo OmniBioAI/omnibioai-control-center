@@ -93,6 +93,19 @@ async def auth_refresh_proxy(request: Request) -> JSONResponse:
     return await _proxy_to_auth("/auth/refresh", request)
 
 
+# Mode B Phase 2: Workspace Switcher. Same _proxy_to_auth helper as every
+# other route in this file, no new logic -- the request body (team_id,
+# optionally refresh_token) and the omnibioai_session cookie both pass
+# through unmodified, and auth-service's own response (access_token/
+# refresh_token JSON body + its Set-Cookie) is relayed back exactly like
+# /auth/login and /auth/refresh already are. This service never inspects
+# or trusts team_id itself -- it's an opaque relay, same posture as
+# every other route here.
+@router.post("/auth/switch-team")
+async def auth_switch_team_proxy(request: Request) -> JSONResponse:
+    return await _proxy_to_auth("/auth/switch-team", request)
+
+
 @router.post("/auth/logout")
 async def auth_logout_proxy(request: Request) -> JSONResponse:
     # SSO Phase 2 PR13: auth-service's LogoutRequest.refresh_token is still

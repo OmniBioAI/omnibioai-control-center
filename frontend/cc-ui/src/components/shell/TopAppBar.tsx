@@ -5,6 +5,7 @@ import GlobalSearch from './GlobalSearch'
 import NotificationsMenu from './NotificationsMenu'
 import OrgSelector from './OrgSelector'
 import ProfileMenu from './ProfileMenu'
+import TeamSwitcher from './TeamSwitcher'
 import ThemeToggle from './ThemeToggle'
 
 interface Props {
@@ -20,9 +21,12 @@ interface Props {
 
 /**
  * Admin Console Phase 2: top app bar. Breadcrumb (left) + global search /
- * notifications / theme toggle / org selector / profile menu (right) --
- * every one of these is new UI except ProfileMenu's sign-out, which
- * reuses auth.ts's existing logout() (see ProfileMenu.tsx).
+ * notifications / theme toggle / org selector / team switcher / profile
+ * menu (right) -- every one of these is new UI except ProfileMenu's
+ * sign-out, which reuses auth.ts's existing logout() (see
+ * ProfileMenu.tsx). Mode B Phase 2 adds TeamSwitcher, the first real
+ * (non-placeholder) context switcher here -- OrgSelector next to it
+ * remains its own documented placeholder.
  */
 export default function TopAppBar({ breadcrumb, user, onSignOut, onMenuToggle, extraActions }: Props) {
   return (
@@ -47,6 +51,7 @@ export default function TopAppBar({ breadcrumb, user, onSignOut, onMenuToggle, e
         {extraActions && <div className="shell-topbar-extra" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>{extraActions}</div>}
         <GlobalSearch />
         <OrgSelector user={user} />
+        <TeamSwitcher user={user} />
         <ThemeToggle />
         <NotificationsMenu />
         <ProfileMenu user={user} onSignOut={onSignOut} />
