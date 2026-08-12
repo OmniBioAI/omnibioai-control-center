@@ -1,4 +1,4 @@
-import { hasAdminAccess, hasOrganizationsAccess, hasPlatformAdminAccess } from './auth'
+import { canSeeAnalytics, hasAdminAccess, hasOrganizationsAccess, hasPlatformAdminAccess } from './auth'
 
 /**
  * Admin Console Phase 2: the single source of truth for the sectioned
@@ -26,6 +26,7 @@ export type PageKey =
   | 'organizations' | 'users' | 'teams' | 'roles'
   | 'infrastructure' | 'workflows' | 'tool-execution' | 'ai-models'
   | 'security-overview' | 'mfa-policy' | 'iam' | 'audit-logs' | 'sessions' | 'interactions' | 'api-keys'
+  | 'analytics'
   | 'billing'
   | 'rag' | 'pubmed'
   | 'integrations' | 'settings'
@@ -242,6 +243,19 @@ export const NAVIGATION: NavSection[] = [
       // entirely backend-side, per-org, via omnibioai-billing's own
       // app.core.iam.get_authorized_organization_id/get_authorized_invoice.
       { key: 'billing', label: 'Billing', functional: true, visible: hasOrganizationsAccess },
+      // Usage Analytics v1 (PR-D). A real page (AnalyticsDashboard.tsx),
+      // no org picker in front of it (unlike 'billing'/'iam'/'api-keys'
+      // above) -- the backend's own require_analytics_scope resolves
+      // org_id/team_id from the caller's token, and the page itself
+      // offers an in-page organization filter only for a platform_admin
+      // (the only role with more than one org to choose from). `visible`
+      // is canSeeAnalytics -- narrower than hasOrganizationsAccess:
+      // platform_admin, an org's own org_admin, or a team's own
+      // team_admin only, mirroring require_analytics_scope's own
+      // platform_admin/org_admin/team_admin/deny matrix exactly (a
+      // regular org member is denied both here and, independently and
+      // authoritatively, by the backend).
+      { key: 'analytics', label: 'Usage Analytics', functional: true, visible: canSeeAnalytics },
       // PR B (Admin Console Billing/Usage consolidation): 'licenses' and
       // 'usage' removed from this section, not flipped to functional.
       // Both were Coming Soon placeholders that, on audit, turned out to

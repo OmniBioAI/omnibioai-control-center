@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { fetchSummary, fetchReportStatus, triggerGenerate } from '../api'
 import {
-  getSessionUser, hasAdminAccess, hasOrganizationsAccess, hasPlatformAdminAccess,
+  canSeeAnalytics as canSeeAnalyticsAccess, getSessionUser, hasAdminAccess, hasOrganizationsAccess, hasPlatformAdminAccess,
   UNAUTHORIZED_EVENT,
 } from '../auth'
 import { findNavItem } from '../navigation'
@@ -33,6 +33,7 @@ import BillingPage from '../pages/billing/BillingPage'
 import AuditLogsPage from '../pages/audit/AuditLogsPage'
 import SessionsPage from '../pages/security/SessionsPage'
 import InteractionsPage from '../pages/InteractionsPage'
+import AnalyticsDashboard from '../pages/AnalyticsDashboard'
 import SecurityDashboardPage from '../pages/security/SecurityDashboardPage'
 import OrganizationMFAPolicyPage from '../pages/security/OrganizationMFAPolicyPage'
 import AuthGate from './AuthGate'
@@ -128,6 +129,12 @@ function AdminDashboard() {
   // PR-B5-B: same reasoning as canSeeAuditLogs -- GET /platform/
   // interactions is manage_all_orgs-gated, not org-scoped.
   const canSeeInteractions = hasPlatformAdminAccess()
+  // Usage Analytics v1 (PR-D): narrower than canSeeOrganizations --
+  // mirrors require_analytics_scope's own platform_admin/org_admin/
+  // team_admin/deny matrix exactly, not the broader "any org member"
+  // gate 'billing'/'iam' use, since a regular org member is denied
+  // analytics access entirely by the backend.
+  const canSeeAnalytics = canSeeAnalyticsAccess()
   // PR11.5.6: same reasoning as canSeeAuditLogs -- GET /platform/users,
   // GET /platform/orgs, GET /platform/audit-events (everything the
   // Security Dashboard reads) are all manage_all_orgs-gated.
@@ -325,7 +332,7 @@ function AdminDashboard() {
       ) : undefined}
     >
       {renderPage(active, {
-        canSeeOps, canSeeOrganizations, canSeeUsers, canSeeAuditLogs, canSeeInteractions, canSeeSecurityOverview, refreshKey,
+        canSeeOps, canSeeOrganizations, canSeeUsers, canSeeAuditLogs, canSeeInteractions, canSeeAnalytics, canSeeSecurityOverview, refreshKey,
         selectedOrgId, setSelectedOrgId, selectedUserId, setSelectedUserId,
         teamsOrgHint, rolesOrgHint, onViewTeams: handleViewTeams, onViewRoles: handleViewRoles,
         selectedSsoOrgId, setSelectedSsoOrgId, navigateToSsoSettings,
@@ -344,6 +351,7 @@ interface RenderCtx {
   canSeeUsers: boolean
   canSeeAuditLogs: boolean
   canSeeInteractions: boolean
+  canSeeAnalytics: boolean
   canSeeSecurityOverview: boolean
   refreshKey: number
   selectedOrgId: number | null
@@ -531,6 +539,15 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
       return ctx.selectedBillingOrgId != null
         ? <BillingPage orgId={ctx.selectedBillingOrgId} onBack={() => ctx.setSelectedBillingOrgId(null)} />
         : <OrganizationsPage onSelect={ctx.setSelectedBillingOrgId} />
+
+    // Usage Analytics v1 (PR-D): flat, no org-picker/deep-link -- unlike
+    // 'billing' immediately above, the page itself resolves/filters
+    // scope in-page (an in-page organization <select> for a
+    // platform_admin only -- see AnalyticsDashboard.tsx), same "flat
+    // platform-wide page" shape 'audit-logs'/'interactions' already use.
+    case 'analytics':
+      if (!ctx.canSeeAnalytics) return null
+      return <AnalyticsDashboard />
 
     // PR-B6: no org picker -- every integration this page reads is
     // genuinely platform-wide (a deployment env var), not org-scoped.
