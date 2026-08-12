@@ -25,7 +25,7 @@ export type PageKey =
   | 'health' | 'docker' | 'ecosystem' | 'config' | 'llms' | 'cloud'
   | 'organizations' | 'users' | 'teams' | 'roles'
   | 'infrastructure' | 'workflows' | 'tool-execution' | 'ai-models'
-  | 'security-overview' | 'mfa-policy' | 'iam' | 'audit-logs' | 'sessions' | 'interactions' | 'api-keys'
+  | 'security-overview' | 'mfa-policy' | 'iam' | 'audit-logs' | 'sessions' | 'interactions' | 'api-keys' | 'compliance-report'
   | 'analytics'
   | 'billing'
   | 'rag' | 'pubmed'
@@ -188,6 +188,16 @@ export const NAVIGATION: NavSection[] = [
       // only thing that matters for security; this only decides
       // whether the nav entry renders.
       { key: 'audit-logs', label: 'Audit Logs', functional: true, visible: hasPlatformAdminAccess },
+      // HIPAA Basic Compliance Report v0.8.0. Same hasPlatformAdminAccess
+      // gate 'audit-logs' immediately above uses, for the identical
+      // reason -- GET /compliance/hipaa-report is manage_all_orgs-gated
+      // (compliance/router.py), not org-scoped; org_admin access is
+      // deferred to v0.9.0 (see compliance/service.py's own module
+      // docstring for why no org-scoped read path exists yet for two of
+      // the report's four sections). Placed next to Audit Logs/
+      // Interactions -- its closest technical precedent (platform-admin-
+      // only, date-ranged, reads the same underlying audit ledger).
+      { key: 'compliance-report', label: 'Compliance Report', functional: true, visible: hasPlatformAdminAccess },
       // PR-C (Control Center Sessions Integration): promoted from Coming
       // Soon to a real page (SessionsPage). Unlike 'audit-logs' above
       // (platform-admin-only backend data), this is self-service --

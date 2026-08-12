@@ -249,6 +249,18 @@ export function canSeeAnalytics(): boolean {
   )
 }
 
+// HIPAA Basic Compliance Report v0.8.0. UX-only mirror of the backend's
+// own compliance/router.py::_require_platform_admin -- platform_admin
+// (manage_all_orgs) only. Unlike canSeeAnalytics above, deliberately no
+// org_admin/team_admin branch: v0.8.0 scoped this report to
+// platform_admin only (no org-scoped read path exists yet for two of the
+// report's four sections -- see compliance/service.py's own module
+// docstring), org_admin access is deferred to v0.9.0. The backend
+// dependency re-checks this independently on every request regardless.
+export function canSeeComplianceReport(): boolean {
+  return hasPlatformAdminAccess()
+}
+
 // Fired whenever a gated request comes back 401 (missing/expired/invalid
 // token) so App.tsx can drop back to the login screen without every
 // call site needing to know about auth.
