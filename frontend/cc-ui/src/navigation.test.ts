@@ -79,6 +79,42 @@ describe('navigation: Interactions placement', () => {
   })
 })
 
+// HIPAA Basic Compliance Report v0.8.0. Same reasoning as the
+// Sessions/Interactions blocks above.
+
+describe('navigation: Compliance Report placement', () => {
+  it('has exactly one "compliance-report" entry across the entire tree', () => {
+    const found: { sectionKey: string; parentKey?: string }[] = []
+    for (const section of NAVIGATION) {
+      for (const item of section.items) {
+        if (item.key === 'compliance-report') found.push({ sectionKey: section.key })
+        for (const child of item.children ?? []) {
+          if (child.key === 'compliance-report') found.push({ sectionKey: section.key, parentKey: item.key })
+        }
+      }
+    }
+    expect(found).toHaveLength(1)
+  })
+
+  it('places "compliance-report" under the Security section, functional and gated', () => {
+    const securitySection = NAVIGATION.find(s => s.key === 'security')
+    expect(securitySection).toBeDefined()
+
+    const complianceItem = securitySection!.items.find(i => i.key === 'compliance-report')
+    expect(complianceItem).toBeDefined()
+    expect(complianceItem!.functional).toBe(true)
+    // Same gate audit-logs uses -- GET /compliance/hipaa-report is
+    // manage_all_orgs-gated, not org-scoped.
+    expect(complianceItem!.visible).toBeDefined()
+  })
+
+  it('is a top-level Security item alongside Audit Logs, not nested under it', () => {
+    const securitySection = NAVIGATION.find(s => s.key === 'security')!
+    const complianceItem = securitySection.items.find(i => i.key === 'compliance-report')!
+    expect(complianceItem.children).toBeUndefined()
+  })
+})
+
 // PR-B6. Same reasoning as the Sessions/Interactions blocks above.
 
 describe('navigation: Integrations placement', () => {

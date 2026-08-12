@@ -17,6 +17,13 @@ dependencies = [
   "neo4j>=5.0",
   "pip-audit>=2.7",
   "PyJWT[crypto]>=2.8",
+  # HIPAA Basic Compliance Report v0.8.0: PDF generation (compliance/pdf.py).
+  # Jinja2 renders templates/hipaa_report.html to a string; WeasyPrint
+  # renders that HTML/CSS string to a PDF. Neither was a dependency of any
+  # kind before this -- confirmed by scanning every requirements/pyproject
+  # in the workspace during discovery, zero hits.
+  "weasyprint>=62.0",
+  "jinja2>=3.1",
 ]
 
 [project.optional-dependencies]

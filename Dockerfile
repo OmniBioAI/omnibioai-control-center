@@ -28,7 +28,12 @@ WORKDIR /app
 # omnibioai-ui, omnibioai-launcher) -- Debian trixie's own repo ships
 # nodejs 20.x, matching the frontend-builder stage's node:20 above, so no
 # third-party NodeSource script is needed to pin the major version.
-RUN apt-get update && apt-get install -y --no-install-recommends     build-essential gcc g++ pkg-config libssl-dev libffi-dev curl ca-certificates cloc nodejs npm     && curl https://sh.rustup.rs -sSf | sh -s -- -y     && rm -rf /var/lib/apt/lists/*
+# libpango/libcairo/libgdk-pixbuf/shared-mime-info/fonts-liberation: real
+# runtime deps of weasyprint (compliance/pdf.py, HIPAA Basic Compliance
+# Report v0.8.0) -- it renders HTML/CSS to PDF via Pango/Cairo, not a
+# pure-Python engine, and imports libgobject at process start, so these
+# are needed here even though nothing else in this image did before.
+RUN apt-get update && apt-get install -y --no-install-recommends     build-essential gcc g++ pkg-config libssl-dev libffi-dev curl ca-certificates cloc nodejs npm     libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf2.0-0 libcairo2 shared-mime-info fonts-liberation     && curl https://sh.rustup.rs -sSf | sh -s -- -y     && rm -rf /var/lib/apt/lists/*
 
 ENV PATH="/root/.cargo/bin:${PATH}"
 

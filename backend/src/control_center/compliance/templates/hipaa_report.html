@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>HIPAA Compliance Report</title>
+<style>
+  @page {
+    size: Letter;
+    margin: 2.2cm 1.6cm 2.4cm 1.6cm;
+    @bottom-left {
+      content: "Generated {{ generated_at }}";
+      font-size: 8px; color: #9ca3af; font-family: 'Helvetica', sans-serif;
+    }
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 8px; color: #9ca3af; font-family: 'Helvetica', sans-serif;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Helvetica', 'Arial', sans-serif;
+    color: #111827;
+    font-size: 10.5px;
+    line-height: 1.5;
+  }
+  .cover {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    margin-bottom: 26px;
+    padding-bottom: 18px;
+    border-bottom: 2px solid #2563eb;
+  }
+  .cover-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .cover-brand-text { font-size: 20px; font-weight: 700; color: #2563eb; letter-spacing: -0.01em; }
+  .cover-brand-text span { font-weight: 400; color: #111827; }
+  .cover-title { font-size: 16px; font-weight: 700; color: #111827; margin-top: 6px; }
+  .cover-meta { font-size: 11px; color: #4b5563; }
+  .cover-meta strong { color: #111827; }
+  .disclaimer {
+    margin-top: 10px;
+    font-size: 8.5px;
+    color: #9ca3af;
+    font-style: italic;
+  }
+
+  .section { margin-top: 22px; page-break-inside: avoid; }
+  .section-title {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #111827;
+    border-bottom: 1px solid #e5e7eb;
+    padding-bottom: 5px;
+    margin-bottom: 10px;
+  }
+  .section-title .num {
+    display: inline-block;
+    width: 18px; height: 18px;
+    border-radius: 4px;
+    background: #2563eb;
+    color: white;
+    font-size: 10px;
+    text-align: center;
+    line-height: 18px;
+    margin-right: 7px;
+  }
+
+  .summary-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+  .stat-tile {
+    flex: 1 1 22%;
+    min-width: 110px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: #f9fafb;
+  }
+  .stat-tile .stat-value { font-size: 18px; font-weight: 700; color: #111827; }
+  .stat-tile .stat-label { font-size: 8.5px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
+  .stat-tile.warn .stat-value { color: #d97706; }
+  .stat-tile.danger .stat-value { color: #dc2626; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  th {
+    font-size: 8.5px;
+    font-weight: 700;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid #e5e7eb;
+    background: #f9fafb;
+  }
+  td {
+    font-size: 9.5px;
+    color: #374151;
+    padding: 6px 8px;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  tr:last-child td { border-bottom: none; }
+  .empty-note { font-size: 9.5px; color: #9ca3af; font-style: italic; padding: 8px 2px; }
+  .not-tracked-note {
+    font-size: 9px; color: #92400e; background: #fffbeb; border: 1px solid #fde68a;
+    border-radius: 6px; padding: 6px 10px; margin-top: 6px;
+  }
+  .unavailable-warning {
+    font-size: 9.5px; color: #991b1b; background: #fef2f2; border: 1px solid #fecaca;
+    border-radius: 6px; padding: 8px 12px; margin-bottom: 18px;
+  }
+  .unavailable-warning strong { display: block; margin-bottom: 3px; }
+  .unavailable-warning ul { margin: 4px 0 0 16px; padding: 0; }
+  .badge {
+    display: inline-block; font-size: 8px; font-weight: 700; padding: 2px 7px;
+    border-radius: 99px; text-transform: uppercase;
+  }
+  .badge-fail { background: #fee2e2; color: #b91c1c; }
+  .badge-deny { background: #fee2e2; color: #b91c1c; }
+  .badge-success { background: #dcfce7; color: #15803d; }
+</style>
+</head>
+<body>
+
+  <div class="cover">
+    <div class="cover-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 34" width="30" height="30">
+        <polygon points="16,2 28,8 28,22 16,28 4,22 4,8" fill="none" stroke="#2563eb" stroke-width="1.8"/>
+        <path d="M11 9 C16 13,14 17,20 20 M20 9 C15 13,17 17,11 20" stroke="#2563eb" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+        <circle cx="16" cy="15" r="2.2" fill="#2563eb"/>
+      </svg>
+      <span class="cover-brand-text">Omni<span>BioAI</span></span>
+    </div>
+    <div class="cover-title">HIPAA Basic Compliance Report</div>
+    <div class="cover-meta"><strong>Organization:</strong> {{ organization_name }} (org #{{ organization_id }})</div>
+    <div class="cover-meta"><strong>Period:</strong> {{ from_date }} &ndash; {{ to_date }}</div>
+    <div class="cover-meta"><strong>Generated:</strong> {{ generated_at }} by {{ generated_by }}</div>
+    <div class="disclaimer">
+      Basic compliance report (OmniBioAI Studio v0.8.0). Covers login/session
+      activity, RAG query access, and security events from existing audit
+      sources. Not a substitute for a full HIPAA compliance audit -- full
+      certification review is planned for v0.9.0.
+    </div>
+  </div>
+
+  {% if sources_unavailable %}
+  <div class="unavailable-warning">
+    <strong>Report may be incomplete -- one or more data sources were unavailable during generation:</strong>
+    <ul>
+      {% for source in sources_unavailable %}
+      <li>{{ source }}</li>
+      {% endfor %}
+    </ul>
+    Figures below reflect only the sources that responded successfully -- they are not a confirmed "zero activity" for the unavailable sources.
+  </div>
+  {% endif %}
+
+  <!-- ── Section 1: Executive Summary ─────────────────────────────────── -->
+  <div class="section">
+    <div class="section-title"><span class="num">1</span>Executive Summary</div>
+    <div class="summary-grid">
+      <div class="stat-tile">
+        <div class="stat-value">{{ summary.total_users }}</div>
+        <div class="stat-label">Total Users</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-value">{{ summary.active_users }}</div>
+        <div class="stat-label">Active Users In Period</div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-value">{{ summary.total_rag_queries }}</div>
+        <div class="stat-label">RAG Queries</div>
+      </div>
+      <div class="stat-tile{% if summary.failed_login_attempts > 0 %} warn{% endif %}">
+        <div class="stat-value">{{ summary.failed_login_attempts }}</div>
+        <div class="stat-label">Failed Login Attempts</div>
+      </div>
+      <div class="stat-tile{% if summary.security_events_requiring_review > 0 %} danger{% endif %}">
+        <div class="stat-value">{{ summary.security_events_requiring_review }}</div>
+        <div class="stat-label">Security Events Requiring Review</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Section 2: User Access Log ───────────────────────────────────── -->
+  <div class="section">
+    <div class="section-title"><span class="num">2</span>User Access Log</div>
+    {% if user_access %}
+    <table>
+      <thead>
+        <tr><th>User</th><th>Login Count</th><th>Last Login</th><th>Failed Attempts</th></tr>
+      </thead>
+      <tbody>
+        {% for row in user_access %}
+        <tr>
+          <td>{{ row.user_label }}</td>
+          <td>{{ row.login_count }}</td>
+          <td>{{ row.last_login }}</td>
+          <td>{% if row.failed_attempts > 0 %}<span class="badge badge-fail">{{ row.failed_attempts }}</span>{% else %}0{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-note">No login activity recorded in this period.</div>
+    {% endif %}
+    <div class="not-tracked-note">
+      Session duration is not included in this report -- no admin-facing
+      session listing exists yet (deferred to v0.9.0).
+    </div>
+  </div>
+
+  <!-- ── Section 3: RAG Query Log ─────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-title"><span class="num">3</span>RAG Query Log</div>
+    {% if rag_queries %}
+    <table>
+      <thead>
+        <tr><th>Timestamp</th><th>User</th><th>Trace ID</th></tr>
+      </thead>
+      <tbody>
+        {% for row in rag_queries %}
+        <tr>
+          <td>{{ row.timestamp }}</td>
+          <td>{{ row.user_label }}</td>
+          <td>{{ row.trace_id or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-note">No RAG queries recorded in this period.</div>
+    {% endif %}
+    <div class="not-tracked-note">
+      Dataset views/downloads and data uploads are not tracked anywhere in
+      the platform today and are excluded from this report (deferred to
+      v0.9.0 -- see report discovery notes).
+    </div>
+  </div>
+
+  <!-- ── Section 4: Security Events ───────────────────────────────────── -->
+  <div class="section">
+    <div class="section-title"><span class="num">4</span>Security Events</div>
+    {% if security_events %}
+    <table>
+      <thead>
+        <tr><th>Timestamp</th><th>Event</th><th>Actor</th><th>Outcome</th></tr>
+      </thead>
+      <tbody>
+        {% for row in security_events %}
+        <tr>
+          <td>{{ row.timestamp }}</td>
+          <td>{{ row.label }}</td>
+          <td>{{ row.actor_label }}</td>
+          <td>
+            {% if row.outcome == 'deny' or row.outcome == 'failure' %}
+              <span class="badge badge-deny">{{ row.outcome }}</span>
+            {% else %}
+              <span class="badge badge-success">{{ row.outcome }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-note">No security events recorded in this period.</div>
+    {% endif %}
+  </div>
+
+</body>
+</html>
