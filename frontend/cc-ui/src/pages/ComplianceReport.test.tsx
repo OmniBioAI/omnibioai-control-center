@@ -37,7 +37,7 @@ const REPORT: HipaaReport = {
   to_date: '2026-08-31',
   generated_at: '2026-08-11T12:00:00Z',
   generated_by: 'admin@omnibioai.org',
-  summary: { total_users: 2, active_users: 1, total_rag_queries: 1, security_incidents: 1 },
+  summary: { total_users: 2, active_users: 1, total_rag_queries: 1, failed_login_attempts: 1, security_events_requiring_review: 1 },
   user_access: [
     { user_label: 'alice@kumc.edu', login_count: 5, last_login: '2026-08-20T10:00:00', failed_attempts: 0 },
   ],
@@ -48,6 +48,7 @@ const REPORT: HipaaReport = {
     { timestamp: '2026-08-13T10:00:00', label: 'Role Assignment Denied', actor_label: 'bob@kumc.edu', outcome: 'deny', event_type: 'role_assignment_denied' },
   ],
   truncated: false,
+  sources_unavailable: [],
 }
 
 async function selectOrgAndGenerate(user: ReturnType<typeof userEvent.setup>) {
@@ -82,6 +83,39 @@ describe('ComplianceReport', () => {
     // RAG Query Log tables -- same user, two different sections.
     expect(screen.getAllByText('alice@kumc.edu').length).toBeGreaterThanOrEqual(2)
     expect(screen.getByText('Role Assignment Denied')).toBeInTheDocument()
+  })
+
+  it('shows the renamed summary labels, not "Security Incidents"', async () => {
+    vi.mocked(compliance.fetchHipaaReport).mockResolvedValue(REPORT)
+    const user = userEvent.setup()
+    render(<ComplianceReport />)
+    await waitFor(() => expect(screen.getByRole('option', { name: 'KUMC Research' })).toBeInTheDocument())
+    await selectOrgAndGenerate(user)
+    await waitFor(() => expect(screen.getByText('Failed Login Attempts')).toBeInTheDocument())
+    expect(screen.getByText('Security Events Requiring Review')).toBeInTheDocument()
+    expect(screen.queryByText('Security Incidents')).not.toBeInTheDocument()
+  })
+
+  it('warns when one or more data sources were unavailable', async () => {
+    vi.mocked(compliance.fetchHipaaReport).mockResolvedValue({
+      ...REPORT, sources_unavailable: ['RAG query events (omnibioai-billing)'],
+    })
+    const user = userEvent.setup()
+    render(<ComplianceReport />)
+    await waitFor(() => expect(screen.getByRole('option', { name: 'KUMC Research' })).toBeInTheDocument())
+    await selectOrgAndGenerate(user)
+    await waitFor(() => expect(screen.getByText(/some data sources were unavailable/)).toBeInTheDocument())
+    expect(screen.getByText(/RAG query events \(omnibioai-billing\)/)).toBeInTheDocument()
+  })
+
+  it('does not show the unavailable-sources warning when every source responded', async () => {
+    vi.mocked(compliance.fetchHipaaReport).mockResolvedValue(REPORT)
+    const user = userEvent.setup()
+    render(<ComplianceReport />)
+    await waitFor(() => expect(screen.getByRole('option', { name: 'KUMC Research' })).toBeInTheDocument())
+    await selectOrgAndGenerate(user)
+    await waitFor(() => expect(screen.getByText(/KUMC Research \(org #1\)/)).toBeInTheDocument())
+    expect(screen.queryByText(/some data sources were unavailable/)).not.toBeInTheDocument()
   })
 
   it('shows empty-state notes when a section has no rows', async () => {

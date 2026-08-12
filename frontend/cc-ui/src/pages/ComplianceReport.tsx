@@ -182,6 +182,16 @@ function ReportPreview({ report }: { report: HipaaReport }) {
         </div>
       )}
 
+      {report.sources_unavailable.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <EmptyState
+            icon={AlertTriangle}
+            title="Report may be incomplete -- some data sources were unavailable"
+            description={`These figures reflect only the sources that responded successfully, not a confirmed "zero activity" for: ${report.sources_unavailable.join(', ')}.`}
+          />
+        </div>
+      )}
+
       <Card style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 12 }}>
           {report.organization_name} (org #{report.organization_id}) &middot; {report.from_date} to {report.to_date}
@@ -193,9 +203,14 @@ function ReportPreview({ report }: { report: HipaaReport }) {
           <StatCard label="Active Users" value={report.summary.active_users} />
           <StatCard label="RAG Queries" value={report.summary.total_rag_queries} />
           <StatCard
-            label="Security Incidents"
-            value={report.summary.security_incidents}
-            accent={report.summary.security_incidents > 0 ? 'red' : 'default'}
+            label="Failed Login Attempts"
+            value={report.summary.failed_login_attempts}
+            accent={report.summary.failed_login_attempts > 0 ? 'amber' : 'default'}
+          />
+          <StatCard
+            label="Security Events Requiring Review"
+            value={report.summary.security_events_requiring_review}
+            accent={report.summary.security_events_requiring_review > 0 ? 'red' : 'default'}
           />
         </div>
       </Card>

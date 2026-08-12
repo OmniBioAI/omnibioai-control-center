@@ -14,11 +14,12 @@ const REPORT: HipaaReport = {
   to_date: '2026-08-31',
   generated_at: '2026-08-11T12:00:00Z',
   generated_by: 'admin@omnibioai.org',
-  summary: { total_users: 2, active_users: 1, total_rag_queries: 3, security_incidents: 0 },
+  summary: { total_users: 2, active_users: 1, total_rag_queries: 3, failed_login_attempts: 0, security_events_requiring_review: 0 },
   user_access: [],
   rag_queries: [],
   security_events: [],
   truncated: false,
+  sources_unavailable: [],
 }
 
 describe('fetchHipaaReport', () => {

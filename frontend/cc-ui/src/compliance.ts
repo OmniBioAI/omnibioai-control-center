@@ -33,11 +33,18 @@ function buildQuery(filters: HipaaReportFilters): URLSearchParams {
 
 // Mirrors control_center.compliance.service.build_report's response
 // exactly (backend/src/control_center/compliance/service.py).
+//
+// Pre-merge security review fix: security_incidents (implying a legal/
+// HIPAA reportable determination this report never makes) is replaced
+// by two separately-named counters -- failed_login_attempts (routine,
+// expected noise) and security_events_requiring_review
+// (role_assignment_denied/mfa_verification_failed specifically).
 export interface HipaaReportSummary {
   total_users: number
   active_users: number
   total_rag_queries: number
-  security_incidents: number
+  failed_login_attempts: number
+  security_events_requiring_review: number
 }
 
 export interface HipaaReportUserAccessRow {
@@ -73,6 +80,12 @@ export interface HipaaReport {
   rag_queries: HipaaReportRagQueryRow[]
   security_events: HipaaReportSecurityEventRow[]
   truncated: boolean
+  /** Pre-merge security review fix: human-readable names of data sources
+   * that failed during report generation (e.g. "RAG query events
+   * (omnibioai-billing)") -- a downstream outage is surfaced here rather
+   * than silently rendering as "this org had zero activity". Empty when
+   * every source responded successfully. */
+  sources_unavailable: string[]
 }
 
 export async function fetchHipaaReport(filters: HipaaReportFilters): Promise<HipaaReport> {
