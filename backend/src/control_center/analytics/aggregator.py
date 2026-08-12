@@ -119,6 +119,18 @@ def apply_interaction_event(event: AnalyticsEvent) -> bool:
         pipe.expire(key, AGG_TTL_SECONDS)
     pipe.execute()
 
+    if event.org_id is not None:
+        # A small, low-cardinality index of "which services has this org
+        # actually seen traffic from" -- read_known_services below is
+        # what /analytics/services (a later PR) enumerates, since there
+        # is no other way to discover which analytics:agg:{org}:{service}:
+        # {date} keys exist without this index (Redis has no efficient
+        # "list keys matching a pattern" primitive worth using here).
+        # No TTL: a service name, once seen for an org, stays a legitimate
+        # thing to report zero-for on a quiet day, same reasoning
+        # AGG_TTL_SECONDS's own 90-day retention already applies to.
+        _redis.sadd(f"analytics:services:{event.org_id}", event.service)
+
     if event.user_id is not None:
         active_keys = [f"analytics:active_users:{date_str}"]
         if event.org_id is not None:
@@ -269,6 +281,34 @@ def _sunion_count(keys: list[str]) -> int:
 
 def read_daily_active_users(date_strs: list[str], org_id: Optional[int] = None) -> list[dict[str, Any]]:
     return [{"date": d, "count": read_active_user_count([d], org_id=org_id)} for d in date_strs]
+
+
+def read_active_user_ids(date_strs: list[str], org_id: Optional[int] = None) -> set[str]:
+    """Raw user_id set (union across date_strs) -- INTERNAL ONLY. Never
+    returned directly by any API response (task brief: "do not expose
+    raw user IDs through normal analytics endpoints") -- the one
+    legitimate caller is a later PR's team-roster intersection, which
+    only ever surfaces a resulting *count*, never this set itself."""
+    prefix = f"analytics:active_users:{org_id}:" if org_id is not None else "analytics:active_users:"
+    keys = [f"{prefix}{d}" for d in date_strs]
+    if not keys:
+        return set()
+    try:
+        if len(keys) == 1:
+            return set(_redis.smembers(keys[0]))
+        return set(_redis.sunion(*keys))
+    except Exception:
+        return set()
+
+
+def read_known_services(org_id: int) -> list[str]:
+    """The service names apply_interaction_event has ever recorded
+    traffic from for this org -- see that function's own comment on the
+    `analytics:services:{org_id}` index this reads."""
+    try:
+        return sorted(_redis.smembers(f"analytics:services:{org_id}"))
+    except Exception:
+        return []
 
 
 def read_user_activity(org_id: int, date_str: str) -> dict[str, int]:

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 import redis
 
@@ -58,6 +58,43 @@ def get_or_set(
 
     CACHE_MISSES.labels(endpoint=endpoint).inc()
     value = compute_fn()
+    try:
+        _redis.setex(key, ttl, json.dumps(value, default=str))
+    except Exception:
+        pass
+    return value
+
+
+async def get_or_set_async(
+    key: str,
+    endpoint: str,
+    compute_coro: Callable[[], Awaitable[Any]],
+    ttl: int = DEFAULT_TTL_SECONDS,
+) -> Any:
+    """Async twin of `get_or_set` -- PR-C's service layer talks to other
+    upstreams (billing/TES/team-roster) via `httpx.AsyncClient` from
+    inside async FastAPI route handlers, so the compute side has to be
+    awaitable. Redis itself is still touched synchronously (redis-py's
+    sync client, same as the rest of this package) -- fine here since
+    those calls are fast, in-network, and already wrapped in their own
+    try/except; only `compute_coro` needs to be awaited.
+    """
+    from control_center.analytics.metrics import CACHE_HITS, CACHE_MISSES
+
+    try:
+        cached = _redis.get(key)
+    except Exception:
+        cached = None
+
+    if cached is not None:
+        CACHE_HITS.labels(endpoint=endpoint).inc()
+        try:
+            return json.loads(cached)
+        except (TypeError, ValueError):
+            pass
+
+    CACHE_MISSES.labels(endpoint=endpoint).inc()
+    value = await compute_coro()
     try:
         _redis.setex(key, ttl, json.dumps(value, default=str))
     except Exception:

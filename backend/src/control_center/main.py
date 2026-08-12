@@ -49,6 +49,7 @@ from control_center.api.routes_workflow_bundles_proxy import router as workflow_
 from control_center.api.routes_rag_proxy import router as rag_proxy_router
 from control_center.api.routes_platform_config_proxy import router as platform_config_proxy_router
 from control_center.api.routes_platform_interactions_proxy import router as platform_interactions_proxy_router
+from control_center.analytics.router import router as analytics_router
 from control_center.api.routes_cloud import router as cloud_router
 from control_center.api.routes_integrations import router as integrations_router
 from control_center.core.auth import require_permission
@@ -180,6 +181,14 @@ app.include_router(platform_interactions_proxy_router)
 # that data, or (Infrastructure/Operations only) via its own in-process
 # platform.manage_infra check.
 app.include_router(dashboard_router)
+# Usage Analytics v1: every route here is individually gated by its own
+# Depends(require_analytics_scope) (401/403 per-request, platform_admin/
+# org_admin/team_admin/deny) -- no blanket router-level permission
+# dependency, same "each route owns its own authorization" posture
+# dashboard_router immediately above already established, for the same
+# reason: a single blanket permission here would either over- or
+# under-restrict across the different roles analytics needs to serve.
+app.include_router(analytics_router)
 
 
 # ==============================================================================

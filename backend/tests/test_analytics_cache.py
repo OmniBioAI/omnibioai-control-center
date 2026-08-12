@@ -12,6 +12,64 @@ from control_center.analytics import cache
 from _fake_redis import FakeRedis
 
 
+class GetOrSetAsyncTestCase(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.fake = FakeRedis()
+        self._patcher = patch.object(cache, "_redis", self.fake)
+        self._patcher.start()
+        self.addCleanup(self._patcher.stop)
+
+    async def test_cache_miss_awaits_compute_and_stores(self) -> None:
+        calls = []
+
+        async def compute():
+            calls.append(1)
+            return {"total": 5}
+
+        result = await cache.get_or_set_async("ak1", "overview", compute)
+        self.assertEqual(result, {"total": 5})
+        self.assertEqual(len(calls), 1)
+
+    async def test_cache_hit_skips_compute(self) -> None:
+        async def compute():
+            return {"total": 1}
+
+        await cache.get_or_set_async("ak2", "overview", compute)
+
+        async def should_not_run():
+            raise AssertionError("should not compute")
+
+        result = await cache.get_or_set_async("ak2", "overview", should_not_run)
+        self.assertEqual(result, {"total": 1})
+
+    async def test_corrupted_cache_entry_falls_back_to_compute(self) -> None:
+        self.fake._strings["ak3"] = "not-json{"
+
+        async def compute():
+            return {"total": 9}
+
+        result = await cache.get_or_set_async("ak3", "overview", compute)
+        self.assertEqual(result, {"total": 9})
+
+    async def test_redis_get_failure_falls_back_to_compute(self) -> None:
+        self.fake.raise_on = {"get"}
+
+        async def compute():
+            return {"total": 2}
+
+        result = await cache.get_or_set_async("ak4", "overview", compute)
+        self.assertEqual(result, {"total": 2})
+
+    async def test_redis_setex_failure_still_returns_value(self) -> None:
+        self.fake.raise_on = {"setex"}
+
+        async def compute():
+            return {"total": 3}
+
+        result = await cache.get_or_set_async("ak5", "overview", compute)
+        self.assertEqual(result, {"total": 3})
+
+
 class GetOrSetTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.fake = FakeRedis()
