@@ -16,13 +16,15 @@ happens in this file.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi.responses import Response
 
 from control_center.analytics import cache
-from control_center.compliance import service
+from control_center.compliance import pdf, service
 from control_center.core.auth import require_permission
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
@@ -78,4 +80,37 @@ async def hipaa_report(
     return await _build_cached_report(
         org_id=org_id, from_date=from_date, to_date=to_date,
         generated_by=_generated_by(admin), authorization=authorization,
+    )
+
+
+def _filename_stem(org_id: int, from_date: date, to_date: date) -> str:
+    return f"hipaa-report-org{org_id}-{from_date.isoformat()}-to-{to_date.isoformat()}"
+
+
+@router.get("/hipaa-report/pdf")
+async def hipaa_report_pdf(
+    from_date: date = Query(...),
+    to_date: date = Query(...),
+    org_id: int = Query(...),
+    authorization: Optional[str] = Header(default=None),
+    admin: dict = Depends(_require_platform_admin),
+) -> Response:
+    _validate_range(from_date, to_date)
+    context = await _build_cached_report(
+        org_id=org_id, from_date=from_date, to_date=to_date,
+        generated_by=_generated_by(admin), authorization=authorization,
+    )
+    # WeasyPrint's layout pass is a real, blocking CPU cost (not I/O) --
+    # off the event loop via run_in_executor, the same pattern
+    # api/routes_llm.py's own count_abstracts/list_indexed_domains already
+    # use for their blocking filesystem walks, so this request doesn't
+    # stall every other concurrent request this process is serving.
+    loop = asyncio.get_event_loop()
+    pdf_bytes = await loop.run_in_executor(None, pdf.render_report_pdf, context)
+
+    filename = f"{_filename_stem(org_id, from_date, to_date)}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

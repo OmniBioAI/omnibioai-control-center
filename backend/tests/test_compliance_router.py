@@ -142,5 +142,41 @@ class HipaaReportEndpointTestCase(ComplianceRouterTestCase):
         self.assertEqual(self.build_report_mock.await_count, 2)
 
 
+class HipaaReportPdfEndpointTestCase(ComplianceRouterTestCase):
+    def test_platform_admin_gets_pdf(self) -> None:
+        r = client.get("/compliance/hipaa-report/pdf", params=self._params(), headers=_auth(sub="1", permissions=[MANAGE_ALL_ORGS]))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.headers["content-type"], "application/pdf")
+        self.assertTrue(r.content.startswith(b"%PDF-"))
+
+    def test_content_disposition_filename(self) -> None:
+        r = client.get("/compliance/hipaa-report/pdf", params=self._params(), headers=_auth(sub="1", permissions=[MANAGE_ALL_ORGS]))
+        self.assertIn('filename="hipaa-report-org1-2026-08-01-to-2026-08-31.pdf"', r.headers["content-disposition"])
+
+    def test_org_admin_without_manage_all_orgs_denied(self) -> None:
+        headers = _auth(sub="1", permissions=[], org_id=1, org_role=["org_admin"])
+        r = client.get("/compliance/hipaa-report/pdf", params=self._params(), headers=headers)
+        self.assertEqual(r.status_code, 403)
+
+    def test_missing_token_returns_401(self) -> None:
+        r = client.get("/compliance/hipaa-report/pdf", params=self._params())
+        self.assertEqual(r.status_code, 401)
+
+    def test_from_date_after_to_date_returns_400(self) -> None:
+        params = self._params(from_date="2026-08-31", to_date="2026-08-01")
+        r = client.get("/compliance/hipaa-report/pdf", params=params, headers=_auth(sub="1", permissions=[MANAGE_ALL_ORGS]))
+        self.assertEqual(r.status_code, 400)
+
+    def test_pdf_and_json_share_the_same_cache_entry(self) -> None:
+        """Both routes call _build_cached_report with the same cache key
+        shape -- the PDF endpoint should reuse a JSON request's already-
+        cached data instead of recomputing it."""
+        headers = _auth(sub="1", permissions=[MANAGE_ALL_ORGS])
+        client.get("/compliance/hipaa-report", params=self._params(), headers=headers)
+        r = client.get("/compliance/hipaa-report/pdf", params=self._params(), headers=headers)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.build_report_mock.await_count, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
