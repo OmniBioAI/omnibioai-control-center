@@ -111,15 +111,15 @@ vi.mock('../pages/billing/BillingPage', () => ({
 
 const admin: SessionUser = {
   userId: '1', email: 'admin@omnibioai.org', roles: ['admin'],
-  permissions: ['manage_config'], orgId: null, orgRoles: [], schemaVersion: 2,
+  permissions: ['manage_config'], orgId: null, orgRoles: [], teamId: null, teamRole: null, schemaVersion: 2,
 }
 const nonAdmin: SessionUser = {
   userId: '2', email: 'no-perms@omnibioai.org', roles: ['user'],
-  permissions: [], orgId: null, orgRoles: [], schemaVersion: 2,
+  permissions: [], orgId: null, orgRoles: [], teamId: null, teamRole: null, schemaVersion: 2,
 }
 const orgOnlyUser: SessionUser = {
   userId: '3', email: 'org-admin@acme.test', roles: ['user'],
-  permissions: ['manage_org'], orgId: '9', orgRoles: ['org_admin'], schemaVersion: 2,
+  permissions: ['manage_org'], orgId: '9', orgRoles: ['org_admin'], teamId: null, teamRole: null, schemaVersion: 2,
 }
 
 /** Clicks a SidebarNav item by its visible label -- the click lands on

@@ -194,6 +194,78 @@ class TestAuthLogoutProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 503)
 
 
+class TestSwitchTeamProxy(unittest.TestCase):
+    """Mode B Phase 2: /auth/switch-team -- same _proxy_to_auth relay
+    every other route in this file already uses, no new logic. This
+    service never inspects team_id itself; these tests only prove the
+    relay (path/body/status/cookie), matching TestAuthRefreshProxy's own
+    shape exactly."""
+
+    def test_request_reaches_auth_service_at_correct_path(self) -> None:
+        upstream = _mock_response(200, {"access_token": "new-tok", "refresh_token": "new-rtok"})
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            client.post("/auth/switch-team", json={"team_id": 7})
+        call_args = mock_ctx.__aenter__.return_value.post.call_args
+        self.assertEqual(call_args.args[0], "http://auth-service:8001/auth/switch-team")
+
+    def test_successful_response_returned(self) -> None:
+        upstream = _mock_response(200, {"access_token": "new-tok", "refresh_token": "new-rtok"})
+        with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.post("/auth/switch-team", json={"team_id": 7})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["access_token"], "new-tok")
+
+    def test_null_team_id_forwarded_unchanged_for_personal_workspace(self) -> None:
+        """team_id: null is a real, meaningful request (switch back to
+        the personal workspace), not an omitted/optional field -- must
+        reach auth-service exactly as sent, not stripped or defaulted."""
+        upstream = _mock_response(200, {"access_token": "new-tok", "refresh_token": "new-rtok"})
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            client.post("/auth/switch-team", json={"team_id": None})
+        call_kwargs = mock_ctx.__aenter__.return_value.post.call_args.kwargs
+        self.assertIn(b'"team_id":null', call_kwargs["content"].replace(b" ", b""))
+
+    def test_denied_response_propagated(self) -> None:
+        upstream = _mock_response(403, {"detail": "Not a member of this team"})
+        with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.post("/auth/switch-team", json={"team_id": 999})
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["detail"], "Not a member of this team")
+
+    def test_not_found_response_propagated(self) -> None:
+        upstream = _mock_response(404, {"detail": "Team not found"})
+        with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.post("/auth/switch-team", json={"team_id": 999})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_auth_service_unreachable_returns_503(self) -> None:
+        with patch(
+            "control_center.api.routes_auth_proxy.httpx.AsyncClient",
+            return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
+        ):
+            resp = client.post("/auth/switch-team", json={"team_id": 7})
+        self.assertEqual(resp.status_code, 503)
+
+    def test_forwards_set_cookie_to_browser(self) -> None:
+        upstream = _mock_response(
+            200, {"access_token": "new-tok", "refresh_token": "new-rtok"},
+            set_cookies=["omnibioai_session=new-rtok; HttpOnly; Path=/; Domain=.omnibioai.org"],
+        )
+        with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.post("/auth/switch-team", json={"team_id": 7})
+        self.assertIn("omnibioai_session=new-rtok", resp.headers.get("set-cookie", ""))
+
+    def test_forwards_incoming_session_cookie_upstream(self) -> None:
+        upstream = _mock_response(200, {"access_token": "tok"})
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            client.post("/auth/switch-team", json={"team_id": 7}, cookies={"omnibioai_session": "cookie-rtok"})
+        call_kwargs = mock_ctx.__aenter__.return_value.post.call_args.kwargs
+        self.assertEqual(call_kwargs["headers"]["Cookie"], "omnibioai_session=cookie-rtok")
+
+
 class TestSessionCookieForwarding(unittest.TestCase):
     """SSO Phase 2 PR13: _proxy_to_auth relays the omnibioai_session cookie
     in both directions -- previously it silently dropped Set-Cookie from
