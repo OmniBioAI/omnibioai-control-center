@@ -4,6 +4,13 @@ omnibioai-billing PR feature/hipaa-report-usage-events-read). Same
 _get/Authorization-forwarding shape as auth_client.py and
 analytics/billing_client.py -- not merged with the latter, see
 auth_client.py's own module docstring for why.
+
+Pre-merge security review finding (2026-08-12): same fix as
+auth_client.py -- list_all_usage_events now returns an explicit
+`unavailable` flag distinct from `truncated`, so a billing-service
+outage doesn't get silently rendered as "this org made zero RAG
+queries." See auth_client.list_all_audit_events's own docstring for the
+full reasoning (identical here).
 """
 from __future__ import annotations
 
@@ -30,9 +37,11 @@ async def list_all_usage_events(
     end_date: date,
     resource: Optional[str] = None,
     authorization: Optional[str],
-) -> tuple[list[dict], bool]:
+) -> tuple[list[dict], bool, bool]:
     """Pages through GET /billing/organizations/{organization_id}/usage-events
-    until exhausted or _MAX_PAGES is hit. Returns (all events, truncated).
+    until exhausted or _MAX_PAGES is hit. Returns (items, truncated,
+    unavailable) -- see auth_client.list_all_audit_events's docstring for
+    what each flag means; the same distinction applies here.
     """
     headers = {"Authorization": authorization} if authorization else {}
     items: list[dict] = []
@@ -56,9 +65,14 @@ async def list_all_usage_events(
                     params=params, headers=headers,
                 )
             except httpx.RequestError:
-                break
+                # A fetch failure mid-pagination still leaves `items`
+                # holding whatever earlier pages already succeeded --
+                # returned as-is, but flagged unavailable, same
+                # "partial sample, not a small-but-complete result"
+                # reasoning as auth_client.py.
+                return items, False, True
             if r.status_code != 200:
-                break
+                return items, False, True
 
             result = r.json()
             page_events = result.get("events", [])
@@ -68,6 +82,6 @@ async def list_all_usage_events(
             offset += len(page_events)
             page += 1
             if offset >= total_count or not page_events:
-                return items, False
+                return items, False, False
 
-    return items, page >= _MAX_PAGES
+    return items, True, False

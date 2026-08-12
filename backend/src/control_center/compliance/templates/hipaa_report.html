@@ -104,6 +104,12 @@
     font-size: 9px; color: #92400e; background: #fffbeb; border: 1px solid #fde68a;
     border-radius: 6px; padding: 6px 10px; margin-top: 6px;
   }
+  .unavailable-warning {
+    font-size: 9.5px; color: #991b1b; background: #fef2f2; border: 1px solid #fecaca;
+    border-radius: 6px; padding: 8px 12px; margin-bottom: 18px;
+  }
+  .unavailable-warning strong { display: block; margin-bottom: 3px; }
+  .unavailable-warning ul { margin: 4px 0 0 16px; padding: 0; }
   .badge {
     display: inline-block; font-size: 8px; font-weight: 700; padding: 2px 7px;
     border-radius: 99px; text-transform: uppercase;
@@ -136,6 +142,18 @@
     </div>
   </div>
 
+  {% if sources_unavailable %}
+  <div class="unavailable-warning">
+    <strong>Report may be incomplete -- one or more data sources were unavailable during generation:</strong>
+    <ul>
+      {% for source in sources_unavailable %}
+      <li>{{ source }}</li>
+      {% endfor %}
+    </ul>
+    Figures below reflect only the sources that responded successfully -- they are not a confirmed "zero activity" for the unavailable sources.
+  </div>
+  {% endif %}
+
   <!-- ── Section 1: Executive Summary ─────────────────────────────────── -->
   <div class="section">
     <div class="section-title"><span class="num">1</span>Executive Summary</div>
@@ -152,9 +170,13 @@
         <div class="stat-value">{{ summary.total_rag_queries }}</div>
         <div class="stat-label">RAG Queries</div>
       </div>
-      <div class="stat-tile{% if summary.security_incidents > 0 %} danger{% endif %}">
-        <div class="stat-value">{{ summary.security_incidents }}</div>
-        <div class="stat-label">Security Incidents</div>
+      <div class="stat-tile{% if summary.failed_login_attempts > 0 %} warn{% endif %}">
+        <div class="stat-value">{{ summary.failed_login_attempts }}</div>
+        <div class="stat-label">Failed Login Attempts</div>
+      </div>
+      <div class="stat-tile{% if summary.security_events_requiring_review > 0 %} danger{% endif %}">
+        <div class="stat-value">{{ summary.security_events_requiring_review }}</div>
+        <div class="stat-label">Security Events Requiring Review</div>
       </div>
     </div>
   </div>

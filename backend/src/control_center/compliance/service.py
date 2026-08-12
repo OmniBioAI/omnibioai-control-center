@@ -20,8 +20,15 @@ producing code directly, not assumed):
    rows for every org; not filtering would leak every other org's login
    activity into a report scoped to one org. Resolved here by fetching
    login events platform-wide, then filtering to this org's own roster
-   (`auth_client.get_org_members`) client-side -- accurate, no new
-   endpoints, no new instrumentation.
+   (`auth_client.get_org_members`) client-side -- accurate for a user
+   whose org membership hasn't changed near the report boundary; a user
+   who joined/left around the edges of the requested period can be
+   mis-included/excluded, since the roster is fetched as of "now", not
+   as of the report period. This is a real, documented limitation (not
+   fixed here -- it needs the org-scoped login architecture v0.9 is
+   scoped to deliver), see test_multi_org_user_login_appears_in_every_
+   member_org's_report in test_compliance_service.py for what this looks
+   like in practice.
 2. The generic cross-service audit ledger (omnibioai-security-audit's
    `audit_events` table, `decision=="deny"` for 403s) has no
    `organization_id` column at all (confirmed reading
@@ -35,10 +42,36 @@ producing code directly, not assumed):
    the only per-org-accurate "access denied" signal available today, so
    Section 4's "permission denied" row reflects that specifically, not a
    generic 403 count.
+
+Pre-merge security review fixes (2026-08-12):
+
+- `sources_unavailable`: every auth_client/billing_client call now
+  reports whether it actually succeeded, not just how much data it
+  returned. A downstream outage is recorded by name in
+  `sources_unavailable` rather than silently rendering as "this org had
+  zero users/events" -- see auth_client.py's own docstring for the
+  status vocabulary this consumes.
+- `OrganizationNotFoundError`: get_organization's "not_found" status
+  (a real 404 from omnibioai-auth, not a network failure) now raises
+  here instead of silently falling back to a placeholder label --
+  router.py converts this to a real HTTP 404.
+- generated_by/generated_at are NO LONGER part of this function's
+  return value or the cached payload -- router.py stamps them fresh on
+  every response, cached or not, so a cache hit can never attribute the
+  report to whichever admin happened to trigger the original cache-miss
+  computation. See router.py's own comment at the call site.
+- `security_incidents` (a name implying a legal/HIPAA reportable
+  determination this report never makes) is replaced by two separate,
+  more honestly-named counters: `failed_login_attempts` (routine,
+  expected operational noise) and `security_events_requiring_review`
+  (role_assignment_denied/mfa_verification_failed specifically -- see
+  _INCIDENT_EVENT_TYPES). The Section 4 events table itself is
+  unchanged -- both kinds of event still appear there, only the Section
+  1 summary terminology changed.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time
 from typing import Any, Optional
 
 from control_center.compliance import auth_client, billing_client
@@ -63,24 +96,33 @@ _SECURITY_EVENT_TYPES = {
     "mfa_reset_by_admin", "mfa_verification_failed",
 }
 
-# Event types whose mere occurrence is a security-relevant "incident" for
-# Section 1's summary count -- denials/failures, not every role change
-# (an admin routinely assigning a role isn't an incident; a rejected
-# privilege-escalation attempt or a failed MFA check is).
+# Event types whose mere occurrence belongs in Section 1's
+# security_events_requiring_review count -- denials/failures, not every
+# role change (an admin routinely assigning a role isn't something that
+# needs review; a rejected privilege-escalation attempt or a failed MFA
+# check is). Deliberately excludes login_failure -- that has its own,
+# separately-named counter (failed_login_attempts) precisely because a
+# mistyped password is not the same kind of thing as a rejected
+# escalation attempt, and conflating them under one "incidents" number
+# was the exact problem this rename fixes.
 _INCIDENT_EVENT_TYPES = {"role_assignment_denied", "mfa_verification_failed"}
+
+
+class OrganizationNotFoundError(Exception):
+    """Raised when omnibioai-auth confirms (a real 404, not a network
+    failure -- see auth_client.get_organization's own docstring) that
+    `organization_id` doesn't exist. router.py converts this to an HTTP
+    404; every other failure mode degrades to a "some data unavailable"
+    warning instead, since this is the one case where the report itself
+    cannot mean anything at all."""
+
+    def __init__(self, organization_id: int):
+        super().__init__(f"Organization {organization_id} not found")
+        self.organization_id = organization_id
 
 
 def _humanize_event_type(event_type: str) -> str:
     return event_type.replace("_", " ").title()
-
-
-def _parse_iso(value: Optional[str]) -> Optional[datetime]:
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
 
 
 def _is_org_member(event: dict, member_by_id: dict, member_by_email: dict) -> bool:
@@ -91,7 +133,7 @@ def _is_org_member(event: dict, member_by_id: dict, member_by_email: dict) -> bo
     return email is not None and email in member_by_email
 
 
-def _build_user_access(login_success: list[dict], login_failure: list[dict], member_by_id: dict) -> list[dict]:
+def _build_user_access(login_success: list[dict], login_failure: list[dict]) -> list[dict]:
     """One row per org member with any login activity in the period --
     login_count/last_login from login_success, failed_attempts from
     login_failure, grouped by email (metadata.email is always set on both
@@ -164,48 +206,75 @@ async def build_report(
     organization_id: int,
     from_date: date,
     to_date: date,
-    generated_by: str,
     authorization: Optional[str],
 ) -> dict[str, Any]:
+    """Returns the cacheable report body -- everything EXCEPT
+    generated_by/generated_at, which router.py stamps fresh on every
+    response (cached or not) so a cache hit is never attributed to the
+    wrong administrator. See this module's own docstring, "Pre-merge
+    security review fixes", for why that split exists.
+    """
     start_dt = datetime.combine(from_date, time.min)
     end_dt = datetime.combine(to_date, time.max)
 
-    org = await auth_client.get_organization(organization_id, authorization)
-    members = await auth_client.get_org_members(organization_id, authorization)
+    org, org_status = await auth_client.get_organization(organization_id, authorization)
+    if org_status == "not_found":
+        raise OrganizationNotFoundError(organization_id)
+
+    members, members_status = await auth_client.get_org_members(organization_id, authorization)
     member_by_id = {m["user_id"]: m for m in members}
     member_by_email = {m["email"]: m for m in members}
 
-    login_success_events, trunc_success = await auth_client.list_all_audit_events(
+    login_success_events, trunc_success, unavail_success = await auth_client.list_all_audit_events(
         organization_id=None, start_date=start_dt, end_date=end_dt,
         event_type="login_success", authorization=authorization,
     )
-    login_failure_events, trunc_failure = await auth_client.list_all_audit_events(
+    login_failure_events, trunc_failure, unavail_failure = await auth_client.list_all_audit_events(
         organization_id=None, start_date=start_dt, end_date=end_dt,
         event_type="login_failure", authorization=authorization,
     )
-    org_scoped_events, trunc_org = await auth_client.list_all_audit_events(
+    org_scoped_events, trunc_org, unavail_org = await auth_client.list_all_audit_events(
         organization_id=organization_id, start_date=start_dt, end_date=end_dt,
         authorization=authorization,
     )
-    rag_events, trunc_rag = await billing_client.list_all_usage_events(
+    rag_events, trunc_rag, unavail_rag = await billing_client.list_all_usage_events(
         organization_id=organization_id, start_date=from_date, end_date=to_date,
         resource="rag.query", authorization=authorization,
     )
 
+    # Human-readable, self-contained strings -- these are consumed
+    # as-is by the JSON response, the PDF template, and the CSV export,
+    # so the label is decided exactly once, here, rather than needing an
+    # internal-key-to-label mapping duplicated in three render layers.
+    sources_unavailable: list[str] = []
+    if org_status == "unavailable":
+        sources_unavailable.append("Organization details (omnibioai-auth)")
+    if members_status != "ok":
+        sources_unavailable.append("Organization members (omnibioai-auth)")
+    if unavail_success:
+        sources_unavailable.append("Login success events (omnibioai-auth)")
+    if unavail_failure:
+        sources_unavailable.append("Login failure events (omnibioai-auth)")
+    if unavail_org:
+        sources_unavailable.append("Role/permission/security events (omnibioai-auth)")
+    if unavail_rag:
+        sources_unavailable.append("RAG query events (omnibioai-billing)")
+
     org_login_success = [e for e in login_success_events if _is_org_member(e, member_by_id, member_by_email)]
     org_login_failure = [e for e in login_failure_events if _is_org_member(e, member_by_id, member_by_email)]
 
-    user_access = _build_user_access(org_login_success, org_login_failure, member_by_id)
+    user_access = _build_user_access(org_login_success, org_login_failure)
     rag_queries = _build_rag_queries(rag_events, member_by_id)
     security_events = _build_security_events(org_login_failure, org_scoped_events)
 
-    incident_count = sum(1 for r in security_events if r["outcome"] in ("deny", "failure"))
+    security_events_requiring_review = sum(1 for r in security_events if r["outcome"] == "deny")
 
     summary = {
         "total_users": len(members),
         "active_users": sum(1 for r in user_access if r["login_count"] > 0),
         "total_rag_queries": len(rag_queries),
-        "security_incidents": incident_count,
+        "failed_login_attempts": len(org_login_failure),
+        "security_events_requiring_review": security_events_requiring_review,
     }
 
     return {
@@ -213,11 +282,10 @@ async def build_report(
         "organization_name": (org or {}).get("name") or f"Organization #{organization_id}",
         "from_date": from_date.isoformat(),
         "to_date": to_date.isoformat(),
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "generated_by": generated_by,
         "summary": summary,
         "user_access": user_access,
         "rag_queries": rag_queries,
         "security_events": security_events,
         "truncated": trunc_success or trunc_failure or trunc_org or trunc_rag,
+        "sources_unavailable": sources_unavailable,
     }
