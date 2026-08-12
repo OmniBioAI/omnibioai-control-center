@@ -13,3 +13,23 @@ services:
     ports:
       - "${CONTROL_CENTER_PORT:-7070}:7070"
     restart: unless-stopped
+
+  # Usage Analytics v1: the Redis Streams consumer draining
+  # interactions:events/audit:events into the analytics aggregates (see
+  # backend/src/control_center/analytics/consumer.py's own module
+  # docstring for why this is a separate process/container from the API
+  # service above, not a background task on it). Same image as
+  # control-center -- no separate Dockerfile -- only the command differs,
+  # same "reuse the existing image, override command" shape a worker
+  # needs here without inventing new build infrastructure.
+  control-center-analytics-worker:
+    build:
+      context: ./deploy/control-center
+      dockerfile: docker/Dockerfile
+    container_name: omnibioai-control-center-analytics-worker
+    command: ["python", "-m", "control_center.analytics.consumer"]
+    environment:
+      WORKSPACE_ROOT: /workspace
+    volumes:
+      - ./:/workspace
+    restart: unless-stopped
