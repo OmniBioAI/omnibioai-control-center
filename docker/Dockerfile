@@ -18,6 +18,18 @@ RUN apt-get update && \
         pkg-config \
         libssl-dev \
         libffi-dev \
+        # HIPAA Basic Compliance Report v0.8.0: weasyprint (compliance/pdf.py)
+        # renders HTML/CSS to PDF via Pango/Cairo/GDK-Pixbuf, not a pure-Python
+        # PDF engine -- these are its real runtime dependencies, not just
+        # build-time ones (weasyprint imports libgobject at process start),
+        # so they're required here even though nothing else in this image
+        # needed them before.
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
+        libgdk-pixbuf2.0-0 \
+        libcairo2 \
+        shared-mime-info \
+        fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 # =========================
