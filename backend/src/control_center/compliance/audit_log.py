@@ -32,6 +32,8 @@ complexity this module doesn't need.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -39,6 +41,8 @@ import uuid
 from datetime import date, datetime, timezone
 
 import redis
+
+from control_center.core.jwt_verify import JWT_SECRET
 
 logger = logging.getLogger("control_center.compliance.audit_log")
 
@@ -52,6 +56,41 @@ AUDIT_STREAM = os.environ.get("AUDIT_STREAM", "audit:events")
 MAX_STREAM_LENGTH = int(os.environ.get("AUDIT_MAXLEN", "1000000"))
 
 _redis = redis.from_url(REDIS_URL, decode_responses=True)
+
+
+# ---------------------------------------------------------------------------
+# HIPAA PR3b: producer-side signing. Hand-ported from
+# omnibioai-security-audit's audit/signing.py::sign_audit_event -- not a
+# shared import (that repo is not a dependency of this one, same tradeoff
+# already documented at the top of this module for the event-shape
+# mirroring above).
+# ---------------------------------------------------------------------------
+_SIGNING_DOMAIN_LABEL = "omnibioai-audit-events"
+_SIGNING_VERSION = "v1"
+
+
+def _signing_key(secret: str) -> bytes:
+    return hashlib.sha256(f"{_SIGNING_DOMAIN_LABEL}:{secret}".encode()).digest()
+
+
+def _signing_message(version: str, service: str, data: str) -> bytes:
+    return f"{version}\n{service}\n{data}".encode()
+
+
+def sign_audit_event(service: str, data: str, secret: str) -> str:
+    """Returns the `sig` field value for one audit event: `"v1:<hex-hmac>"`.
+
+    `data` must be the *exact* string written to the stream's `data`
+    field -- not a re-serialization. See log_report_access() below.
+    """
+    if not service:
+        raise ValueError("service must be a non-empty string")
+    if data is None:
+        raise ValueError("data must not be None")
+    mac = hmac.new(
+        _signing_key(secret), _signing_message(_SIGNING_VERSION, service, data), hashlib.sha256
+    ).hexdigest()
+    return f"{_SIGNING_VERSION}:{mac}"
 
 
 def log_report_access(
@@ -81,7 +120,10 @@ def log_report_access(
         },
     }
     try:
-        _redis.xadd(AUDIT_STREAM, {"data": json.dumps(event)}, maxlen=MAX_STREAM_LENGTH, approximate=True)
+        data = json.dumps(event)
+        fields = {"data": data}
+        fields["sig"] = sign_audit_event(event["service"], data, JWT_SECRET)
+        _redis.xadd(AUDIT_STREAM, fields, maxlen=MAX_STREAM_LENGTH, approximate=True)
     except Exception:
         # Never let an audit-logging failure break the actual report
         # response that already succeeded -- see this module's own
