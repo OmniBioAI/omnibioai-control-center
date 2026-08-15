@@ -67,6 +67,13 @@ export default defineConfig({
       '/model-registry': { target: 'http://localhost:7070', changeOrigin: true },
       '/workflow-bundles': { target: 'http://localhost:7070', changeOrigin: true },
       '/rag': { target: 'http://localhost:7070', changeOrigin: true },
+      // Admin Console HIPAA Compliance Report -- persistent change
+      // history, proxied through control-center's own in-process router
+      // (routes_hipaa_compliance.py, not a routes_*_proxy.py relay --
+      // this repo's own hipaa_compliance/ package owns the data). Same
+      // "missing here means npm run dev 404s" gap class every entry
+      // above already warns about.
+      '/hipaa-compliance': { target: 'http://localhost:7070', changeOrigin: true },
     },
   },
 })

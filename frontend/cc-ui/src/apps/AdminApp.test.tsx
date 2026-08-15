@@ -108,6 +108,8 @@ vi.mock('../pages/InteractionsPage', () => ({ default: () => <div data-testid="I
 vi.mock('../pages/billing/BillingPage', () => ({
   default: ({ orgId }: { orgId: number }) => <div data-testid="BillingPage" data-org-id={orgId} />,
 }))
+// Admin Console HIPAA Compliance Report (V1).
+vi.mock('../pages/compliance/HipaaCompliancePage', () => ({ default: () => <div data-testid="HipaaCompliancePage" /> }))
 
 const admin: SessionUser = {
   userId: '1', email: 'admin@omnibioai.org', roles: ['admin'],
@@ -875,5 +877,38 @@ describe('AdminApp auth gate', () => {
 
     fireEvent.click(screen.getByText('View all teams'))
     expect(await screen.findByTestId('TeamsPage')).toHaveAttribute('data-initial-org-id', '42')
+  })
+
+  // ── Admin Console HIPAA Compliance Report (V1) ─────────────────────────
+
+  it('reaches HIPAA Compliance via the sidebar for a platform admin', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-hipaa1')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    clickNav('HIPAA Compliance')
+
+    expect(await screen.findByTestId('HipaaCompliancePage')).toBeInTheDocument()
+    expect(screen.queryByText('Coming soon')).not.toBeInTheDocument()
+  })
+
+  it('hides the HIPAA Compliance nav item for a user who is not a platform admin', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-hipaa2')
+    vi.mocked(auth.ensureSession).mockResolvedValue(orgOnlyUser)
+    vi.mocked(auth.getSessionUser).mockReturnValue(orgOnlyUser)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(false)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(false)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    expect(screen.queryByText('HIPAA Compliance')).not.toBeInTheDocument()
   })
 })

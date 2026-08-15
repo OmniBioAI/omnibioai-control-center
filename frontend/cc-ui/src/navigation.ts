@@ -27,6 +27,7 @@ export type PageKey =
   | 'organizations' | 'users' | 'teams' | 'roles'
   | 'infrastructure' | 'workflows' | 'tool-execution' | 'ai-models'
   | 'security-overview' | 'mfa-policy' | 'iam' | 'saml' | 'audit-logs' | 'sessions' | 'interactions' | 'api-keys' | 'compliance-report'
+  | 'hipaa-compliance'
   | 'analytics'
   | 'billing'
   | 'rag' | 'pubmed'
@@ -264,6 +265,29 @@ export const NAVIGATION: NavSection[] = [
       // are opened (see docs/admin-console-pr11-service-accounts-
       // discovery.md).
       { key: 'api-keys', label: 'API Keys / Service Accounts', functional: true, visible: hasOrganizationsAccess },
+    ],
+  },
+  {
+    // Admin Console HIPAA Compliance Report (V1): a new top-level
+    // section, deliberately distinct from Security > "Compliance
+    // Report" above (the pre-existing HIPAA Basic Compliance Report
+    // v0.8.0 -- an org-scoped usage/access-log export). This section
+    // tracks a completely different thing: the platform's own HIPAA
+    // *engineering* remediation history (which PRs closed which control
+    // gaps, with what verification evidence) -- not org data at all.
+    // Placed as its own section (task brief: "Admin Console > Compliance
+    // > HIPAA Compliance"), not nested under Security, so the two
+    // "compliance" concepts don't visually collide as if one were a
+    // subset of the other.
+    key: 'compliance',
+    label: 'Compliance',
+    items: [
+      // Same hasPlatformAdminAccess gate 'audit-logs'/'compliance-report'
+      // above use, for the identical reason -- every route under
+      // GET /hipaa-compliance/changes is manage_all_orgs-gated
+      // (routes_hipaa_compliance.py's own _require_platform_admin),
+      // reads included, not just writes.
+      { key: 'hipaa-compliance', label: 'HIPAA Compliance', functional: true, visible: hasPlatformAdminAccess },
     ],
   },
   {

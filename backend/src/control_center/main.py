@@ -52,6 +52,7 @@ from control_center.api.routes_platform_config_proxy import router as platform_c
 from control_center.api.routes_platform_interactions_proxy import router as platform_interactions_proxy_router
 from control_center.analytics.router import router as analytics_router
 from control_center.compliance.router import router as compliance_router
+from control_center.api.routes_hipaa_compliance import router as hipaa_compliance_router
 from control_center.api.routes_cloud import router as cloud_router
 from control_center.api.routes_integrations import router as integrations_router
 from control_center.core.auth import require_permission
@@ -197,6 +198,14 @@ app.include_router(analytics_router)
 # above -- each route already requires manage_all_orgs individually
 # (compliance/router.py's own _require_platform_admin).
 app.include_router(compliance_router)
+# Admin Console HIPAA Compliance Report (persistent change history): same
+# posture as compliance_router immediately above -- each route already
+# requires manage_all_orgs individually
+# (routes_hipaa_compliance.py's own _require_platform_admin), not a
+# generic proxy relay, so this is a normal in-process router like
+# dashboard_router/analytics_router, not one of the routes_*_proxy.py
+# routers above.
+app.include_router(hipaa_compliance_router)
 
 
 # ==============================================================================
