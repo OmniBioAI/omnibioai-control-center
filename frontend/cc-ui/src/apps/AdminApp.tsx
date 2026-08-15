@@ -38,6 +38,7 @@ import SessionsPage from '../pages/security/SessionsPage'
 import InteractionsPage from '../pages/InteractionsPage'
 import AnalyticsDashboard from '../pages/AnalyticsDashboard'
 import ComplianceReport from '../pages/ComplianceReport'
+import HipaaCompliancePage from '../pages/compliance/HipaaCompliancePage'
 import SecurityDashboardPage from '../pages/security/SecurityDashboardPage'
 import OrganizationMFAPolicyPage from '../pages/security/OrganizationMFAPolicyPage'
 import SAMLSettingsPage from '../pages/identity/SAMLSettingsPage'
@@ -154,6 +155,11 @@ function AdminDashboard() {
   // canSeeAuditLogs -- GET /compliance/hipaa-report is manage_all_orgs-
   // gated, not org-scoped (org_admin access deferred to v0.9.0).
   const canSeeComplianceReport = hasPlatformAdminAccess()
+  // Admin Console HIPAA Compliance Report (V1): same reasoning as
+  // canSeeComplianceReport immediately above -- every route under
+  // GET /hipaa-compliance/changes is manage_all_orgs-gated, reads
+  // included (see routes_hipaa_compliance.py's own module docstring).
+  const canSeeHipaaCompliance = hasPlatformAdminAccess()
 
   const [active, setActive] = useState<PageKey>(() => {
     if (window.location.pathname.startsWith('/organizations')) return 'organizations'
@@ -356,7 +362,7 @@ function AdminDashboard() {
     >
       {renderPage(active, {
         canSeeOps, canSeeOrganizations, canSeeUsers, canSeeAuditLogs, canSeeInteractions, canSeeAnalytics, canSeeSecurityOverview,
-        canSeeComplianceReport, refreshKey,
+        canSeeComplianceReport, canSeeHipaaCompliance, refreshKey,
         selectedOrgId, setSelectedOrgId, selectedUserId, setSelectedUserId,
         teamsOrgHint, rolesOrgHint, onViewTeams: handleViewTeams, onViewRoles: handleViewRoles,
         selectedSsoOrgId, setSelectedSsoOrgId, navigateToSsoSettings,
@@ -379,6 +385,7 @@ interface RenderCtx {
   canSeeAnalytics: boolean
   canSeeSecurityOverview: boolean
   canSeeComplianceReport: boolean
+  canSeeHipaaCompliance: boolean
   refreshKey: number
   selectedOrgId: number | null
   setSelectedOrgId: (id: number | null) => void
@@ -490,6 +497,14 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
     case 'compliance-report':
       if (!ctx.canSeeComplianceReport) return null
       return <ComplianceReport />
+
+    // Admin Console HIPAA Compliance Report (V1): flat platform-wide
+    // page, no org-picker/deep-link -- same shape as 'compliance-report'
+    // immediately above, for the identical reason (every route this
+    // page reads is manage_all_orgs-gated, not org-scoped).
+    case 'hipaa-compliance':
+      if (!ctx.canSeeHipaaCompliance) return null
+      return <HipaaCompliancePage />
 
     // PR-C: self-service, flat, no org-picker/deep-link and no gate --
     // same shape as 'overview' above (no `ctx.canSeeX` check either).

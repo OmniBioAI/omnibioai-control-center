@@ -194,3 +194,53 @@ describe('navigation: Integrations placement', () => {
     expect(integrationsItem.functional).not.toBe(false)
   })
 })
+
+// Admin Console HIPAA Compliance Report (V1): "Admin Console > Compliance
+// > HIPAA Compliance" -- a dedicated Compliance section, deliberately
+// distinct from the pre-existing 'compliance-report' item under
+// Security (a different feature: HIPAA Basic Compliance Report v0.8.0,
+// an org-scoped usage/access-log export -- see this item's own comment
+// in navigation.ts).
+
+describe('navigation: HIPAA Compliance placement', () => {
+  it('has exactly one "hipaa-compliance" entry across the entire tree', () => {
+    const found: { sectionKey: string; parentKey?: string }[] = []
+    for (const section of NAVIGATION) {
+      for (const item of section.items) {
+        if (item.key === 'hipaa-compliance') found.push({ sectionKey: section.key })
+        for (const child of item.children ?? []) {
+          if (child.key === 'hipaa-compliance') found.push({ sectionKey: section.key, parentKey: item.key })
+        }
+      }
+    }
+    expect(found).toHaveLength(1)
+  })
+
+  it('lives in its own dedicated "Compliance" section, not nested under Security', () => {
+    const complianceSection = NAVIGATION.find(s => s.key === 'compliance')
+    expect(complianceSection).toBeDefined()
+    expect(complianceSection!.label).toBe('Compliance')
+
+    const item = complianceSection!.items.find(i => i.key === 'hipaa-compliance')
+    expect(item).toBeDefined()
+    expect(item!.label).toBe('HIPAA Compliance')
+    expect(item!.functional).toBe(true)
+    expect(item!.children).toBeUndefined()
+
+    const securitySection = NAVIGATION.find(s => s.key === 'security')!
+    expect(securitySection.items.some(i => i.key === 'hipaa-compliance')).toBe(false)
+  })
+
+  it('is a distinct entry from the pre-existing "compliance-report" item', () => {
+    const securitySection = NAVIGATION.find(s => s.key === 'security')!
+    const legacyReportItem = securitySection.items.find(i => i.key === 'compliance-report')
+    expect(legacyReportItem).toBeDefined()
+    expect(legacyReportItem!.key).not.toBe('hipaa-compliance')
+  })
+
+  it('is gated (not always-visible like "sessions"/"overview")', () => {
+    const complianceSection = NAVIGATION.find(s => s.key === 'compliance')!
+    const item = complianceSection.items.find(i => i.key === 'hipaa-compliance')!
+    expect(item.visible).toBeDefined()
+  })
+})
