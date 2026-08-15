@@ -30,6 +30,16 @@ services:
     command: ["python", "-m", "control_center.analytics.consumer"]
     environment:
       WORKSPACE_ROOT: /workspace
+      # HIPAA PR3d: this worker now verifies audit:events signatures
+      # (checks.audit_trail.classify_event_integrity via
+      # control_center.core.jwt_verify.JWT_SECRET). Previously unset here
+      # entirely, which would silently fall back to jwt_verify.py's own
+      # "change-me" default and misclassify every genuinely-valid signed
+      # event as "invalid" -- same env var name/value every other
+      # JWT_SECRET consumer on the platform already uses (see
+      # omnibioai-studio/docker-compose.yml's ${AUTH_SECRET_KEY:-change-me}
+      # pattern, applied identically here, not a new secret or fallback).
+      JWT_SECRET: ${AUTH_SECRET_KEY:-change-me}
     volumes:
       - ./:/workspace
     restart: unless-stopped

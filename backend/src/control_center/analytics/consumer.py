@@ -47,6 +47,8 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 from control_center.analytics import aggregator
 from control_center.analytics.metrics import EVENTS_FAILED
 from control_center.analytics.schemas import normalize_interaction_event
+from control_center.checks.audit_trail import classify_event_integrity
+from control_center.core.jwt_verify import JWT_SECRET
 
 logger = logging.getLogger("omnibioai.control_center.analytics.consumer")
 
@@ -59,6 +61,33 @@ READ_BLOCK_MS = int(os.getenv("ANALYTICS_READ_BLOCK_MS", "5000"))
 INTERACTIONS_STREAM = "interactions:events"
 AUDIT_STREAM = "audit:events"
 STREAMS = (INTERACTIONS_STREAM, AUDIT_STREAM)
+
+# ---------------------------------------------------------------------------
+# HIPAA PR3d: integrity-aware ingestion into the durable analytics
+# aggregates. classify_event_integrity is imported from checks.audit_trail
+# (HIPAA PR3c, same repo/package) rather than hand-ported a fourth time --
+# see that module's own comment for why an intra-repo import carries none
+# of the drift-risk tradeoff the cross-repo producers accept.
+#
+# Classification policy (see _handle_audit_message below for where this
+# applies): "valid" and "unsigned" are applied to the aggregator exactly
+# as before this PR -- unsigned is the pre-PR3b norm for this entire
+# stream's history, not evidence of tampering, and excluding it would
+# silently zero out legitimate historical/mixed-backlog traffic in a
+# *durable* aggregate (worse than gateway_traffic.py's read-only,
+# recomputed-every-request case, since a durable miscount here can't
+# self-correct by recomputing). "invalid" -- a cryptographic proof of
+# forgery or in-transit tampering -- is never applied to the aggregator:
+# an attacker-forged event must not durably corrupt request/error-rate
+# aggregates a platform_admin later trusts. The message is still ACKed
+# (never left pending) since a bad signature is permanent, not a
+# transient failure -- retrying accomplishes nothing and would only
+# accumulate poison-pill pending entries, the same reasoning
+# omnibioai-security-audit's own worker/main.py already established for
+# this exact distinction. A distinct, loud log line marks the event as
+# rejected evidence, mirroring that worker's own
+# "SIGNATURE INVALID"-vs-plain-warning convention.
+# ---------------------------------------------------------------------------
 
 # checks/gateway_traffic.py's own parsing of this exact stream (the one
 # proven-working reader of audit:events in this codebase) treats
@@ -143,10 +172,30 @@ def _handle_audit_message(fields: dict) -> bool:
     that is the one proven-working parser for this wire shape already in
     this codebase."""
     try:
-        event = json.loads(fields["data"])
+        raw_data = fields["data"]
+        event = json.loads(raw_data)
     except (KeyError, json.JSONDecodeError) as e:
         logger.warning("analytics_consumer_parse_failed stream=%s error=%s", AUDIT_STREAM, e)
         return False
+
+    # HIPAA PR3d: classified before this event can reach the durable
+    # aggregator -- see this module's own policy comment above STREAMS for
+    # why "invalid" is rejected here while "unsigned" is not. Uses
+    # raw_data (the exact string off the wire), never a re-serialization
+    # of the parsed `event` dict, since the signature covers those exact
+    # bytes. ACKed (returns True, not False) rather than left pending: a
+    # bad signature can't become valid on retry, so leaving it pending
+    # would only accumulate a permanent poison-pill entry.
+    integrity_status = classify_event_integrity(
+        event.get("service"), fields.get("sig"), raw_data, JWT_SECRET
+    )
+    if integrity_status == "invalid":
+        logger.warning(
+            "analytics_consumer_signature_invalid stream=%s event_id=%r service=%r -- "
+            "rejected as durable-aggregate input, not trusted",
+            AUDIT_STREAM, event.get("event_id"), event.get("service"),
+        )
+        return True
 
     event_id = event.get("event_id")
     timestamp_raw = event.get("timestamp")

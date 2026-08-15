@@ -10,6 +10,8 @@ persistence.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import unittest
 from unittest.mock import MagicMock, patch
@@ -34,7 +36,7 @@ def _interaction_fields(**overrides) -> dict:
     return {"data": json.dumps(payload)}
 
 
-def _audit_fields(**overrides) -> dict:
+def _audit_fields(*, sig: str | None = None, **overrides) -> dict:
     payload = dict(
         event_id="audit-1",
         timestamp="2026-01-15T10:30:00+00:00",
@@ -46,7 +48,22 @@ def _audit_fields(**overrides) -> dict:
         status_code=200,
     )
     payload.update(overrides)
-    return {"data": json.dumps(payload)}
+    fields: dict = {"data": json.dumps(payload)}
+    if sig is not None:
+        fields["sig"] = sig
+    return fields
+
+
+def _sign(service: str, data: str, secret: str) -> str:
+    """Independent re-implementation of the sign side of the construction
+    consumer.py's imported classify_event_integrity checks against -- see
+    test_check_audit_trail.py's own identical helper."""
+    mac = hmac.new(
+        hashlib.sha256(f"omnibioai-audit-events:{secret}".encode()).digest(),
+        f"v1\n{service}\n{data}".encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"v1:{mac}"
 
 
 class HandleInteractionMessageTestCase(unittest.TestCase):
@@ -124,6 +141,53 @@ class HandleAuditMessageTestCase(unittest.TestCase):
         self.assertTrue(consumer._handle_audit_message(_audit_fields(latency_ms="not-a-number")))
         self.assertEqual(aggregator.read_agg("2026-01-15")["latency_count"], 0)
 
+    # -- HIPAA PR3d: integrity-aware ingestion -----------------------------
+
+    def test_unsigned_event_still_applied(self) -> None:
+        """Backward compatibility, stated explicitly: unsigned is the
+        pre-PR3b norm for this entire stream's history, not evidence of
+        tampering. Every other test in this class already proves this
+        implicitly (none of them sign), but this one says so directly."""
+        self.assertTrue(consumer._handle_audit_message(_audit_fields()))
+        self.assertEqual(aggregator.read_agg("2026-01-15")["request_count"], 1)
+
+    def test_valid_signed_event_applied(self) -> None:
+        base = _audit_fields()
+        sig = _sign("api-gateway", base["data"], consumer.JWT_SECRET)
+        self.assertTrue(consumer._handle_audit_message({"data": base["data"], "sig": sig}))
+        self.assertEqual(aggregator.read_agg("2026-01-15")["request_count"], 1)
+
+    def test_tampered_event_not_applied_but_acked(self) -> None:
+        """Signed correctly, then published with a different payload under
+        that same signature -- the exact mutation-must-be-caught scenario.
+        Returns True (ACKed): a bad signature is permanent, not a
+        transient failure, so leaving it pending would only accumulate a
+        poison-pill entry -- distinct from test_malformed_json_returns_false
+        above, which IS left pending since a parse failure could in
+        principle be transient/fixable."""
+        base = _audit_fields()
+        sig = _sign("api-gateway", base["data"], consumer.JWT_SECRET)
+        tampered_payload = json.loads(base["data"])
+        tampered_payload["decision"] = "deny"
+        tampered_fields = {"data": json.dumps(tampered_payload), "sig": sig}
+
+        self.assertTrue(consumer._handle_audit_message(tampered_fields))
+        agg = aggregator.read_agg("2026-01-15")
+        self.assertEqual(agg["request_count"], 0)
+        self.assertEqual(agg["request_error_count"], 0)
+
+    def test_malformed_signature_not_applied_but_acked(self) -> None:
+        ok = consumer._handle_audit_message(_audit_fields(sig="not-a-real-signature"))
+        self.assertTrue(ok)  # must not raise, must still ack
+        self.assertEqual(aggregator.read_agg("2026-01-15")["request_count"], 0)
+
+    def test_wrong_secret_signature_never_silently_applied(self) -> None:
+        base = _audit_fields()
+        sig = _sign("api-gateway", base["data"], "a-different-secret-than-jwt_secret")
+        ok = consumer._handle_audit_message({"data": base["data"], "sig": sig})
+        self.assertTrue(ok)
+        self.assertEqual(aggregator.read_agg("2026-01-15")["request_count"], 0)
+
 
 class HandleMessageDispatchTestCase(unittest.TestCase):
     def setUp(self) -> None:
@@ -150,6 +214,21 @@ class HandleMessageDispatchTestCase(unittest.TestCase):
             ok = consumer.handle_message(mock_consumer, consumer.INTERACTIONS_STREAM, "1-0", _interaction_fields())
         self.assertFalse(ok)
         mock_consumer.ack.assert_not_called()
+
+    def test_acks_invalid_signature_audit_message_without_applying_it(self) -> None:
+        """HIPAA PR3d, at the dispatch level: an invalid-signature audit
+        event IS acked (unlike test_does_not_ack_on_malformed_payload
+        above) -- a bad signature is a permanent verdict, not a transient
+        parse failure -- but never reaches the aggregator."""
+        base = _audit_fields()
+        sig = _sign("api-gateway", base["data"], "wrong-secret")
+        mock_consumer = MagicMock()
+        ok = consumer.handle_message(
+            mock_consumer, consumer.AUDIT_STREAM, "1-0", {"data": base["data"], "sig": sig}
+        )
+        self.assertTrue(ok)
+        mock_consumer.ack.assert_called_once_with(consumer.AUDIT_STREAM, "1-0")
+        self.assertEqual(aggregator.read_agg("2026-01-15")["request_count"], 0)
 
 
 class DrainOwnPendingTestCase(unittest.TestCase):
