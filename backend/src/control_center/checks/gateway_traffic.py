@@ -5,6 +5,9 @@ import json
 import os
 from typing import Any
 
+from control_center.checks.audit_trail import classify_event_integrity
+from control_center.core.jwt_verify import JWT_SECRET
+
 # Same Redis instance omnibioai-api-gateway's AuditMiddleware writes every
 # request to (redis stream "audit:events") -- see
 # omnibioai-api-gateway/app/services/audit_client.py. api-gateway has no
@@ -16,6 +19,40 @@ _CONNECT_TIMEOUT_S = 5
 _WINDOW_DAYS = 7
 _TOP_ROUTES_LIMIT = 15
 _MAX_ENTRIES = 200_000
+
+# ---------------------------------------------------------------------------
+# HIPAA PR3d: integrity-aware aggregation. Imports classify_event_integrity
+# straight from checks.audit_trail (HIPAA PR3c, same repo/package) rather
+# than a fourth hand-port of the signing contract -- unlike the cross-repo
+# producers (api-gateway/tes/workflow-bundles/rag/security-audit), this
+# module and audit_trail.py are the same deployable, so there is no
+# drift-risk tradeoff to accept by importing instead of copying; sharing
+# one verifier is strictly safer than a second copy that could silently
+# diverge from it.
+#
+# Classification policy, decided per this consumer's own actual semantics
+# (not copied uncritically from audit_trail.py's "keep everything, just
+# label it" choice, which fits that endpoint's job -- showing an admin the
+# raw evidence, forgeries included) -- this module computes trend/rate
+# metrics (auth_failure_rate_pct, status_code_breakdown, latency
+# percentiles) that get READ as an operational signal, not inspected
+# per-event:
+#
+#   - "valid"    -- counted exactly as before signing existed. No change.
+#   - "unsigned" -- counted exactly as before. Before PR3b, EVERY event on
+#     this stream was unsigned; treating "never signed" as suspicious
+#     would retroactively invalidate all pre-PR3b traffic and today's
+#     still-mixed backlog, breaking existing dashboards for legitimate
+#     historical data that was never signed by design, not tampered with.
+#   - "invalid"  -- a cryptographic proof the event was forged or altered
+#     in transit. EXCLUDED from every numeric aggregate below (not counted
+#     in requests_7d, latencies, status_code_breakdown, or
+#     auth_failure_rate_pct) -- an attacker-forged "auth_failed" event
+#     must not be able to inflate auth_failure_rate_pct or pollute a
+#     latency percentile. Never silently discarded, though: its count is
+#     surfaced via the new `invalid_signature_events_7d` field so the
+#     exclusion itself is visible, not silent.
+# ---------------------------------------------------------------------------
 
 # auth_failed/policy_denied/hpc_denied fire *before* a response object exists,
 # so the audit payload itself carries no status_code -- these are read
@@ -36,6 +73,7 @@ _EMPTY: dict[str, Any] = {
     "auth_failure_rate_pct": 0.0,
     "requests_by_route": [],
     "status_code_breakdown": {"2xx": 0, "4xx": 0, "5xx": 0},
+    "invalid_signature_events_7d": 0,
 }
 
 
@@ -59,11 +97,26 @@ def get_gateway_traffic() -> dict[str, Any]:
     status_buckets = {"2xx": 0, "4xx": 0, "5xx": 0}
     deny_count = 0
     total_attempts = 0
+    invalid_signature_events = 0
 
     for _eid, fields in entries:
+        raw_data = fields.get("data", "{}")
         try:
-            event = json.loads(fields.get("data", "{}"))
+            event = json.loads(raw_data)
         except (TypeError, ValueError):
+            continue
+
+        # HIPAA PR3d: classified once per event, before it can contribute
+        # to any aggregate below -- see this module's own policy comment
+        # at the top of the file for why "invalid" is excluded here while
+        # audit_trail.py keeps everything. Uses raw_data (the exact string
+        # off the wire), never a re-serialization of the parsed `event`
+        # dict, since the signature covers those exact bytes.
+        integrity_status = classify_event_integrity(
+            event.get("service"), fields.get("sig"), raw_data, JWT_SECRET
+        )
+        if integrity_status == "invalid":
+            invalid_signature_events += 1
             continue
 
         event_type = event.get("event_type")
@@ -109,6 +162,7 @@ def get_gateway_traffic() -> dict[str, Any]:
         "auth_failure_rate_pct": auth_failure_pct,
         "requests_by_route": top_routes,
         "status_code_breakdown": status_buckets,
+        "invalid_signature_events_7d": invalid_signature_events,
     }
 
 
