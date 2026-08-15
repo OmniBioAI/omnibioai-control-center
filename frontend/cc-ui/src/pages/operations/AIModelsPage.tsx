@@ -27,11 +27,17 @@ import { formatDate, classifyAuthError } from '../../format'
 //     honestly "is the registry up and how is it configured to
 //     authenticate," not invented infrastructure metrics.
 //
-// Permission/error handling is included defensively (EmptyState+
-// ShieldAlert on a 403, a distinct SessionExpiredState on a 401) even
-// though none of these three routes are gated upstream today -- see
-// model_registry.ts's module comment. If that ever changes, this page
-// already renders it correctly without a follow-up UI change. PR E2:
+// Permission/error handling (EmptyState+ShieldAlert on a 403, a distinct
+// SessionExpiredState on a 401) was written defensively, back when none
+// of these three routes were gated upstream -- see model_registry.ts's
+// module comment for what's actually gated today (list_models, via
+// model.use). It's load-bearing now: a caller without model.use
+// genuinely gets a 403 from Registered Models/Model Versions (Runtime
+// Status is unaffected -- health/auth-status stay open). That 403
+// previously still rendered as the generic ErrorState below, not this
+// DeniedState, because format.ts's classifyAuthError() couldn't
+// classify a real backend `detail` message -- fixed in
+// model_registry.ts's own _errorMessage(), see its comment. PR E2:
 // previously a local classify() folded 401 into the same "Permission
 // denied" bucket as 403 -- now uses the shared classifyAuthError, same
 // fix as every other page in this app that had the same conflation.

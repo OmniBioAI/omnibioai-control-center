@@ -3,10 +3,17 @@
 // control-center's own backend at a relative path (routes_model_registry_
 // proxy.py proxies the /model-registry/* surface to
 // omnibioai-model-registry); no function here makes an authorization
-// decision -- none of these three routes are gated at all on the
-// model-registry side today (confirmed by reading its own
-// service/app/main.py -- no Depends(require_auth) on list_models,
-// health, or api_auth_status), unlike tes.ts's /runs calls.
+// decision. health and api_auth_status remain fully open upstream (no
+// Depends(...) on either, confirmed by reading service/app/main.py
+// directly) but list_models no longer is -- omnibioai-model-registry's
+// later HIPAA hardening series (Phase 2A-2D) put it behind
+// require_auth_with_context, which enforces the same model.use
+// permission as every write route (see that repo's auth.py module
+// docstring: "Almost every route checks the existing model.use
+// permission"). A caller without model.use now gets a real 403 with a
+// `detail` message here, same as tes.ts's /runs calls always could --
+// _errorMessage() below has to preserve that classifyability, see its
+// own comment.
 //
 // GET /v1/models returns one row per registered *version*, not per
 // distinct model (model-registry globs every version's model_meta.json)
@@ -96,11 +103,36 @@ export async function fetchModelRegistryAuthStatus(): Promise<ModelRegistryAuthS
 
 // Prefers the backend's own detail message over a bare "<path> <status>"
 // -- same convention billing.ts's/tes.ts's own _errorMessage established.
+//
+// format.ts's classifyAuthError() (shared by every page's error handling,
+// including AIModelsPage's) only recognizes a 401/403 by this message
+// literally ending in " 401"/" 403" -- the shape the generic fallback
+// below has always had, but not what a real backend `detail`/`error`
+// message gives it. Since model-registry's list_models started
+// enforcing model.use (see this file's module comment), a caller
+// without it got a genuinely helpful 403 body here -- {"detail":
+// "Missing required permission: model.use"} -- that this function
+// returned completely unsuffixed. classifyAuthError() then silently
+// fell through to its generic 'error' bucket instead of 'denied', so
+// AIModelsPage rendered the raw string under a bare "Error" heading
+// (ErrorState) instead of the DeniedState it already has built
+// specifically for this case. Appending the status code for exactly
+// these two auth-outcome codes restores that classification without
+// changing this function's message for any other status (404/500/503/
+// ... keep the bare detail text, unsuffixed) -- narrowly scoped to the
+// 401/403 distinction this bug report was actually about, not a general
+// "always suffix the status" change.
+const CLASSIFIABLE_STATUSES = [401, 403]
+
 async function _errorMessage(r: Response, path: string): Promise<string> {
   try {
     const data = await r.json()
-    if (typeof data?.detail === 'string') return data.detail
-    if (typeof data?.error === 'string') return data.error
+    const detail = typeof data?.detail === 'string' ? data.detail
+      : typeof data?.error === 'string' ? data.error
+      : null
+    if (detail !== null) {
+      return CLASSIFIABLE_STATUSES.includes(r.status) ? `${detail} ${r.status}` : detail
+    }
   } catch {
     // fall through to the generic message below
   }
