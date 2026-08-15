@@ -200,3 +200,128 @@ export async function fetchPluginImages(): Promise<PluginImagesResponse> {
   if (!r.ok) throw new Error(`/docker/plugin-images ${r.status}`)
   return r.json()
 }
+
+// ── Admin Console: Actions (report/coverage regeneration) ─────────────────
+// Moved here from the legacy scripts/sections/misc/admin.py static-HTML
+// panel (see docs/admin-console-navigation-move.md). Same endpoints, same
+// platform.manage_content gate server-side -- AdminApp's own AuthGate is
+// what supplies the Authorization header via apiFetch()'s authHeaders(),
+// so there's no separate login form here (unlike the legacy panel, which
+// had no ambient session to draw on).
+export interface CoverageStatus {
+  status: 'idle' | 'running' | 'done' | 'error'
+  started_at: string | null
+  finished_at: string | null
+  message: string
+  result_exists: boolean
+  result_generated_at: string | null
+}
+
+export async function fetchCoverageStatus(): Promise<CoverageStatus> {
+  const r = await apiFetch(`${BASE}/coverage/status`)
+  if (!r.ok) throw new Error(`/coverage/status ${r.status}`)
+  return r.json()
+}
+
+export async function triggerCoverageGenerate(): Promise<void> {
+  const r = await apiFetch(`${BASE}/coverage/generate`, { method: 'POST' })
+  if (!r.ok && r.status !== 409) throw new Error(`/coverage/generate ${r.status}`)
+}
+
+// ── Admin Console: Scheduled Jobs (cron) ───────────────────────────────────
+export interface CronJob {
+  id: string
+  name: string
+  schedule: string
+  paused: boolean | null
+  last_status: string | null
+  last_run_at: string | null
+}
+
+export interface CronJobsResponse {
+  jobs: CronJob[]
+}
+
+export async function fetchCronJobs(): Promise<CronJobsResponse> {
+  const r = await apiFetch(`${BASE}/cron/jobs`)
+  if (!r.ok) throw new Error(`/cron/jobs ${r.status}`)
+  return r.json()
+}
+
+export async function fetchCronJobLog(id: string, lines = 100): Promise<{ lines: string[] }> {
+  const r = await apiFetch(`${BASE}/cron/jobs/${encodeURIComponent(id)}/log?lines=${lines}`)
+  if (!r.ok) throw new Error(`/cron/jobs/${id}/log ${r.status}`)
+  return r.json()
+}
+
+export async function pauseCronJob(id: string): Promise<void> {
+  const r = await apiFetch(`${BASE}/cron/jobs/${encodeURIComponent(id)}/pause`, { method: 'POST' })
+  if (!r.ok) throw new Error(`/cron/jobs/${id}/pause ${r.status}`)
+}
+
+export async function resumeCronJob(id: string): Promise<void> {
+  const r = await apiFetch(`${BASE}/cron/jobs/${encodeURIComponent(id)}/resume`, { method: 'POST' })
+  if (!r.ok) throw new Error(`/cron/jobs/${id}/resume ${r.status}`)
+}
+
+export async function updateCronSchedule(id: string, schedule: string): Promise<void> {
+  const r = await apiFetch(`${BASE}/cron/jobs/${encodeURIComponent(id)}/schedule`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ schedule }),
+  })
+  if (!r.ok) throw new Error(`/cron/jobs/${id}/schedule ${r.status}`)
+}
+
+// ── Admin Console: Known Issues ─────────────────────────────────────────────
+export interface KnownIssue {
+  id: string
+  title: string
+  description: string | null
+  severity: 'low' | 'medium' | 'high' | string
+  status: 'open' | 'acknowledged' | 'resolved' | string
+  area: string | null
+  opened_at: string | null
+}
+
+export interface KnownIssuesResponse {
+  issues: KnownIssue[]
+}
+
+export async function fetchKnownIssues(): Promise<KnownIssuesResponse> {
+  const r = await apiFetch(`${BASE}/known-issues`)
+  if (!r.ok) throw new Error(`/known-issues ${r.status}`)
+  return r.json()
+}
+
+export interface KnownIssueInput {
+  title: string
+  description?: string
+  severity?: string
+  area?: string
+}
+
+export async function createKnownIssue(body: KnownIssueInput): Promise<KnownIssue> {
+  const r = await apiFetch(`${BASE}/known-issues`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!r.ok) throw new Error(`/known-issues ${r.status}`)
+  return r.json()
+}
+
+export async function updateKnownIssueStatus(id: string, status: string): Promise<KnownIssue> {
+  const r = await apiFetch(`${BASE}/known-issues/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  })
+  if (!r.ok) throw new Error(`/known-issues/${id} ${r.status}`)
+  return r.json()
+}
+
+export async function deleteKnownIssue(id: string): Promise<void> {
+  const r = await apiFetch(`${BASE}/known-issues/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  if (!r.ok) throw new Error(`/known-issues/${id} ${r.status}`)
+}

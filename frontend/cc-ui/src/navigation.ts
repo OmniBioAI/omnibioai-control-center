@@ -23,6 +23,7 @@ import { canSeeAnalytics, hasAdminAccess, hasOrganizationsAccess, hasPlatformAdm
 export type PageKey =
   | 'overview'
   | 'health' | 'docker' | 'ecosystem' | 'config' | 'llms' | 'cloud'
+  | 'actions' | 'scheduled-jobs' | 'known-issues'
   | 'organizations' | 'users' | 'teams' | 'roles'
   | 'infrastructure' | 'workflows' | 'tool-execution' | 'ai-models'
   | 'security-overview' | 'mfa-policy' | 'iam' | 'saml' | 'audit-logs' | 'sessions' | 'interactions' | 'api-keys' | 'compliance-report'
@@ -92,6 +93,20 @@ export const NAVIGATION: NavSection[] = [
           { key: 'config', label: 'Config', functional: true, visible: hasAdminAccess },
           { key: 'llms', label: 'LLMs', functional: true, visible: hasAdminAccess },
           { key: 'cloud', label: 'Cloud', functional: true, visible: hasAdminAccess },
+          // Moved from the public Control Center's legacy static-HTML
+          // ecosystem-report page (scripts/sections/misc/admin.py) --
+          // that page's own "Admin" tab is gone (see
+          // docs/admin-console-navigation-move.md); these three items
+          // are its replacement, admin-console-only from here on. Same
+          // hasAdminAccess() gate every other Infrastructure child
+          // already uses -- real authorization is still each backend
+          // route's own require_permission (platform.manage_content for
+          // Actions/Known Issues writes, platform.manage_cron for
+          // Scheduled Jobs writes; every GET in all three is open to any
+          // authenticated admin-console user, same as before the move).
+          { key: 'actions', label: 'Actions', functional: true, visible: hasAdminAccess },
+          { key: 'scheduled-jobs', label: 'Scheduled Jobs', functional: true, visible: hasAdminAccess },
+          { key: 'known-issues', label: 'Known Issues', functional: true, visible: hasAdminAccess },
         ],
       },
       // PR A3: Admin Console Capability Parity. functional: true because

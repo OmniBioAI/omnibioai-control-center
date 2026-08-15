@@ -895,14 +895,14 @@ def root() -> HTMLResponse:
 </header>
 <script>
 (function() {{
-  // Regenerate/coverage-refresh controls now live in the Admin tab
+  // Regenerate/coverage-refresh controls now live in the Admin Console
   // (admin-gated there, both client-side and server-side) rather than
   // this always-visible header -- this script now only drives the live
   // service-status chip. /summary itself moved behind
   // require_permission("platform.manage_infra") (it leaks internal
   // hostnames/LAN IPs, not just up/down counts) --
   // attach the token if the visitor happens to already be signed in via
-  // the Admin tab; anonymous visitors just see no chip (badge stays
+  // the Admin Console; anonymous visitors just see no chip (badge stays
   // hidden), same as any other unreachable-state failure below.
   async function omniLoadStatus() {{
     try {{
@@ -1061,6 +1061,6 @@ def root() -> HTMLResponse:
 def dashboard() -> RedirectResponse:
     """/dashboard is retired -- its live per-service status cards and
     report-generation controls are now covered by / (service status chip
-    in the header) and the Admin tab (Actions sub-tab), respectively.
+    in the header) and the Admin Console (Actions page), respectively.
     Kept as a redirect rather than a 404 for any old bookmarks/links."""
     return RedirectResponse(url="/", status_code=302)

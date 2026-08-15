@@ -4,7 +4,7 @@ import { clearToken } from '../auth'
 import Header from '../components/Header'
 import type { Tab } from '../components/Header'
 import PublicHealthPage from '../pages/PublicHealthPage'
-import EcosystemPage from '../pages/EcosystemPage'
+import PublicEcosystemPage from '../pages/PublicEcosystemPage'
 import LlmPage from '../pages/LlmPage'
 import CloudPage from '../pages/CloudPage'
 import IntegrationsPage from '../pages/IntegrationsPage'
@@ -23,7 +23,13 @@ import IntegrationsPage from '../pages/IntegrationsPage'
  * no permission dependency in main.py, and none of their response shapes
  * contain a per-user identifier, credential, or internal topology
  * detail -- confirmed by reading each one directly, not assumed; see
- * test_public_dashboard_no_leak.py for the regression guard).
+ * test_public_dashboard_no_leak.py for the regression guard). Ecosystem
+ * Report renders via PublicEcosystemPage.tsx here, NOT the full
+ * EcosystemPage.tsx AdminApp uses -- that file also contains ArchTab's
+ * static internal-topology map (real service names/ports/tech stack)
+ * and the /summary-sourced HealthTab, neither safe for anonymous
+ * access; see PublicEcosystemPage.tsx's own doc comment and
+ * docs/public-control-center.md.
  *
  * Docker and Config are deliberately NOT here anymore -- both call
  * backend routes gated behind platform.manage_infra (docker_router/
@@ -104,8 +110,8 @@ function ControlDashboard() {
       {/* 56px header + 44px tab bar = 100px offset */}
       <div style={{ paddingTop: 100 }}>
         <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 48px' }}>
-          {tab === 'health'       && <PublicHealthPage refreshKey={refreshKey} />}
-          {tab === 'ecosystem'    && <EcosystemPage     refreshKey={refreshKey} />}
+          {tab === 'health'       && <PublicHealthPage     refreshKey={refreshKey} />}
+          {tab === 'ecosystem'    && <PublicEcosystemPage  refreshKey={refreshKey} />}
           {tab === 'llms'         && <LlmPage           refreshKey={refreshKey} />}
           {tab === 'cloud'        && <CloudPage         refreshKey={refreshKey} />}
           {tab === 'integrations' && <IntegrationsPage />}
