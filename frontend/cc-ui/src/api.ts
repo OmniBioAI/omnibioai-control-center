@@ -105,6 +105,23 @@ export async function fetchSummary(): Promise<SummaryResponse> {
   return r.json()
 }
 
+export interface HealthResponse {
+  status: string
+}
+
+// Public Read-Only Control Center architecture: GET /health is the one
+// genuinely anonymous liveness check (no permission requirement, no
+// service/disk detail -- see routes_health.py). Deliberately a plain
+// fetch(), not apiFetch() -- ControlApp must never attach a bearer token
+// merely because one happens to be sitting in this origin's
+// localStorage; this call has no Authorization header under any
+// circumstances.
+export async function fetchHealth(): Promise<HealthResponse> {
+  const r = await fetch(`${BASE}/health`)
+  if (!r.ok) throw new Error(`/health ${r.status}`)
+  return r.json()
+}
+
 export async function fetchConfig(): Promise<string> {
   const r = await apiFetch(`${BASE}/config`)
   if (!r.ok) throw new Error(`/config ${r.status}`)
