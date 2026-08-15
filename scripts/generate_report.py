@@ -61,10 +61,6 @@ from sections.docker_images import (
     docker_sif_section_html, docker_plugins_section_html, _DOCKER_IMAGES_SCRIPT,
 )
 
-from sections.misc.admin import (
-    admin_auth_header_html, admin_actions_section_html,
-    admin_jobs_section_html, admin_issues_section_html, _ADMIN_SCRIPT,
-)
 from sections.misc.active_runs import active_runs_section_html
 from sections.misc.storage import storage_section_html
 from sections.misc.catalog import catalog_section_html
@@ -163,7 +159,17 @@ SIDEBAR_NAV_SPEC: List[Tuple[str, str, Optional[List[Tuple[str, str]]]]] = [
     ("modelreg",     "Model Registry",    None),
     ("dockerimages", "Docker Images",     [("containers", "Platform Containers"), ("sif", "Tool SIF Images"), ("plugins", "Plugin Docker Images")]),
     ("misc",         "Miscellaneous",     [("runs", "Active Runs"), ("storage", "Storage"), ("catalog", "Catalog"), ("database", "Data Layer"), ("queue", "Task Queue"), ("license", "License"), ("secrets", "Secrets Audit"), ("images", "Image Freshness"), ("ports", "Exposed Ports"), ("cicd", "CI/CD Health"), ("cvetrend", "CVE Trend"), ("backup", "Backup Status")]),
-    ("admin",        "Admin",             [("actions", "Actions"), ("jobs", "Scheduled Jobs"), ("issues", "Known Issues")]),
+    # Public Read-Only Control Center architecture: the "Admin" tab
+    # (Actions / Scheduled Jobs / Known Issues) used to live here --
+    # this report is served unauthenticated at GET / on
+    # control.omnibioai.org (routes_report.py's own public allowlist),
+    # so anything rendered into it ships to every anonymous visitor
+    # regardless of the login form admin.py's own JS used to gate on.
+    # Moved to the Admin Console (admin.omnibioai.org, cc-ui's own
+    # ActionsPage/ScheduledJobsPage/KnownIssuesPage, which sit behind
+    # AdminApp's real AuthGate) -- see
+    # docs/admin-console-navigation-move.md. Not rendered here at all
+    # anymore, not just hidden.
 ]
 
 
@@ -234,12 +240,6 @@ def build_report(out_html: Path, title: str, timestamp: str,
         ("cloud", "Cloud", cloud_html),
         ("cost", "Cost Tracking", cost_tracking_placeholder_section_html()),
     ], group_id="llmscloud", render_nav=False)
-    admin_html = misc_section_html([
-        ("actions", "Actions", admin_actions_section_html()),
-        ("jobs", "Scheduled Jobs", admin_jobs_section_html()),
-        ("issues", "Known Issues", admin_issues_section_html()),
-    ], group_id="admin", render_nav=False, header_html=admin_auth_header_html()) + _ADMIN_SCRIPT
-
     html = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -334,7 +334,6 @@ def build_report(out_html: Path, title: str, timestamp: str,
       <div id="tab-modelreg" class="tab-panel">{model_registry_html}</div>
       <div id="tab-dockerimages" class="tab-panel">{dockerimages_html}</div>
       <div id="tab-misc" class="tab-panel">{misc_html}</div>
-      <div id="tab-admin" class="tab-panel">{admin_html}</div>
     </div>
   </div>
 

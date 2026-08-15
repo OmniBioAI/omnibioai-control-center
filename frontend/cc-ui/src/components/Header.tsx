@@ -1,13 +1,11 @@
-export type Tab = 'health' | 'docker' | 'ecosystem' | 'config' | 'llms' | 'cloud' | 'organizations' | 'users'
+export type Tab = 'health' | 'ecosystem' | 'llms' | 'cloud' | 'integrations' | 'organizations' | 'users'
 
 interface Props {
   tab: Tab
   onTab: (t: Tab) => void
   status: 'UP' | 'WARN' | 'DOWN' | null
-  generating: boolean
   reportExists: boolean
   onRefresh: () => void
-  onGenerate: () => void
   // Phase 3 PR2: the existing ops tabs stay admin-role-gated exactly as
   // before; "Organizations" has a broader audience (org_admin/platform_admin
   // too, not just the global "admin" role) -- see auth.ts's
@@ -26,13 +24,21 @@ interface Props {
 
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
 
+// Public Read-Only Control Center architecture: Docker/Config are gone
+// from this list -- both call backend routes gated behind
+// platform.manage_infra (docker_router/config_router in main.py), and
+// this Header component's only consumer (ControlApp) is now a always-
+// anonymous build with no way to satisfy that gate. They remain fully
+// available, unchanged, through AdminApp's own Infrastructure section.
+// Integrations is new here -- routes_integrations.py has never required
+// auth (booleans/labels only, see that module's own comment), it just
+// wasn't in ControlApp's tab set before this PR.
 const OPS_TABS: { id: Tab; label: string }[] = [
-  { id: 'health',    label: 'Health Dashboard' },
-  { id: 'docker',    label: 'Docker Images' },
-  { id: 'ecosystem', label: 'Ecosystem Report' },
-  { id: 'config',    label: 'Config' },
-  { id: 'llms',      label: 'LLMs' },
-  { id: 'cloud',     label: 'Cloud' },
+  { id: 'health',       label: 'Health Dashboard' },
+  { id: 'ecosystem',    label: 'Ecosystem Report' },
+  { id: 'llms',         label: 'LLMs' },
+  { id: 'cloud',        label: 'Cloud' },
+  { id: 'integrations', label: 'Integrations' },
 ]
 
 const ORGANIZATIONS_TAB: { id: Tab; label: string } = { id: 'organizations', label: 'Organizations' }
@@ -45,7 +51,7 @@ const STATUS_CFG = {
 }
 
 export default function Header({
-  tab, onTab, status, generating, reportExists, onRefresh, onGenerate,
+  tab, onTab, status, reportExists, onRefresh,
   showOpsTabs = true, showOrganizationsTab = true, showUsersTab = true,
 }: Props) {
   const sc = status ? STATUS_CFG[status] : null
@@ -110,28 +116,12 @@ export default function Header({
             ↺ Refresh
           </button>
 
-          <button
-            onClick={onGenerate}
-            disabled={generating}
-            style={{
-              fontSize: 13, fontWeight: 600, padding: '7px 15px',
-              border: 'none', borderRadius: 8,
-              background: generating ? 'rgba(0,229,160,0.4)' : '#00e5a0',
-              color: '#000',
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-              cursor: generating ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {generating && (
-              <span style={{
-                width: 12, height: 12,
-                border: '2px solid rgba(0,0,0,0.3)', borderTopColor: '#000',
-                borderRadius: '50%', animation: 'spin 0.8s linear infinite', flexShrink: 0,
-              }} />
-            )}
-            {generating ? 'Generating…' : '⊕ Generate Report'}
-          </button>
-
+          {/* Public Read-Only Control Center architecture: the "Generate
+              Report" button (POST /report/generate, platform.manage_content
+              -gated) is gone -- this build has no way to satisfy that gate
+              and no mutation belongs in an always-anonymous surface. "View
+              Report" below stays: it's a plain GET link to already-generated,
+              already-public report content. */}
           {reportExists && (
             <a
               href={`${BASE}/`}

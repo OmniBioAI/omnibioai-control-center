@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from control_center.checks.activity import get_activity_status
@@ -15,10 +15,26 @@ from control_center.checks.image_freshness import get_image_freshness
 from control_center.checks.integrity import run_integrity_checks
 from control_center.checks.license_status import get_license_status
 from control_center.checks.usage_status import get_usage_status
+from control_center.core.auth import require_permission
 from control_center.core.settings import load_settings
 
 router = APIRouter()
 
+# Public Read-Only Control Center architecture: every other route in this
+# router (gpu/celery/database/image-freshness/usage/gateway-traffic/
+# activity/integrity) is aggregate-only telemetry -- no hostnames, LAN
+# IPs, container inventory, mount paths, or per-user identifiers -- same
+# "no internal topology" bar routes_integrations.py's own module comment
+# already documents for why it's safely ungated. /license and
+# /audit-trail below are the two exceptions: /license returns real
+# customer/user email addresses (checks/license_status.py's own SELECT
+# email ... query) and /audit-trail returns a raw, individually-listed
+# audit-event feed including per-event user_id
+# (checks/audit_trail.py) -- both gated here rather than left open, same
+# platform.manage_infra permission summary_router/docker_router/
+# config_router/services_router already use in main.py for the same
+# "leaks real identity/topology data" reasoning.
+_require_manage_infra = require_permission("platform.manage_infra")
 
 @router.get("/gpu")
 def gpu() -> JSONResponse:
@@ -41,7 +57,7 @@ def image_freshness() -> JSONResponse:
 
 
 @router.get("/license")
-def license_status() -> JSONResponse:
+def license_status(_admin: dict = Depends(_require_manage_infra)) -> JSONResponse:
     return JSONResponse(get_license_status())
 
 
@@ -56,7 +72,7 @@ def gateway_traffic() -> JSONResponse:
 
 
 @router.get("/audit-trail")
-def audit_trail() -> JSONResponse:
+def audit_trail(_admin: dict = Depends(_require_manage_infra)) -> JSONResponse:
     return JSONResponse(get_audit_trail())
 
 

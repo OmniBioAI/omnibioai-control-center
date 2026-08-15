@@ -15,6 +15,9 @@ import EcosystemPage from '../pages/EcosystemPage'
 import ConfigPage from '../pages/ConfigPage'
 import LlmPage from '../pages/LlmPage'
 import CloudPage from '../pages/CloudPage'
+import ActionsPage from '../pages/ActionsPage'
+import ScheduledJobsPage from '../pages/ScheduledJobsPage'
+import KnownIssuesPage from '../pages/KnownIssuesPage'
 import ToolExecutionPage from '../pages/operations/ToolExecutionPage'
 import AIModelsPage from '../pages/operations/AIModelsPage'
 import WorkflowsPage from '../pages/operations/WorkflowsPage'
@@ -411,6 +414,14 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
     case 'config':    return ctx.canSeeOps ? <ConfigPage    refreshKey={ctx.refreshKey} /> : null
     case 'llms':      return ctx.canSeeOps ? <LlmPage       refreshKey={ctx.refreshKey} /> : null
     case 'cloud':     return ctx.canSeeOps ? <CloudPage     refreshKey={ctx.refreshKey} /> : null
+
+    // Moved from the public Control Center's legacy static-HTML "Admin"
+    // tab (scripts/sections/misc/admin.py) -- see
+    // docs/admin-console-navigation-move.md. Same canSeeOps gate every
+    // other Infrastructure page above uses.
+    case 'actions':        return ctx.canSeeOps ? <ActionsPage />       : null
+    case 'scheduled-jobs': return ctx.canSeeOps ? <ScheduledJobsPage /> : null
+    case 'known-issues':   return ctx.canSeeOps ? <KnownIssuesPage />   : null
 
     // PR A1: no org picker (unlike 'billing'/'iam' below) -- TES
     // self-scopes GET /api/runs to the caller's own organization_id
