@@ -24,6 +24,16 @@ dependencies = [
   # in the workspace during discovery, zero hits.
   "weasyprint>=62.0",
   "jinja2>=3.1",
+  # Admin Console HIPAA Compliance Report (persistent change history):
+  # this service's first ORM/database code -- everywhere else in this
+  # repo is a stateless proxy/health-checker (confirmed by reading every
+  # api/routes_*_proxy.py and core/settings.py directly; pymysql above is
+  # raw ad-hoc connections for health checks, not an ORM). SQLite via
+  # SQLAlchemy, not a new MySQL database, so this feature needs no
+  # deploy-time credential/compose wiring in any other repo to be a real,
+  # persistent store in this one -- see hipaa_compliance/db.py's own
+  # module docstring.
+  "sqlalchemy>=2.0",
 ]
 
 [project.optional-dependencies]
