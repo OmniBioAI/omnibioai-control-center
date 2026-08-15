@@ -412,6 +412,18 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
     case 'overview':
       return <DashboardPage />
 
+    // 'infrastructure' is the Operations > Infrastructure group's own
+    // parent nav row (navigation.ts), not just a label over its 9 real
+    // children below -- SidebarNav renders it as its own clickable
+    // NavRow, so it needs its own case here too, same as every other
+    // functional: true item. Landing it on the shared <ComingSoon />
+    // via the default case below was the bug (it claimed the whole
+    // group "isn't built yet" despite every child already being real).
+    // No dedicated "Infrastructure overview" page exists, and building
+    // one is out of scope here -- HealthPage is this group's own
+    // existing system-status overview, so reusing it as the landing
+    // page is wiring to existing content, not new functionality.
+    case 'infrastructure':
     case 'health':    return ctx.canSeeOps ? <HealthPage    refreshKey={ctx.refreshKey} /> : null
     case 'docker':    return ctx.canSeeOps ? <DockerPage    refreshKey={ctx.refreshKey} /> : null
     case 'ecosystem': return ctx.canSeeOps ? <EcosystemPage refreshKey={ctx.refreshKey} /> : null
