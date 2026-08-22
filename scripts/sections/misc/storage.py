@@ -2,13 +2,24 @@ from __future__ import annotations
 
 def storage_section_html(control_center_url: str) -> str:
     """Fetch disk/storage usage from control center."""
-    import urllib.request, json
+    import urllib.error, urllib.request, json
     data: dict = {}
     try:
         with urllib.request.urlopen(
             f"{control_center_url.rstrip('/')}/storage", timeout=200
         ) as r:
             data = json.loads(r.read())
+    except urllib.error.URLError:
+        return """
+<div class="tab-section">
+  <h2 style="font-size:18px;font-weight:700;margin-bottom:4px">Storage</h2>
+  <p style="color:var(--color-text-muted);font-size:13px;margin-bottom:4px">
+    Storage service unavailable
+  </p>
+  <p style="color:var(--color-text-muted);font-size:12px">
+    The configured storage health endpoint is currently unreachable.
+  </p>
+</div>"""
     except Exception as e:
         print(f"[report] storage_section_html failed: {type(e).__name__}: {e}", flush=True)
 

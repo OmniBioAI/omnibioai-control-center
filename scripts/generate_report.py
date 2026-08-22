@@ -77,7 +77,7 @@ from sections.misc.backup_status import backup_status_section_html
 # ── constants ──────────────────────────────────────────────────────────────────
 
 DEFAULT_TARGETS = [
-    "omnibioai-tes", "omnibioai", "omnibioai-rag", "omnibioai-lims",
+    "omnibioai-tes", "omnibioai-workbench", "omnibioai-rag", "omnibioai-lims",
     "omnibioai-toolserver", "omnibioai-tool-runtime",
     "omnibioai-control-center", "omnibioai-dev-docker", "omnibioai-sdk",
     "omnibioai-workflow-bundles", "omnibioai-model-registry",
