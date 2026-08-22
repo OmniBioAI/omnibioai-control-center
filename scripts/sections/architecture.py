@@ -125,7 +125,7 @@ def architecture_section_html(project_totals: Dict[str, Totals],
   <div class="legend-item"><span class="legend-dot" style="background:#3B6D11;border-radius:50%"></span>healthy</div>
   <div class="legend-item"><span class="legend-dot" style="background:#A32D2D;border-radius:50%"></span>down</div>
   <div class="legend-item"><span class="legend-dot" style="background:#888780;border-radius:50%"></span>not monitored</div>
-  <div style="margin-left:auto;font-size:11px;color:var(--color-text-muted)">live from <code style="font-size:10px">/summary</code> · auto-refreshes every 30s</div>
+  <div style="margin-left:auto;font-size:11px;color:var(--color-text-muted)">live from <code style="font-size:10px">/health</code> · auto-refreshes every 30s</div>
 </div>
 </div>
 
@@ -136,14 +136,15 @@ function _ccAuthHeader(){{
   return t?{{'Authorization':'Bearer '+t}}:{{}};
 }}
 function fetchH(){{
-  fetch(_cc+'/summary',{{headers:_ccAuthHeader()}}).then(function(r){{return r.json();}}).then(function(d){{
-    var svcs=d.services||[];
+  fetch(_cc+'/health',{{headers:_ccAuthHeader()}}).then(function(r){{if(!r.ok)throw new Error('health request failed');return r.json();}}).then(function(d){{
+    var svcs=Array.isArray(d.services)?d.services:[];
     _hd={{}};svcs.forEach(function(s){{_hd[s.name]=s;}});
-    var ov=(d.overall_status||'').toUpperCase();
+    var raw=String(d.overall_status||d.status||'UNKNOWN').toUpperCase();
+    var ov=(raw==='OK'||raw==='HEALTHY')?'UP':raw;
     var gd=document.getElementById('g-dot');
     var gs=document.getElementById('g-status');
-    gd.className='status-dot '+(ov==='UP'?'dot-up':'dot-down');
-    gs.textContent=ov==='UP'?'all systems up':ov.toLowerCase();
+    gd.className='status-dot '+(ov==='UP'?'dot-up':(ov==='DOWN'||ov==='UNREACHABLE'||ov==='UNAVAILABLE')?'dot-down':'dot-warn');
+    gs.textContent=ov==='UP'?'healthy':ov==='WARN'?'degraded':ov.toLowerCase();
     Object.keys(_hd).forEach(function(k){{
       var el=document.getElementById('nd-'+k);
       if(el){{var s=(_hd[k].status||'').toUpperCase();el.className='status-dot '+(s==='UP'?'dot-up':'dot-down');}}

@@ -41,29 +41,47 @@ def _parse_disk(raw: Dict[str, Any]) -> DiskHealth:
                       message=str(raw.get("message", "")))
 
 def _admin_header() -> Dict[str, str]:
-    # /summary now requires require_admin (core/auth.py) -- self-mint a
-    # short-lived admin token with the same shared secret it validates
-    # against (JWT_SECRET, already set on this container -- see
-    # docker-compose.yml's control-center service) rather than doing an
-    # interactive login round-trip. Same pattern check_domain_health.py /
-    # check_disk_space.py already use for their own admin-gated calls.
+    # Keep the standard report request headers in one place. The public
+    # /health endpoint ignores the admin token; richer deployments may use it.
     secret = os.environ.get("JWT_SECRET", "change-me")
     token = jwt.encode({"sub": "generate-report", "roles": ["admin"]}, secret, algorithm="HS256")
     return {"Authorization": f"Bearer {token}"}
 
+def _overall_status(payload: Dict[str, Any]) -> str:
+    raw = str(payload.get("overall_status") or payload.get("status") or "UNKNOWN").upper()
+    if raw in {"OK", "HEALTHY"}:
+        return "UP"
+    if raw in {"UNAVAILABLE", "UNREACHABLE"}:
+        return "UNREACHABLE"
+    return raw if raw in {"UP", "DOWN", "WARN"} else "UNKNOWN"
+
 def fetch_health(base_url: str, timeout_s: float = 5.0) -> EcosystemHealth:
-    url = base_url.rstrip("/") + "/summary"
+    url = base_url.rstrip("/") + "/health"
     try:
         req = urllib.request.Request(
             url, headers={"User-Agent": "omnibioai-report/1.0", **_admin_header()},
         )
         with urllib.request.urlopen(req, timeout=timeout_s) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
-        services = [_parse_service(s) for s in (payload.get("services") or [])]
-        disk_raw = (payload.get("system") or {}).get("disk") or []
+        if not isinstance(payload, dict):
+            return EcosystemHealth(overall_status="UNKNOWN", generated_at="",
+                                   error="Unexpected health response")
+        services_raw = payload.get("services")
+        if services_raw is not None and not isinstance(services_raw, list):
+            return EcosystemHealth(overall_status="UNKNOWN", generated_at="",
+                                   error="Unexpected services response")
+        services = [_parse_service(s) for s in (services_raw or []) if isinstance(s, dict)]
+        system_raw = payload.get("system")
+        if system_raw is not None and not isinstance(system_raw, dict):
+            return EcosystemHealth(overall_status="UNKNOWN", generated_at="",
+                                   error="Unexpected system response")
+        disk_raw = (system_raw or {}).get("disk") or []
+        if not isinstance(disk_raw, list):
+            return EcosystemHealth(overall_status="UNKNOWN", generated_at="",
+                                   error="Unexpected disk response")
         disk     = [_parse_disk(d) for d in disk_raw]
         return EcosystemHealth(
-            overall_status=str(payload.get("overall_status", "WARN")).upper(),
+            overall_status=_overall_status(payload),
             generated_at=str(payload.get("generated_at", "")),
             services=services, disk=disk)
     except urllib.error.URLError as e:

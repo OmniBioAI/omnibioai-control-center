@@ -340,7 +340,7 @@ def build_report(out_html: Path, title: str, timestamp: str,
   <div class="footer">
     cloc counts exclude vendored/runtime directories and selected extensions per cloc policy.<br>
     Coverage is best-effort and does not fail the report when a repository has test or configuration issues.<br>
-    Health data is live — fetched from the Control Center /summary endpoint with 30-second auto-refresh.<br>
+    Health data is live — fetched from the Control Center /health endpoint with 30-second auto-refresh.<br>
     <a href="https://omnibioai.org" target="_blank" rel="noopener noreferrer" style="color:var(--color-accent);text-decoration:none">← Back to omnibioai.org</a>
   </div>
 </div>
@@ -415,18 +415,23 @@ if(!sbnavApplyHash()){{
 window.addEventListener('hashchange', function(){{ sbnavApplyHash(); }});
 
 (function globalHealthBadge(){{
-  fetch('/summary').then(function(r){{return r.json();}}).then(function(d){{
-    var ov=(d.overall_status||'UNKNOWN').toUpperCase();
+  fetch('/health').then(function(r){{if(!r.ok)throw new Error('health request failed');return r.json();}}).then(function(d){{
+    var raw=String(d.overall_status||d.status||'UNKNOWN').toUpperCase();
+    var ov=(raw==='OK'||raw==='HEALTHY')?'UP':raw;
     var badge=document.getElementById('global-health-badge');
     var dot=document.getElementById('global-health-dot');
     var txt=document.getElementById('global-health-text');
     var ts=document.getElementById('global-health-ts');
     var cls={{UP:'sb-up',DOWN:'sb-down',WARN:'sb-warn'}};
     badge.className='status-badge '+(cls[ov]||'sb-unknown');
-    dot.className='status-dot '+(ov==='UP'?'dot-up':ov==='DOWN'?'dot-down':'dot-warn');
-    var svcs=d.services||[];
-    var up=svcs.filter(function(s){{return s.status==='UP';}}).length;
-    txt.textContent=up+'/'+svcs.length+' UP';
+    dot.className='status-dot '+(ov==='UP'?'dot-up':(ov==='DOWN'||ov==='UNREACHABLE'||ov==='UNAVAILABLE')?'dot-down':'dot-warn');
+    var svcs=Array.isArray(d.services)?d.services:[];
+    if(svcs.length){{
+      var up=svcs.filter(function(s){{return String(s.status||'').toUpperCase()==='UP';}}).length;
+      txt.textContent=up+'/'+svcs.length+' UP';
+    }}else{{
+      txt.textContent=ov==='UP'?'HEALTHY':ov==='WARN'?'DEGRADED':ov;
+    }}
     if(d.generated_at)ts.textContent=new Date(d.generated_at).toLocaleTimeString();
   }}).catch(function(){{
     document.getElementById('global-health-dot').className='status-dot dot-down';
