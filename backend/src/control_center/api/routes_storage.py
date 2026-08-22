@@ -1,12 +1,20 @@
-import asyncio
 import os
 import subprocess
+import threading
+import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 router_storage = APIRouter()
+
+_CACHE_TTL_SECONDS = 300.0
+_storage_cache: tuple[float, dict] | None = None
+_storage_refresh: Future[dict] | None = None
+_storage_lock = threading.Lock()
+_storage_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="storage-scan")
 
 
 def _du(path: Path) -> int:
@@ -107,8 +115,53 @@ def _compute_storage(workspace: Path) -> dict:
     }
 
 
+def _storage_snapshot(workspace: Path) -> dict:
+    """Return useful storage data without recursively walking the workspace."""
+    total, used, free = _df_disk(workspace)
+    return {
+        "disk": {
+            "total": total,
+            "used": used,
+            "free": free,
+            "pct_used": round(used / total * 100, 1) if total > 0 else 0,
+        },
+        "categories": {},
+        "reference_indexes": {},
+        "work_breakdown": {},
+        "docker_raw": "refreshing",
+        "refreshing": True,
+    }
+
+
+def _cached_storage(workspace: Path) -> dict:
+    """Serve immediately and refresh expensive directory totals in the background."""
+    global _storage_cache, _storage_refresh
+
+    now = time.monotonic()
+    with _storage_lock:
+        if _storage_refresh is not None and _storage_refresh.done():
+            try:
+                _storage_cache = (now, _storage_refresh.result())
+            except Exception:
+                # Retain stale data if an unexpected failure escapes the
+                # otherwise defensive scanner.
+                pass
+            _storage_refresh = None
+
+        cache_is_fresh = (
+            _storage_cache is not None
+            and now - _storage_cache[0] < _CACHE_TTL_SECONDS
+        )
+        if not cache_is_fresh and _storage_refresh is None:
+            _storage_refresh = _storage_executor.submit(_compute_storage, workspace)
+
+        if _storage_cache is not None:
+            return _storage_cache[1]
+
+    return _storage_snapshot(workspace)
+
+
 @router_storage.get("/storage")
 async def get_storage() -> JSONResponse:
     workspace = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
-    data = await asyncio.to_thread(_compute_storage, workspace)
-    return JSONResponse(data)
+    return JSONResponse(_cached_storage(workspace))

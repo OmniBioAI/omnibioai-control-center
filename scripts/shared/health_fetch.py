@@ -43,8 +43,20 @@ def _parse_disk(raw: Dict[str, Any]) -> DiskHealth:
 def _admin_header() -> Dict[str, str]:
     # Keep the standard report request headers in one place. The public
     # /health endpoint ignores the admin token; richer deployments may use it.
-    secret = os.environ.get("JWT_SECRET", "change-me")
-    token = jwt.encode({"sub": "generate-report", "roles": ["admin"]}, secret, algorithm="HS256")
+    secret = (
+        os.environ.get("AUTH_SECRET_KEY")
+        or os.environ.get("JWT_SECRET")
+        or "change-me"
+    )
+    token = jwt.encode(
+        {
+            "sub": "generate-report",
+            "roles": ["admin"],
+            "permissions": ["platform.manage_infra"],
+        },
+        secret,
+        algorithm="HS256",
+    )
     return {"Authorization": f"Bearer {token}"}
 
 def _overall_status(payload: Dict[str, Any]) -> str:
