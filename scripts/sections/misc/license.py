@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from shared.health_fetch import _admin_header
+
 def license_section_html(control_center_url: str) -> str:
     import urllib.request, json
     data: dict = {}
     try:
-        with urllib.request.urlopen(
-            f"{control_center_url.rstrip('/')}/license", timeout=10
-        ) as r:
+        request = urllib.request.Request(
+            f"{control_center_url.rstrip('/')}/license",
+            headers={"User-Agent": "omnibioai-report/1.0", **_admin_header()},
+        )
+        with urllib.request.urlopen(request, timeout=10) as r:
             data = json.loads(r.read())
     except Exception as e:
         print(f"[report] license_section_html failed: {type(e).__name__}: {e}", flush=True)
