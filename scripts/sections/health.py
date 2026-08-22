@@ -250,7 +250,7 @@ var _hIcons={{mysql:'🗄️',redis:'⚡',http:'🌐',tcp:'🔌'}};
 function _hLatCol(ms){{return ms<5?'#3B6D11':ms<20?'#854F0B':'#A32D2D';}}
 function hlthFetch(){{
   clearInterval(_hTimer);_hCd=30;
-  fetch(_hUrl+'/summary').then(function(r){{return r.json();}}).then(function(d){{
+  fetch(_hUrl+'/health').then(function(r){{if(!r.ok)throw new Error('health request failed');return r.json();}}).then(function(d){{
     _hlthRender(d);_hStartCd();
   }}).catch(function(){{_hlthError();_hStartCd();}});
 }}
@@ -262,8 +262,10 @@ function _hStartCd(){{
   }},1000);
 }}
 function _hlthRender(data){{
-  var svcs=data.services||[];var disk=(data.system||{{}}).disk||[];
-  var ov=(data.overall_status||'UNKNOWN').toUpperCase();
+  var svcs=Array.isArray(data.services)?data.services:[];var disk=Array.isArray((data.system||{{}}).disk)?data.system.disk:[];
+  var hasServices=svcs.length>0,hasDisk=disk.length>0;
+  var raw=String(data.overall_status||data.status||'UNKNOWN').toUpperCase();
+  var ov=(raw==='OK'||raw==='HEALTHY')?'UP':raw;
   var ts=data.generated_at||'';
   var up=svcs.filter(function(s){{return s.status==='UP';}}).length;
   var dn=svcs.filter(function(s){{return s.status==='DOWN';}}).length;
@@ -273,26 +275,29 @@ function _hlthRender(data){{
   var bgMap={{UP:'#EAF3DE',DOWN:'#FCEBEB',WARN:'#FAEEDA'}};
   var bdMap={{UP:'#97C459',DOWN:'#E24B4A',WARN:'#EF9F27'}};
   bn.style.background=bgMap[ov]||'#1a1d2e';bn.style.borderColor=bdMap[ov]||'#2a2d3e';
-  document.getElementById('hlth-dot').className='status-dot dot-'+(ov==='UP'?'up':ov==='DOWN'?'down':'warn');
-  document.getElementById('hlth-title').textContent=ov==='UP'?'All systems operational':ov==='DOWN'?'One or more services are down':'One or more services degraded';
-  document.getElementById('hlth-sub').textContent='Checked: '+(ts?new Date(ts).toLocaleTimeString():'')+' · Source: Control Center /summary';
-  document.getElementById('hk-total').textContent=svcs.length;
-  document.getElementById('hk-up').textContent=up;
-  document.getElementById('hk-down').textContent=dn;
-  document.getElementById('hk-warn').textContent=wn;
-  document.getElementById('hk-disk').textContent=dw;
-  document.getElementById('hl-up').textContent=up;
-  document.getElementById('hl-down').textContent=dn;
-  document.getElementById('hl-warn').textContent=wn;
-  document.getElementById('hlth-up-val').textContent=up;
-  document.getElementById('hlth-of-lbl').textContent='of '+svcs.length+' UP';
+  document.getElementById('hlth-dot').className='status-dot dot-'+(ov==='UP'?'up':(ov==='DOWN'||ov==='UNREACHABLE'||ov==='UNAVAILABLE')?'down':'warn');
+  document.getElementById('hlth-title').textContent=ov==='UP'?'Healthy':ov==='DOWN'?'One or more services are down':ov==='WARN'?'One or more services degraded':ov==='UNREACHABLE'||ov==='UNAVAILABLE'?'Control center unreachable':'Health status unknown';
+  document.getElementById('hlth-sub').textContent='Checked: '+(ts?new Date(ts).toLocaleTimeString():'')+' · Source: Control Center /health';
+  document.getElementById('hk-total').textContent=hasServices?svcs.length:'\u2014';
+  document.getElementById('hk-up').textContent=hasServices?up:'\u2014';
+  document.getElementById('hk-down').textContent=hasServices?dn:'\u2014';
+  document.getElementById('hk-warn').textContent=hasServices?wn:'\u2014';
+  document.getElementById('hk-disk').textContent=hasDisk?dw:'\u2014';
+  document.getElementById('hl-up').textContent=hasServices?up:'\u2014';
+  document.getElementById('hl-down').textContent=hasServices?dn:'\u2014';
+  document.getElementById('hl-warn').textContent=hasServices?wn:'\u2014';
+  document.getElementById('hlth-up-val').textContent=hasServices?up:(ov==='UP'?'HEALTHY':ov);
+  document.getElementById('hlth-of-lbl').textContent=hasServices?'of '+svcs.length+' UP':'service details unavailable';
   if(_hChart)_hChart.destroy();
-  _hChart=new Chart(document.getElementById('hlth-donut'),{{
-    type:'doughnut',
-    data:{{labels:['healthy','down','degraded'],
-           datasets:[{{data:[up,dn,wn],backgroundColor:['#22c55e','#ef4444','#f59e0b'],borderWidth:2,borderColor:'#1a1d2e',hoverOffset:3}}]}},
-    options:{{responsive:false,cutout:'70%',plugins:{{legend:{{display:false}},tooltip:{{callbacks:{{label:function(c){{return c.label+': '+c.raw;}}}}}}}}}}
-  }});
+  _hChart=null;
+  if(hasServices){{
+    _hChart=new Chart(document.getElementById('hlth-donut'),{{
+      type:'doughnut',
+      data:{{labels:['healthy','down','degraded'],
+             datasets:[{{data:[up,dn,wn],backgroundColor:['#22c55e','#ef4444','#f59e0b'],borderWidth:2,borderColor:'#1a1d2e',hoverOffset:3}}]}},
+      options:{{responsive:false,cutout:'70%',plugins:{{legend:{{display:false}},tooltip:{{callbacks:{{label:function(c){{return c.label+': '+c.raw;}}}}}}}}}}
+    }});
+  }}
   var latEl=document.getElementById('hlth-lat-bars');latEl.innerHTML='';
   var wl=svcs.filter(function(s){{return s.latency_ms!==null&&s.latency_ms!==undefined;}});
   var ml=Math.max.apply(null,wl.map(function(s){{return s.latency_ms;}}));if(!ml)ml=1;
@@ -306,6 +311,7 @@ function _hlthRender(data){{
     latEl.appendChild(d);
   }});
   var grid=document.getElementById('hlth-svc-grid');grid.innerHTML='';
+  if(!hasServices){{grid.innerHTML='<div style="font-size:12px;color:#6b7280;grid-column:1/-1">service-level health details were not provided</div>';}}
   svcs.forEach(function(s){{
     var sc=s.status==='UP'?'up':s.status==='DOWN'?'down':'warn';
     var bgC={{up:'#F0FDF4',down:'#FEF2F2',warn:'#FFFBEB'}};
@@ -474,7 +480,11 @@ function _hlthError(){{
   document.getElementById('hlth-title').textContent='Control center unreachable';
   document.getElementById('hlth-sub').textContent='Check that the control center is running on the configured URL';
   ['hk-total','hk-up','hk-down','hk-warn','hk-disk'].forEach(function(id){{document.getElementById(id).textContent='—';}});
-  document.getElementById('hlth-svc-grid').innerHTML='<div style="font-size:12px;color:#6b7280;grid-column:1/-1">unable to reach '+_hUrl+'/summary</div>';
+  ['hl-up','hl-down','hl-warn'].forEach(function(id){{document.getElementById(id).textContent='\u2014';}});
+  document.getElementById('hlth-up-val').textContent='UNAVAILABLE';
+  document.getElementById('hlth-of-lbl').textContent='service details unavailable';
+  if(_hChart){{_hChart.destroy();_hChart=null;}}
+  document.getElementById('hlth-svc-grid').innerHTML='<div style="font-size:12px;color:#6b7280;grid-column:1/-1">unable to reach '+_hUrl+'/health</div>';
   document.getElementById('hlth-disk-grid').innerHTML='<div style="font-size:12px;color:#6b7280">no data</div>';
   document.getElementById('hlth-lat-bars').innerHTML='<div style="font-size:12px;color:#6b7280">no data</div>';
 }}
