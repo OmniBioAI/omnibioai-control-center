@@ -1,5 +1,7 @@
 # OmniBioAI Control Center
 
+> README last reviewed: **2026-08-23**
+
 **Operational health dashboard, ecosystem report server, and observability hub for the OmniBioAI stack.**
 
 The Control Center is a FastAPI service that aggregates health status across all OmniBioAI components, serves an interactive ecosystem report, exposes Prometheus metrics, and auto-generates reports on a configurable schedule.
@@ -208,7 +210,7 @@ omnibioai-control-center/
 │   │   │   └── discord.py          # Discord webhook alerts (known issues, GPU temp)
 │   │   └── utils/
 │   │       └── summary_client.py   # Fetches /summary for report generation
-│   └── tests/                      # 886 tests — see "Running Tests" below
+│   └── tests/                      # 1,394 collected tests at last review — see "Running Tests" below
 │
 ├── frontend/cc-ui/src/
 │   ├── apps/
@@ -408,23 +410,29 @@ No code changes required.
 
 ## Running
 
-### Via Docker Compose (recommended)
+### Via Docker (repository-local)
+
+The repository root `Dockerfile` builds both frontend bundles and the FastAPI
+service. Build and run it directly from this checkout:
 
 ```bash
-# From the ecosystem root (~/Desktop/machine)
-docker compose \
-  --project-directory . \
-  -f omnibioai-control-center/compose/docker-compose.control-center.yml \
-  up -d
+docker build -t omnibioai-control-center -f Dockerfile .
+docker run --rm -p 7070:7070 \
+  -e CONTROL_CENTER_CONFIG=/workspace/config/control_center.yaml \
+  -e WORKSPACE_ROOT=/workspace \
+  -v "$PWD:/workspace" \
+  omnibioai-control-center
 ```
 
-Access at: `http://localhost/_svc/control` — read-only endpoints (`/health`, `/summary`, `/services`, `/report`, `/report/data`) are public; everything else requires a valid JWT via the nginx reverse proxy, and admin-gated write endpoints additionally require the `admin` role (see API Endpoints above).
+The checked-in `compose/docker-compose.control-center.yml` is an ecosystem
+deployment template and currently references an external `deploy/control-center`
+build context; do not use it as a standalone command from this checkout until
+that deployment layout is present.
 
-For local scripts and Prometheus scraping (localhost only):
-`http://127.0.0.1:7070`
-
-> **Note:** Port 7070 is bound to `127.0.0.1` only in production.
-> External access requires a valid JWT via the nginx reverse proxy.
+Access the direct development service at `http://127.0.0.1:7070`. In the full
+ecosystem deployment, nginx exposes the service at `/_svc/control`; read-only
+endpoints are public there, while other endpoints require JWT authentication
+and write endpoints additionally require the `admin` role.
 
 ### Standalone (development)
 
@@ -442,10 +450,10 @@ uvicorn control_center.main:app --host 0.0.0.0 --port 7070 --reload
 | Variable                | Default                       | Description |
 |-------------------------|-------------------------------|-------------|
 | `CONTROL_CENTER_CONFIG` | `/config/control_center.yaml` | Path to YAML config |
-| `WORKSPACE_ROOT`        | `/workspace`                  | Ecosystem root **as seen inside the container** — this is the mount point, not a host path. The compose file maps it via `${MACHINE_DIR}:/workspace`, so on the host this is wherever `MACHINE_DIR` points (e.g. `~/Desktop/machine`) |
+| `WORKSPACE_ROOT`        | `/workspace`                  | Ecosystem root as seen inside the container or local process |
 | `CONTROL_CENTER_PORT`   | `7070`                        | Service port |
 | `REPORT_SCHEDULE_HOURS` | `6`                           | Auto-regenerate report every N hours |
-| `WORK_DIR`              | `/workspace/omnibioai-work`   | Path to work/output directory, **container-internal** (same `/workspace` mount as `WORKSPACE_ROOT` above) — on the host this resolves to `${MACHINE_DIR}/omnibioai-work` |
+| `WORK_DIR`              | `/workspace/omnibioai-work`   | Work/output directory; use a path valid for the selected local or container deployment |
 | `JWT_SECRET`            | `change-me`                   | Shared HS256 secret for validating admin JWTs locally (`require_admin`) — same value as `AUTH_SECRET_KEY` used by omnibioai-auth/workbench/api-gateway/model-registry |
 | `JWKS_URL`               | `https://auth.omnibioai.org/.well-known/jwks.json` | RS256 verification (not yet enabled in production) — see [Authentication](#authentication) |
 | `JWKS_TIMEOUT_SECONDS` / `JWKS_CACHE_TTL_SECONDS` | `5` / `300`  | JWKS fetch timeout and key-set cache lifetime |
@@ -754,7 +762,7 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 - **Config-driven** — add services via YAML, no code changes
 - **Graceful degradation** — unreachable services show `DOWN`, never crash the dashboard
 - **Zero mandatory cloud** — runs fully offline and air-gapped
-- **Minimal dependencies** — FastAPI, uvicorn, PyYAML, pydantic, PyJWT only
+- **Focused dependencies** — FastAPI, uvicorn, PyYAML, pydantic, JWT, Prometheus, Celery/Redis, database clients, and report-generation libraries
 - **stdlib HTTP in report** — `urllib` used for health fetching in report generator, no extra deps
 - **Design-token driven** — CSS uses `@omnibioai/design-tokens` vocabulary; zero hardcoded hex values in the report or dashboard
 - **Structured logging** — all key events (startup, report triggered/finished/failed, scheduler) emitted as JSON to stdout
@@ -771,7 +779,7 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 
 ---
 
-## Current Status — v0.4.0-beta
+## Current Status — repository snapshot (2026-08-23)
 
 | Feature | Status |
 |---------|--------|
@@ -784,8 +792,8 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 | Ecosystem report — Languages | ✓ Stable |
 | Ecosystem report — Coverage | ✓ Stable |
 | Ecosystem report — Health tab | ✓ Stable |
-| Unit tests | ✓ Stable — 886 tests, 99.79% coverage (98% gate met) |
-| Docker Compose deployment | ✓ Stable |
+| Unit tests | ✓ 1,394 tests collected at last review; configured coverage gate is 98%, but the current checkout requires coverage work before that gate is met |
+| Docker deployment | ✓ Root Dockerfile is current; Compose file is an ecosystem template with an external build context |
 | Prometheus metrics (/metrics) | ✓ Stable |
 | Scheduled report generation | ✓ Stable |
 | JWT authentication (via nginx) | ✓ Stable |
@@ -803,8 +811,8 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 | Design token CSS alignment | ✓ Stable |
 | LLM monitoring (/llms) | ✓ Stable |
 | Cloud backend status (/cloud) | ✓ Stable |
-| Reference genome registry | ✓ Stable — 12 organisms |
-| AI Knowledge Base (/knowledge-base) | ✓ Stable — 28M+ abstracts |
+| Reference genome registry | ✓ Implemented; organism/index availability is deployment-dependent |
+| AI Knowledge Base (/knowledge-base) | ✓ Implemented; corpus size is deployment-dependent |
 | Storage monitoring (/storage) | ✓ Stable |
 | Report — LLMs tab | ✓ Stable |
 | Report — Cloud tab | ✓ Stable |
@@ -819,8 +827,8 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 | Admin Console — Security (MFA Policy, IAM/SSO, Audit Logs, API Keys/Service Accounts) | ✓ Stable |
 | Admin Console — Billing, Workflows, Tool Execution, AI Models, RAG/PubMed, Settings | ✓ Stable |
 | Admin Console — Sessions, Integrations | Placeholder (`functional: false`, "Coming Soon") |
-| Admin Console dual-build (`dist-admin`/`dist-control`, nginx host-based split) | ✓ Stable — verified on `localhost:5174` |
-| Admin Console external domain cutover (`admin.omnibioai.org` via Cloudflare Tunnel) | Prepared, not yet applied — needs DNS record + tunnel-host access |
+| Admin Console dual-build (`dist-admin`/`dist-control`, nginx host-based split) | ✓ Implemented and locally verifiable; external deployment is separate |
+| Admin Console external domain cutover (`admin.omnibioai.org` via Cloudflare Tunnel) | Pending — requires DNS, tunnel-host access, and Cloudflare Access policy |
 | Historical tracking | Planned |
 | Alert hooks (Slack, email) | Planned |
 | `/auth/login` audit trail | Planned — needs deliberate design, see Planned Enhancements |
