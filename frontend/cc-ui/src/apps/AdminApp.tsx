@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { fetchSummary, fetchReportStatus, triggerGenerate } from '../api'
 import {
   canSeeAnalytics as canSeeAnalyticsAccess, getSessionUser, hasAdminAccess, hasOrganizationsAccess, hasPlatformAdminAccess,
-  UNAUTHORIZED_EVENT,
+  UNAUTHORIZED_EVENT, openLims,
 } from '../auth'
 import { findNavItem } from '../navigation'
 import type { PageKey } from '../navigation'
@@ -199,6 +199,7 @@ function AdminDashboard() {
   const [overallStatus, setOverallStatus] = useState<'UP' | 'WARN' | 'DOWN' | null>(null)
   const [generating, setGenerating] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [limsOpening, setLimsOpening] = useState(false)
 
   useEffect(() => {
     if (!canSeeOps) return
@@ -342,20 +343,28 @@ function AdminDashboard() {
     window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
   }
 
+  const handleOpenLims = async () => {
+    setLimsOpening(true)
+    try { await openLims() } catch (error) { window.alert(error instanceof Error ? error.message : 'Unable to open LIMS') } finally { setLimsOpening(false) }
+  }
+
   return (
     <AppShell
       active={active}
       onNavigate={handleNavigate}
       user={user}
       onSignOut={handleSignOut}
-      extraActions={canSeeOps ? (
-        <StatusAndReportActions
+      extraActions={<div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {hasPlatformAdminAccess() && <button type="button" onClick={handleOpenLims} disabled={limsOpening} className="shell-action-button">
+          {limsOpening ? 'Opening LIMS…' : 'Open LIMS'}
+        </button>}
+        {canSeeOps && <StatusAndReportActions
           status={overallStatus}
           generating={generating}
           onRefresh={() => setRefreshKey(k => k + 1)}
           onGenerate={handleGenerate}
-        />
-      ) : undefined}
+        />}
+      </div>}
     >
       {renderPage(active, {
         canSeeOps, canSeeOrganizations, canSeeUsers, canSeeAuditLogs, canSeeInteractions, canSeeAnalytics, canSeeSecurityOverview,

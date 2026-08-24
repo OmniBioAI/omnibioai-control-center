@@ -447,6 +447,17 @@ uvicorn control_center.main:app --host 0.0.0.0 --port 7070 --reload
 
 ### Environment variables
 
+For the owner-only **Open LIMS** launch, configure the public client values
+at frontend build time. The client secret is never placed in Control Center
+or browser configuration; it remains server-side in Auth and LIMS.
+
+```text
+VITE_LIMS_SSO_CLIENT_ID=<registered-client-id>
+VITE_LIMS_SSO_REDIRECT_URI=https://lims.omnibioai.org/sso/callback
+```
+
+The redirect URI must exactly match Auth's `LIMS_SSO_REDIRECT_URI` value.
+
 | Variable                | Default                       | Description |
 |-------------------------|-------------------------------|-------------|
 | `CONTROL_CENTER_CONFIG` | `/config/control_center.yaml` | Path to YAML config |
