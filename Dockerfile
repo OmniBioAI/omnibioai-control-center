@@ -15,6 +15,8 @@ WORKDIR /frontend
 COPY frontend/cc-ui/package*.json ./
 RUN npm ci
 COPY frontend/cc-ui/ ./
+ARG VITE_LIMS_SSO_CLIENT_ID
+ARG VITE_LIMS_SSO_REDIRECT_URI
 RUN npm run build && npm run build:admin && npm run build:control
 
 # ── Stage 2: Python backend ────────────────────────────────────────────────────
