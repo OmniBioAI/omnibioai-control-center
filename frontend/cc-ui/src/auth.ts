@@ -32,6 +32,30 @@ export function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
+/** Start the owner-only first-party LIMS authorization-code flow. */
+export async function openLims(): Promise<void> {
+  const clientId = import.meta.env.VITE_LIMS_SSO_CLIENT_ID as string | undefined
+  const redirectUri = import.meta.env.VITE_LIMS_SSO_REDIRECT_URI as string | undefined
+  if (!clientId || !redirectUri) throw new Error('LIMS SSO is not configured')
+  const state = `${crypto.randomUUID()}${crypto.randomUUID()}`
+  const query = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    state,
+    nonce: crypto.randomUUID(),
+  })
+  const response = await fetch(`/auth/oauth/authorize?${query.toString()}`, {
+    headers: authHeaders(),
+    redirect: 'manual',
+  })
+  const location = response.headers.get('Location')
+  if (!location || response.status < 300 || response.status >= 400) {
+    throw new Error(response.status === 403 ? 'Platform-owner permission required' : 'Unable to start LIMS SSO')
+  }
+  window.location.assign(location)
+}
+
 // ── Silent refresh ───────────────────────────────────────────────────────
 //
 // workbench's lib/web/session.js already has a working refresh() (POSTs

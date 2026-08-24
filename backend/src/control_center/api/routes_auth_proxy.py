@@ -5,7 +5,7 @@ import os
 
 import httpx
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 # control.omnibioai.org's Cloudflare Tunnel ingress rule routes directly to
 # control-center's own :7070 (see /etc/cloudflared/config.yml's "Admin
@@ -86,6 +86,37 @@ async def auth_login_proxy(request: Request) -> JSONResponse:
 @router.post("/auth/validate")
 async def auth_validate_proxy(request: Request) -> JSONResponse:
     return await _proxy_to_auth("/auth/validate", request)
+
+
+@router.get("/auth/oauth/authorize")
+async def auth_first_party_authorize_proxy(request: Request) -> Response:
+    """Relay the owner-only authorization request without consuming its redirect.
+
+    The browser cannot attach an Authorization header to a native navigation,
+    so the Admin Console fetches this endpoint first and then navigates to the
+    returned Auth redirect. Only the bearer header and query string are
+    forwarded; cookies and arbitrary headers are deliberately excluded.
+    """
+    headers = {}
+    authorization = request.headers.get("authorization")
+    if authorization:
+        headers["Authorization"] = authorization
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
+            upstream = await client.get(
+                f"{IAM_URL}/oauth/authorize",
+                params=dict(request.query_params),
+                headers=headers,
+            )
+    except httpx.RequestError as e:
+        return JSONResponse({"error": f"auth-service unreachable: {type(e).__name__}: {e}"}, status_code=503)
+    if upstream.status_code in (301, 302, 303, 307, 308) and upstream.headers.get("location"):
+        return Response(status_code=upstream.status_code, headers={"location": upstream.headers["location"]})
+    try:
+        payload = upstream.json()
+    except ValueError:
+        payload = {"error": "auth-service returned a non-JSON response"}
+    return JSONResponse(payload, status_code=upstream.status_code)
 
 
 @router.post("/auth/refresh")
