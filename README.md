@@ -595,6 +595,12 @@ The report generates gracefully even if the Control Center is offline or coverag
 
 ## Admin Console
 
+The detailed, maintained Admin Console guide is [available here](docs/admin-console/README.md).
+It covers the feature catalog, authentication and authorization model,
+service ownership, local development, deployment, testing, troubleshooting,
+and current boundaries. The section below remains the repository-level
+architecture summary.
+
 **One repository, two frontend builds, two domains.** `control.omnibioai.org`
 serves the ops console described above (Health, Docker, Ecosystem Report,
 Config, LLMs, Cloud — no enterprise administration UI at all, not hidden,
