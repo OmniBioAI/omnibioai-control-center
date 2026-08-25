@@ -1,6 +1,6 @@
 # OmniBioAI Control Center
 
-> README last reviewed: **2026-08-23**
+> README last reviewed: **2026-08-24**
 
 **Operational health dashboard, ecosystem report server, and observability hub for the OmniBioAI stack.**
 
@@ -24,6 +24,15 @@ The Control Center is a FastAPI service that aggregates health status across all
 - **AI Knowledge Base** — 28M+ PubMed abstracts, FAISS indexes via `/knowledge-base`
 - **Storage monitoring** — disk usage, per-organism reference indexes via `/storage`
 - **Cloud backends** — execution backend status via `/cloud`
+
+### Control Center preview
+
+The Control build is the internal operations surface for platform health,
+Docker, ecosystem status, configuration, LLMs, and cloud infrastructure. The
+current public health view is shown below; authenticated operational views
+require the backend services and an authorized session.
+
+![Current Control Center login screen](docs/images/control-center-latest/control-login.png)
 
 ## Architecture
 
