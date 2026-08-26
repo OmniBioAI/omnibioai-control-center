@@ -46,7 +46,7 @@ from typing import Dict, List, Optional, Any
 REPOS = [
     # Core services
     "omnibioai-tes",
-    "omnibioai",
+    "omnibioai-workbench",
     "omnibioai-rag",
     "omnibioai-lims",
     "omnibioai-toolserver",
