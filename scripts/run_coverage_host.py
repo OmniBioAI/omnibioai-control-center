@@ -2,7 +2,7 @@
 
 #!/usr/bin/env python3
 """
-run_coverage_host.py — Run pytest coverage for each OmniBioAI repo on the host.
+run_coverage_host.py — Run test coverage for each OmniBioAI repo on the host.
 
 Runs on the developer machine (not inside the control-center container) so each
 repo's dependencies are already installed.  Saves a per-repo result JSON to:
@@ -53,12 +53,16 @@ REPOS = [
     "omnibioai-tool-runtime",
     "omnibioai-control-center",
     "omnibioai-sdk",
+    "omnibioai-design-tokens",
     "omnibioai-workflow-bundles",
     "omnibioai-model-registry",
     "omnibioai-tool-images",
     "omnibioai-dev-hub",
     "omnibioai-videos",
     "omnibioai-launcher",
+    "omnibioai-docs",
+    "omnibioai-usage-client",
+    "omnibioai-billing",
     # Security plane
     "omnibioai-auth",
     "omnibioai-api-gateway",
@@ -96,6 +100,19 @@ def _has_pytest_project(repo: Path) -> bool:
         or (repo / "tests").exists()
         or (repo / "backend" / "pyproject.toml").exists()
     )
+
+
+def _has_npm_coverage_project(repo: Path) -> bool:
+    """Return whether the repo exposes the standard npm coverage command."""
+    package_file = repo / "package.json"
+    if not package_file.exists():
+        return False
+    try:
+        package = json.loads(package_file.read_text(encoding="utf-8"))
+        script = package.get("scripts", {}).get("test:coverage")
+        return isinstance(script, str) and bool(script.strip())
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return False
 
 
 def _pytest_cwd(repo: Path) -> Path:
@@ -191,6 +208,51 @@ def _parse_coverage_json(cwd: Path) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _parse_vitest_coverage_json(cwd: Path) -> Optional[Dict[str, Any]]:
+    """Parse Vitest's coverage-summary or coverage-final JSON output."""
+    summary_file = cwd / "coverage" / "coverage-summary.json"
+    if summary_file.exists():
+        try:
+            total = json.loads(summary_file.read_text(encoding="utf-8")).get("total", {})
+            statements = total.get("statements", {})
+            branches = total.get("branches", {})
+            if statements.get("total") is not None:
+                return {
+                    "statements": int(statements["total"]),
+                    "missed": int(statements.get("total", 0) - statements.get("covered", 0)),
+                    "branches": int(branches["total"]) if branches.get("total") is not None else None,
+                    "partial_branches": int(branches.get("total", 0) - branches.get("covered", 0)) if branches.get("total") is not None else None,
+                    "coverage_pct": round(float(statements.get("pct", 0)), 2),
+                }
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            pass
+
+    final_file = cwd / "coverage" / "coverage-final.json"
+    if not final_file.exists():
+        return None
+    try:
+        data = json.loads(final_file.read_text(encoding="utf-8"))
+        statements = covered_statements = branches = covered_branches = 0
+        for file_data in data.values():
+            statement_counts = file_data.get("s", {})
+            statements += len(statement_counts)
+            covered_statements += sum(1 for count in statement_counts.values() if count > 0)
+            for counts in file_data.get("b", {}).values():
+                branches += len(counts)
+                covered_branches += sum(1 for count in counts if count > 0)
+        if statements == 0:
+            return None
+        return {
+            "statements": statements,
+            "missed": statements - covered_statements,
+            "branches": branches or None,
+            "partial_branches": (branches - covered_branches) if branches else None,
+            "coverage_pct": round(covered_statements / statements * 100, 2),
+        }
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
 def _resolve_repo(root: Path, name: str) -> Path:
     exact = root / name
     if exact.is_dir():
@@ -200,6 +262,42 @@ def _resolve_repo(root: Path, name: str) -> Path:
         if entry.is_dir() and entry.name.lower().replace("-", "_") == norm_key:
             return entry
     return exact
+
+
+def run_npm_repo(repo: Path, timeout_override: int | None = None) -> Dict[str, Any]:
+    """Run a repository's test:coverage script and normalize its result."""
+    result: Dict[str, Any] = {
+        "repo": repo.name, "path": str(repo),
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "returncode": None, "statements": None, "missed": None,
+        "branches": None, "partial_branches": None, "coverage_pct": None,
+        "total_line": None, "stdout_tail": None, "stderr_tail": None,
+        "status": "ok",
+    }
+    timeout = timeout_override or REPO_TIMEOUTS.get(repo.name, DEFAULT_TIMEOUT)
+    print(f"    npm run test:coverage (timeout={timeout}s) …", end=" ", flush=True)
+    try:
+        proc = subprocess.run(
+            ["npm", "run", "test:coverage"], cwd=str(repo), env=_subprocess_env(repo),
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        result["status"] = "timeout"
+        result["stderr_tail"] = str(exc)
+        print("timeout")
+        return result
+    print(f"rc={proc.returncode}")
+    result["returncode"] = proc.returncode
+    result["stdout_tail"] = "\n".join(proc.stdout.strip().splitlines()[-50:]) or None
+    result["stderr_tail"] = "\n".join(proc.stderr.strip().splitlines()[-10:]) or None
+    cov_data = _parse_vitest_coverage_json(repo)
+    if cov_data:
+        result.update(cov_data)
+        result["total_line"] = "vitest-json"
+        result["status"] = "ok" if proc.returncode == 0 else "test_failure"
+    else:
+        result["status"] = "no_total_found" if proc.returncode == 0 else "test_failure"
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -226,6 +324,9 @@ def run_repo(repo: Path, timeout_override: int | None = None) -> Dict[str, Any]:
     if not repo.exists():
         result["status"] = "missing_path"
         return result
+
+    if _has_npm_coverage_project(repo):
+        return run_npm_repo(repo, timeout_override)
 
     if not _has_pytest_project(repo):
         result["status"] = "skipped_no_pytest_project"
@@ -283,6 +384,9 @@ def run_repo(repo: Path, timeout_override: int | None = None) -> Dict[str, Any]:
         result.update(cov_data)
     else:
         result["status"] = "no_total_found"
+
+    if proc.returncode != 0 and result["status"] == "ok":
+        result["status"] = "test_failure"
 
     return result
 
