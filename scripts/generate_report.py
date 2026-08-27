@@ -84,6 +84,7 @@ DEFAULT_TARGETS = [
     "omnibioai-tool-images", "omnibioai-studio", "omnibioai-dev-hub",
     "omnibioai-videos", "omnibioai-iam-client", "omnibioai-usage-client",
     "omnibioai-policy-engine",
+    "omnibioai-ecosystem-regression",
     "omnibioai-security-audit", "omnibioai-security-sdk",
     "omnibioai-api-gateway", "omnibioai-hpc-policy-engine", "omnibioai-docs", "omnibioai-auth", "omnibioai-landing", "omnibioai-design-tokens", "omnibioai-ui",
     "omnibioai-utils",
