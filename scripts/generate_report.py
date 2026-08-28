@@ -89,6 +89,7 @@ DEFAULT_TARGETS = [
     "omnibioai-api-gateway", "omnibioai-hpc-policy-engine", "omnibioai-docs", "omnibioai-auth", "omnibioai-landing", "omnibioai-design-tokens", "omnibioai-ui",
     "omnibioai-utils",
     "omnibioai-launcher",
+    "omnibioai-billing", "omnibioai-db-init",
 ]
 
 _work_dir = Path(os.environ.get(
