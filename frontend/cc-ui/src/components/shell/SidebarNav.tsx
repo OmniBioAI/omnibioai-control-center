@@ -2,7 +2,7 @@ import {
   Activity, Bot, BookOpen, BrainCircuit, Building2, Cloud, Container,
   CreditCard, FlaskConical, KeyRound, KeySquare, LayoutDashboard, Network,
   Plug, ScrollText, Server, Settings, Settings2, ShieldCheck, Clock, Users,
-  UsersRound, Workflow, Wrench,
+  UsersRound, Workflow, Wrench, ClipboardCheck,
 } from 'lucide-react'
 import { NAVIGATION, isNavItemVisible } from '../../navigation'
 import type { NavItem, PageKey } from '../../navigation'
@@ -16,6 +16,7 @@ const ICONS: Partial<Record<PageKey, IconComponent>> = {
   roles: ShieldCheck,
   infrastructure: Server,
   health: Activity,
+  'regression-health': ClipboardCheck,
   docker: Container,
   ecosystem: Network,
   config: Settings2,

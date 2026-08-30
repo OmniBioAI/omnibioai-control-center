@@ -244,3 +244,25 @@ describe('navigation: HIPAA Compliance placement', () => {
     expect(item.visible).toBeDefined()
   })
 })
+
+describe('navigation: Regression Health placement', () => {
+  it('places Regression Health after Health and before Docker', () => {
+    const operations = NAVIGATION.find(section => section.key === 'operations')!
+    const infrastructure = operations.items.find(item => item.key === 'infrastructure')!
+    expect(infrastructure.children?.map(item => item.key)).toEqual(
+      expect.arrayContaining(['health', 'regression-health', 'docker'])
+    )
+    const keys = infrastructure.children!.map(item => item.key)
+    expect(keys.indexOf('regression-health')).toBe(keys.indexOf('health') + 1)
+    expect(keys.indexOf('docker')).toBe(keys.indexOf('regression-health') + 1)
+  })
+
+  it('is functional and gated by the existing platform.manage_infra permission', () => {
+    const operations = NAVIGATION.find(section => section.key === 'operations')!
+    const infrastructure = operations.items.find(item => item.key === 'infrastructure')!
+    const item = infrastructure.children!.find(child => child.key === 'regression-health')!
+    expect(item.label).toBe('Regression Health')
+    expect(item.functional).toBe(true)
+    expect(item.visible).toBeDefined()
+  })
+})

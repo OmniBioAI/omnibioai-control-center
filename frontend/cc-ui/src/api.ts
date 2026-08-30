@@ -122,6 +122,67 @@ export async function fetchHealth(): Promise<HealthResponse> {
   return r.json()
 }
 
+export type RegressionStatus =
+  | 'complete' | 'in_progress' | 'implemented' | 'not_implemented' | 'pass'
+  | 'certified' | 'partial' | 'paused' | 'blocked' | 'not_run'
+  | 'not_certified' | 'failed' | 'unknown'
+
+export interface RegressionPhase {
+  status: RegressionStatus
+  certification_status: RegressionStatus
+  last_certified_at?: string | null
+  evidence: Record<string, unknown>
+  notes?: string | null
+}
+
+export interface RegressionCapability {
+  id: string
+  label: string
+  implementation_status: RegressionStatus
+  test_status: RegressionStatus
+  live_status: RegressionStatus
+  certification_status: RegressionStatus
+  last_validated_at?: string | null
+  evidence: Record<string, unknown>
+  notes?: string | null
+}
+
+export interface RegressionFinding {
+  id: string
+  status: 'fixed' | 'open' | 'closed' | 'unknown'
+  validation_status: 'tested' | 'live_validated' | 'not_live_validated' | 'unknown'
+  summary: string
+  last_validated_at?: string | null
+}
+
+export interface RegressionTechnicalDebt {
+  id: string
+  status: RegressionStatus
+  summary: string
+  notes?: string | null
+}
+
+export interface RegressionHealthResponse {
+  schema_version: string
+  generated_at: string
+  source: { repository: string; commit: string; workflow_run_id?: string | null }
+  phases: Record<'p0' | 'p1' | 'p2', RegressionPhase>
+  capabilities: RegressionCapability[]
+  findings: RegressionFinding[]
+  technical_debt: RegressionTechnicalDebt[]
+  freshness: {
+    status: 'CURRENT' | 'STALE' | 'UNKNOWN'
+    age_seconds?: number
+    stale_after_hours: number
+  }
+}
+
+export async function fetchRegressionHealth(): Promise<RegressionHealthResponse> {
+  const r = await apiFetch(`${BASE}/regression-health`)
+  if (!r.ok) throw new Error(`/regression-health ${r.status}`)
+  return r.json()
+}
+
 export async function fetchConfig(): Promise<string> {
   const r = await apiFetch(`${BASE}/config`)
   if (!r.ok) throw new Error(`/config ${r.status}`)
