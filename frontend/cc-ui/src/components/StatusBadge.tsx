@@ -35,10 +35,27 @@ const KNOWN: Record<string, { bg: string; color: string }> = {
   // rather than relying on the KNOWN-miss fallback below.
   configured: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
   not_configured: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
+  complete: { bg: 'rgba(0,148,255,0.12)', color: 'var(--blue)' },
+  pass: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
+  certified: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
+  in_progress: { bg: 'rgba(0,148,255,0.12)', color: 'var(--blue)' },
+  partial: { bg: 'var(--amber-bg)', color: 'var(--amber)' },
+  paused: { bg: 'var(--amber-bg)', color: 'var(--amber)' },
+  blocked: { bg: 'var(--red-bg)', color: 'var(--red)' },
+  not_implemented: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
+  not_certified: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
+  failed: { bg: 'var(--red-bg)', color: 'var(--red)' },
+  unknown: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
+  not_run: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
+  stale: { bg: 'var(--amber-bg)', color: 'var(--amber)' },
+  fixed: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
+  live_validated: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
+  tested: { bg: 'rgba(0,148,255,0.12)', color: 'var(--blue)' },
+  not_live_validated: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
 }
 
 export default function StatusBadge({ status }: Props) {
-  const cfg = KNOWN[status] ?? { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' }
+  const cfg = KNOWN[status.toLowerCase()] ?? { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' }
   return (
     <span
       style={{

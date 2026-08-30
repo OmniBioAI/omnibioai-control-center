@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { fetchSummary, fetchReportStatus, triggerGenerate } from '../api'
 import {
-  canSeeAnalytics as canSeeAnalyticsAccess, getSessionUser, hasAdminAccess, hasOrganizationsAccess, hasPlatformAdminAccess,
+  canSeeAnalytics as canSeeAnalyticsAccess, getSessionUser, hasAdminAccess, hasOrganizationsAccess, hasPermission, hasPlatformAdminAccess,
   UNAUTHORIZED_EVENT, openLims,
 } from '../auth'
 import { findNavItem } from '../navigation'
@@ -10,6 +10,7 @@ import { AppShell } from '../components/shell'
 import { ComingSoon } from '../components/ui'
 import DashboardPage from '../pages/DashboardPage'
 import HealthPage from '../pages/HealthPage'
+import RegressionHealthPage from '../pages/RegressionHealthPage'
 import DockerPage from '../pages/DockerPage'
 import EcosystemPage from '../pages/EcosystemPage'
 import ConfigPage from '../pages/ConfigPage'
@@ -133,6 +134,7 @@ function billingOrgIdFromPath(): number | null {
 
 function AdminDashboard() {
   const canSeeOps = hasAdminAccess()
+  const canSeeRegressionHealth = hasPermission('platform.manage_infra')
   const canSeeOrganizations = hasOrganizationsAccess()
   const canSeeUsers = hasPlatformAdminAccess()
   // PR11.4b: same gate as 'users' -- GET /platform/audit-events is
@@ -163,6 +165,7 @@ function AdminDashboard() {
   const canSeeHipaaCompliance = hasPlatformAdminAccess()
 
   const [active, setActive] = useState<PageKey>(() => {
+    if (window.location.pathname === '/regression-health') return 'regression-health'
     if (window.location.pathname.startsWith('/organizations')) return 'organizations'
     if (window.location.pathname.startsWith('/users')) return 'users'
     // /iam/service-accounts must be checked before the bare /iam prefix
@@ -249,6 +252,7 @@ function AdminDashboard() {
       : active === 'mfa-policy' ? (selectedMfaPolicyOrgId != null ? `/security/mfa-policy/${selectedMfaPolicyOrgId}` : '/security/mfa-policy')
       : active === 'saml' ? (selectedSamlOrgId != null ? `/security/saml/${selectedSamlOrgId}` : '/security/saml')
       : active === 'billing' ? (selectedBillingOrgId != null ? `/billing/${selectedBillingOrgId}` : '/billing')
+      : active === 'regression-health' ? '/regression-health'
       : '/'
     if (window.location.pathname !== path) {
       window.history.pushState(null, '', path)
@@ -257,7 +261,9 @@ function AdminDashboard() {
 
   useEffect(() => {
     const onPopState = () => {
-      if (window.location.pathname.startsWith('/organizations')) {
+      if (window.location.pathname === '/regression-health') {
+        setActive('regression-health')
+      } else if (window.location.pathname.startsWith('/organizations')) {
         setActive('organizations')
         setSelectedOrgId(orgIdFromPath())
       } else if (window.location.pathname.startsWith('/users')) {
@@ -368,7 +374,7 @@ function AdminDashboard() {
       </div>}
     >
       {renderPage(active, {
-        canSeeOps, canSeeOrganizations, canSeeUsers, canSeeAuditLogs, canSeeInteractions, canSeeAnalytics, canSeeSecurityOverview,
+        canSeeOps, canSeeRegressionHealth, canSeeOrganizations, canSeeUsers, canSeeAuditLogs, canSeeInteractions, canSeeAnalytics, canSeeSecurityOverview,
         canSeeComplianceReport, canSeeHipaaCompliance, refreshKey,
         selectedOrgId, setSelectedOrgId, selectedUserId, setSelectedUserId,
         teamsOrgHint, rolesOrgHint, onViewTeams: handleViewTeams, onViewRoles: handleViewRoles,
@@ -385,6 +391,7 @@ function AdminDashboard() {
 
 interface RenderCtx {
   canSeeOps: boolean
+  canSeeRegressionHealth: boolean
   canSeeOrganizations: boolean
   canSeeUsers: boolean
   canSeeAuditLogs: boolean
@@ -435,6 +442,7 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
     // page is wiring to existing content, not new functionality.
     case 'infrastructure':
     case 'health':    return ctx.canSeeOps ? <HealthPage    refreshKey={ctx.refreshKey} /> : null
+    case 'regression-health': return ctx.canSeeRegressionHealth ? <RegressionHealthPage /> : null
     case 'docker':    return ctx.canSeeOps ? <DockerPage    refreshKey={ctx.refreshKey} /> : null
     case 'ecosystem': return ctx.canSeeOps ? <EcosystemPage refreshKey={ctx.refreshKey} /> : null
     case 'config':    return ctx.canSeeOps ? <ConfigPage    refreshKey={ctx.refreshKey} /> : null
