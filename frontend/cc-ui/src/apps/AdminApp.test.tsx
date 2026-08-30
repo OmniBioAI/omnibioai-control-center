@@ -22,6 +22,7 @@ vi.mock('../auth', async () => {
     ensureSession: vi.fn(),
     getSessionUser: vi.fn(),
     hasAdminAccess: vi.fn(),
+    hasPermission: vi.fn(),
     hasOrganizationsAccess: vi.fn(),
     hasPlatformAdminAccess: vi.fn(),
   }
@@ -40,6 +41,7 @@ vi.mock('../api', () => ({
 // otherwise collide with the nav-visibility assertions below.
 vi.mock('../pages/DashboardPage', () => ({ default: () => <div data-testid="DashboardPage" /> }))
 vi.mock('../pages/HealthPage', () => ({ default: () => <div data-testid="HealthPage" /> }))
+vi.mock('../pages/RegressionHealthPage', () => ({ default: () => <div data-testid="RegressionHealthPage" /> }))
 vi.mock('../pages/DockerPage', () => ({ default: () => <div data-testid="DockerPage" /> }))
 vi.mock('../pages/EcosystemPage', () => ({ default: () => <div data-testid="EcosystemPage" /> }))
 vi.mock('../pages/ConfigPage', () => ({ default: () => <div data-testid="ConfigPage" /> }))
@@ -137,6 +139,7 @@ describe('AdminApp auth gate', () => {
     vi.mocked(auth.ensureSession).mockReset()
     vi.mocked(auth.getSessionUser).mockReset().mockReturnValue(null)
     vi.mocked(auth.hasAdminAccess).mockReset()
+    vi.mocked(auth.hasPermission).mockReset().mockReturnValue(false)
     vi.mocked(auth.hasOrganizationsAccess).mockReset()
     vi.mocked(auth.hasPlatformAdminAccess).mockReset()
     window.history.pushState(null, '', '/')
@@ -187,6 +190,21 @@ describe('AdminApp auth gate', () => {
 
     expect(await screen.findByTestId('HealthPage')).toBeInTheDocument()
     expect(screen.queryByTestId('DashboardPage')).not.toBeInTheDocument()
+  })
+
+  it('reaches Regression Health only with platform.manage_infra permission', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-456')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPermission).mockImplementation(permission => permission === 'platform.manage_infra')
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+    clickNav('Regression Health')
+    expect(await screen.findByTestId('RegressionHealthPage')).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/regression-health')
   })
 
   it('drops back to the login screen when a gated request reports 401', async () => {

@@ -96,6 +96,19 @@ class TestNginxApiProxyConfig(unittest.TestCase):
                 "that api-proxy.conf's locations proxy_pass to",
             )
 
+    def test_regression_health_api_is_separate_from_spa_route(self) -> None:
+        self.assertRegex(
+            self.api_proxy_conf,
+            r"location\s+=\s+/regression-health/data\s*\{[\s\S]*?"
+            r"rewrite\s+\^/regression-health/data\$\s+/regression-health\s+break;[\s\S]*?"
+            r"proxy_pass\s+http://\$control_center_upstream;",
+        )
+        self.assertNotRegex(
+            self.api_proxy_conf,
+            r"location\s+(?:=\s+)?/regression-health\s*\{",
+            "the SPA route must not be claimed by an API proxy location",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

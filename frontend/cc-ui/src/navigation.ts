@@ -1,4 +1,4 @@
-import { canSeeAnalytics, hasAdminAccess, hasOrganizationsAccess, hasPlatformAdminAccess } from './auth'
+import { canSeeAnalytics, hasAdminAccess, hasOrganizationsAccess, hasPermission, hasPlatformAdminAccess } from './auth'
 
 /**
  * Admin Console Phase 2: the single source of truth for the sectioned
@@ -22,7 +22,7 @@ import { canSeeAnalytics, hasAdminAccess, hasOrganizationsAccess, hasPlatformAdm
 
 export type PageKey =
   | 'overview'
-  | 'health' | 'docker' | 'ecosystem' | 'config' | 'llms' | 'cloud'
+  | 'health' | 'regression-health' | 'docker' | 'ecosystem' | 'config' | 'llms' | 'cloud'
   | 'actions' | 'scheduled-jobs' | 'known-issues'
   | 'organizations' | 'users' | 'teams' | 'roles'
   | 'infrastructure' | 'workflows' | 'tool-execution' | 'ai-models'
@@ -89,6 +89,7 @@ export const NAVIGATION: NavSection[] = [
         key: 'infrastructure', label: 'Infrastructure', functional: true, visible: hasAdminAccess,
         children: [
           { key: 'health', label: 'Health', functional: true, visible: hasAdminAccess },
+          { key: 'regression-health', label: 'Regression Health', functional: true, visible: () => hasPermission('platform.manage_infra') },
           { key: 'docker', label: 'Docker', functional: true, visible: hasAdminAccess },
           { key: 'ecosystem', label: 'Ecosystem Report', functional: true, visible: hasAdminAccess },
           { key: 'config', label: 'Config', functional: true, visible: hasAdminAccess },
