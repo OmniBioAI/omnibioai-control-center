@@ -43,6 +43,20 @@ describe('navigation: Sessions placement', () => {
   })
 })
 
+describe('navigation: Security Posture placement', () => {
+  it('is one functional, permission-gated top-level Security item after Overview', () => {
+    const securitySection = NAVIGATION.find(section => section.key === 'security')!
+    const posture = securitySection.items.find(item => item.key === 'security-posture')
+    expect(posture).toBeDefined()
+    expect(posture!.functional).toBe(true)
+    expect(posture!.visible).toBeDefined()
+    expect(posture!.children).toBeUndefined()
+    expect(securitySection.items.indexOf(posture!)).toBe(
+      securitySection.items.findIndex(item => item.key === 'security-overview') + 1,
+    )
+  })
+})
+
 // PR-B5-B (Control Center Interaction Admin View). Same reasoning as the
 // Sessions block above.
 
