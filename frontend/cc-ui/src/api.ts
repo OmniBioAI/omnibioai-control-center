@@ -183,6 +183,86 @@ export async function fetchRegressionHealth(): Promise<RegressionHealthResponse>
   return r.json()
 }
 
+export type SecurityEvidenceType =
+  | 'SOURCE_IMPLEMENTATION' | 'UNIT_TEST' | 'INTEGRATION_TEST' | 'LIVE_VALIDATION'
+  | 'REGRESSION_CERTIFICATION' | 'RUNTIME_HEALTH' | 'CONFIGURATION'
+  | 'SECURITY_AUDIT' | 'COMPOSE_SECURITY' | 'DOCKER_PROXY_POLICY'
+
+export type SecurityPostureState = 'VERIFIED' | 'PARTIAL' | 'ATTENTION' | 'UNKNOWN' | 'NOT_IMPLEMENTED'
+export type SecurityImplementationStatus = 'IMPLEMENTED' | 'NOT_IMPLEMENTED' | 'UNKNOWN'
+export type SecurityTestStatus = 'PASS' | 'FAILED' | 'PARTIAL' | 'NOT_RUN' | 'UNKNOWN'
+export type SecurityLiveStatus = 'AVAILABLE' | 'UNAVAILABLE' | 'PARTIAL' | 'UNKNOWN'
+export type SecurityCertificationStatus = 'CERTIFIED' | 'NOT_CERTIFIED' | 'PARTIAL' | 'UNKNOWN'
+export type SecurityFreshness = 'CURRENT' | 'STALE' | 'UNKNOWN'
+export type SecurityDataSourceStatus = 'AVAILABLE' | 'UNAVAILABLE' | 'UNKNOWN' | 'NOT_CONFIGURED' | 'PARTIAL'
+
+export interface SecurityEvidenceItem {
+  type: SecurityEvidenceType
+  repository: string
+  identifier: string
+  status: string
+  validated_at: string | null
+  freshness: SecurityFreshness
+  description: string
+}
+
+export interface SecurityFindingItem {
+  finding_id: string
+  title: string
+  type: 'ACTIVE_ISSUE' | 'FIXED_HISTORICAL' | 'TECHNICAL_DEBT' | 'COVERAGE_GAP'
+  control_ids: string[]
+  severity?: string
+  source: string
+  validated_at: string | null
+  summary: string
+}
+
+export interface SecurityTechnicalDebtItem {
+  debt_id: string
+  summary: string
+  control_ids: string[]
+}
+
+export interface SecurityControlItem {
+  control_id: string
+  name: string
+  category: string
+  priority: 'P0' | 'P1' | 'P2'
+  implementation_status: SecurityImplementationStatus
+  test_status: SecurityTestStatus
+  live_status: SecurityLiveStatus
+  certification_status: SecurityCertificationStatus
+  freshness: SecurityFreshness
+  posture: SecurityPostureState
+  evidence: SecurityEvidenceItem[]
+  findings: SecurityFindingItem[]
+  limitations: string[]
+}
+
+export interface SecurityPostureResponse {
+  schema_version: string
+  generated_at: string
+  summary: {
+    verified: number
+    partial: number
+    attention: number
+    unknown: number
+    not_implemented: number
+  }
+  categories: string[]
+  controls: SecurityControlItem[]
+  findings: SecurityFindingItem[]
+  technical_debt: SecurityTechnicalDebtItem[]
+  data_sources: Record<string, SecurityDataSourceStatus>
+  limitations: string[]
+}
+
+export async function fetchSecurityPosture(): Promise<SecurityPostureResponse> {
+  const r = await apiFetch(`${BASE}/security-posture/data`)
+  if (!r.ok) throw new Error(`/security-posture/data ${r.status}`)
+  return r.json()
+}
+
 // ── Deployment Health (DH-3) ────────────────────────────────────────────────
 // Types below are transcribed directly from the real DH-2 response shape
 // (control_center/deployment_health_runtime.py's build_deployment_health_response

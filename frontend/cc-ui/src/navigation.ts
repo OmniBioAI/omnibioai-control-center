@@ -34,7 +34,7 @@ export type PageKey =
   | 'actions' | 'scheduled-jobs' | 'known-issues'
   | 'organizations' | 'users' | 'teams' | 'roles'
   | 'infrastructure' | 'workflows' | 'tool-execution' | 'ai-models' | 'agentic-ai'
-  | 'security-overview' | 'mfa-policy' | 'iam' | 'saml' | 'audit-logs' | 'sessions' | 'interactions' | 'api-keys' | 'compliance-report'
+  | 'security-overview' | 'security-posture' | 'mfa-policy' | 'iam' | 'saml' | 'audit-logs' | 'sessions' | 'interactions' | 'api-keys' | 'compliance-report'
   | 'hipaa-compliance'
   | 'analytics'
   | 'billing'
@@ -207,6 +207,7 @@ export const NAVIGATION: NavSection[] = [
       // orgs, GET /platform/audit-events are all manage_all_orgs-gated,
       // not org-scoped).
       { key: 'security-overview', label: 'Security Overview', functional: true, visible: hasPlatformAdminAccess },
+      { key: 'security-posture', label: 'Security Posture', functional: true, visible: hasPlatformAdminAccess },
       // mfa-policy: per-organization MFA requirement management -- same
       // hasOrganizationsAccess gate 'iam'/'api-keys' below already use,
       // for the identical reason (GET/POST/PATCH /orgs/{org_id}/
