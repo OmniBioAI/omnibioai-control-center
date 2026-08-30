@@ -1,6 +1,8 @@
 import {
   Activity, Bot, BookOpen, BrainCircuit, Building2, Cloud, Container,
   CreditCard, FlaskConical, KeyRound, KeySquare, LayoutDashboard, Network,
+  Plug, ScrollText, Server, Settings, Settings2, ShieldCheck, Clock, Sparkles, Users,
+  UsersRound, Workflow, Wrench,
   Plug, ScrollText, Server, Settings, Settings2, ShieldCheck, Clock, Users,
   UsersRound, Workflow, Wrench, ClipboardCheck,
 } from 'lucide-react'
@@ -25,6 +27,7 @@ const ICONS: Partial<Record<PageKey, IconComponent>> = {
   workflows: Workflow,
   'tool-execution': Wrench,
   'ai-models': BrainCircuit,
+  'agentic-ai': Sparkles,
   iam: KeyRound,
   'audit-logs': ScrollText,
   sessions: Clock,

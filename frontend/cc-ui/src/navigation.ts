@@ -25,7 +25,7 @@ export type PageKey =
   | 'health' | 'regression-health' | 'docker' | 'ecosystem' | 'config' | 'llms' | 'cloud'
   | 'actions' | 'scheduled-jobs' | 'known-issues'
   | 'organizations' | 'users' | 'teams' | 'roles'
-  | 'infrastructure' | 'workflows' | 'tool-execution' | 'ai-models'
+  | 'infrastructure' | 'workflows' | 'tool-execution' | 'ai-models' | 'agentic-ai'
   | 'security-overview' | 'mfa-policy' | 'iam' | 'saml' | 'audit-logs' | 'sessions' | 'interactions' | 'api-keys' | 'compliance-report'
   | 'hipaa-compliance'
   | 'analytics'
@@ -148,6 +148,23 @@ export const NAVIGATION: NavSection[] = [
       // so there is no separate real authorization boundary this gate
       // could be papering over.
       { key: 'ai-models', label: 'AI Models', functional: true, visible: hasAdminAccess },
+      // feature/agentic-ai-navbar. functional: true because a real page
+      // now exists (AgenticAIPage), reusing omnibioai-workbench's own
+      // GET /api/agent/graphs/ (agent_orchestrator service) via
+      // routes_agent_orchestrator_proxy.py. Same hasAdminAccess() gate
+      // 'ai-models'/'tool-execution'/'workflows'/'rag' above already
+      // use -- this only decides whether the nav entry renders. Unlike
+      // 'rag'/'ai-models' below, that endpoint does require a real
+      // Authorization header in practice (a cross-cutting Django
+      // middleware in a different, unrelated plugin gates every /api/*
+      // route project-wide -- confirmed live, see
+      // routes_agent_orchestrator_proxy.py's own comment), so this gate
+      // and the real upstream check now line up rather than this being
+      // the only real control.
+      // No org picker: agent_orchestrator's graph catalog has no
+      // organization concept, same reasoning 'tool-execution'/'ai-models'
+      // above use.
+      { key: 'agentic-ai', label: 'Agentic AI', functional: true, visible: hasAdminAccess },
     ],
   },
   {

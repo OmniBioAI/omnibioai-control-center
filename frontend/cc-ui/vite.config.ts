@@ -67,6 +67,14 @@ export default defineConfig({
       '/model-registry': { target: 'http://localhost:7070', changeOrigin: true },
       '/workflow-bundles': { target: 'http://localhost:7070', changeOrigin: true },
       '/rag': { target: 'http://localhost:7070', changeOrigin: true },
+      // Agentic AI nav item (feature/agentic-ai-navbar), proxied through
+      // control-center's own backend (routes_agent_orchestrator_proxy.py)
+      // to omnibioai-workbench's agent_orchestrator service. Added
+      // alongside its route, unlike /tes, /model-registry, /workflow-
+      // bundles, /rag above -- this repo's own comment on those four
+      // documents exactly the "npm run dev 404s" gap that skipping this
+      // entry would repeat.
+      '/agent-orchestrator': { target: 'http://localhost:7070', changeOrigin: true },
       // Admin Console HIPAA Compliance Report -- persistent change
       // history, proxied through control-center's own in-process router
       // (routes_hipaa_compliance.py, not a routes_*_proxy.py relay --
