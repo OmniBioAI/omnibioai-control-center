@@ -99,6 +99,22 @@ function HealthCells({ service }: { service: DeploymentServiceView }) {
   )
 }
 
+/** DH-5: drift is a compact, single badge next to Health -- deliberately
+ * never merged into the Health cell above (an independent operational
+ * dimension, not a health state; see StatusBadge.tsx's own comment for
+ * why 'drifted' gets a color no health state uses). The human-readable
+ * reason the backend computed is shown underneath, same layout
+ * convention HealthCells already uses for its own divergence reason. */
+function DriftCell({ service }: { service: DeploymentServiceView }) {
+  const { status, reason } = service.drift.drift
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 220 }}>
+      <StatusBadge status={status} />
+      <div style={{ fontSize: 10, color: 'var(--muted)' }}>{reason}</div>
+    </div>
+  )
+}
+
 function CompletenessCell({ service }: { service: DeploymentServiceView }) {
   if (service.completeness.is_complete) {
     return <span style={{ fontSize: 11, color: 'var(--muted)' }}>Complete</span>
@@ -138,6 +154,53 @@ function DependencyList({ dependencies }: { dependencies: DeploymentServiceView[
           <StatusBadge status={dep.target_intrinsic_health} />
         </div>
       ))}
+    </div>
+  )
+}
+
+/** DH-5: the full source/commit/image drift provenance for one service --
+ * Source, Configured, and Running are kept as three visually separate
+ * sub-sections (never collapsed into one), each showing only the fields
+ * the backend already allowlisted in `to_public_dict()`. Never renders
+ * raw Docker inspect JSON, a container ID, or a filesystem path -- only
+ * the same handful of fields DriftCell's badge already summarizes. */
+function DriftDetailSection({ service }: { service: DeploymentServiceView }) {
+  const { source, configured, running, drift } = service.drift
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <h3 style={{ fontSize: 13, color: 'var(--text)', marginBottom: 8 }}>Source / Commit / Image Drift</h3>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+        <StatusBadge status={drift.status} />
+        <span style={{ fontSize: 12, color: 'var(--text2)' }}>{drift.reason}</span>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Source</div>
+          <div style={{ fontSize: 12, color: 'var(--text2)', display: 'grid', gap: 3 }}>
+            <div>Repository: {source.repository ? <code>{source.repository}</code> : <span style={{ fontStyle: 'italic' }}>Unknown ownership</span>}</div>
+            <div>Expected revision: {source.expected_revision ?? <span style={{ fontStyle: 'italic' }}>Unknown</span>}</div>
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Configured</div>
+          <div style={{ fontSize: 12, color: 'var(--text2)', display: 'grid', gap: 3 }}>
+            <div>Image: {configured.image ? <code>{configured.image}</code> : <span style={{ fontStyle: 'italic' }}>None declared</span>}</div>
+            <div>Digest: {configured.digest ? <code>{configured.digest}</code> : <span style={{ fontStyle: 'italic' }}>Not pinned</span>}</div>
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Running</div>
+          <div style={{ fontSize: 12, color: 'var(--text2)', display: 'grid', gap: 3 }}>
+            <div>Image identity: {running.image_id ? <code>{running.image_id}</code> : <span style={{ fontStyle: 'italic' }}>Unknown</span>}</div>
+            <div>Revision: {running.revision ?? <span style={{ fontStyle: 'italic' }}>Unknown</span>}</div>
+            <div>Version: {running.version ?? <span style={{ fontStyle: 'italic' }}>Unknown</span>}</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>Drift evidence</div>
+        <EvidenceList evidence={drift.evidence} />
+      </div>
     </div>
   )
 }
@@ -230,6 +293,8 @@ function ServiceDetailPanel({ service, onClose }: { service: DeploymentServiceVi
         </div>
       </div>
 
+      <DriftDetailSection service={service} />
+
       <div style={{ marginBottom: 20 }}>
         <h3 style={{ fontSize: 13, color: 'var(--text)', marginBottom: 8 }}>Dependencies</h3>
         <DependencyList dependencies={service.dependencies} />
@@ -311,6 +376,19 @@ export default function DeploymentHealthPage() {
         </div>
       </section>
 
+      {/* DH-5: a distinct summary dimension from Health above -- counts
+          services by drift status, never merged into or replacing the
+          Healthy/Degraded/Unhealthy/Unknown health summary. */}
+      <section aria-labelledby="drift-summary-heading" style={{ marginBottom: 24 }}>
+        <h2 id="drift-summary-heading" style={{ fontSize: 15, color: 'var(--text)', marginBottom: 12 }}>Drift Summary</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+          <StatCard label="Matched" value={data.drift_summary.match} accent="green" />
+          <StatCard label="Drifted" value={data.drift_summary.drifted} accent="purple" />
+          <StatCard label="Unknown" value={data.drift_summary.unknown} />
+          <StatCard label="Not Applicable" value={data.drift_summary.not_applicable} />
+        </div>
+      </section>
+
       <section aria-labelledby="sources-heading" style={{ marginBottom: 24 }}>
         <h2 id="sources-heading" style={{ fontSize: 15, color: 'var(--text)', marginBottom: 12 }}>Evidence / Data Sources</h2>
         <Card>
@@ -367,6 +445,7 @@ export default function DeploymentHealthPage() {
                 { key: 'category', header: 'Category', render: row => row.category },
                 { key: 'repository', header: 'Repository', render: row => <RepositoryCell repository={row.repository} /> },
                 { key: 'health', header: 'Health', render: row => <HealthCells service={row} /> },
+                { key: 'drift', header: 'Drift', render: row => <DriftCell service={row} /> },
                 { key: 'dependencies', header: 'Dependencies', render: row => row.dependencies.length },
                 { key: 'completeness', header: 'Metadata', render: row => <CompletenessCell service={row} /> },
               ]}

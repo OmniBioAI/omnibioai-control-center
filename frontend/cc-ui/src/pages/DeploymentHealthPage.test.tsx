@@ -29,6 +29,16 @@ function service(overrides: Partial<DeploymentServiceView> = {}): DeploymentServ
       effective_evidence: [],
     },
     image_comparison: { status: 'match', configured: 'omnibioai-svc:1.0', running: 'omnibioai-svc:1.0' },
+    drift: {
+      source: { repository: 'omnibioai-svc', expected_revision: null, revision_type: 'unknown' },
+      configured: { image: 'omnibioai-svc:1.0', tag: '1.0', digest: null },
+      running: { image_id: 'sha256:abc123', revision: null, source: null, version: null },
+      drift: {
+        status: 'match',
+        reason: "running container's image id matches the currently locally-tagged image for its configured reference",
+        evidence: [{ source: 'docker_inspect', detail: "running image id compared against the currently locally-tagged image for 'omnibioai-svc:1.0'" }],
+      },
+    },
     dependencies: [],
     evidence: [{ source: 'compose_service', detail: "service 'svc' defined in compose" }],
     completeness: { repository_known: true, category_known: true, dependencies_known: true, missing_fields: [], is_complete: true },
@@ -39,10 +49,13 @@ function service(overrides: Partial<DeploymentServiceView> = {}): DeploymentServ
 function response(services: DeploymentServiceView[] = [service()]) {
   const counts = { healthy: 0, degraded: 0, unhealthy: 0, unknown: 0 }
   for (const s of services) counts[s.health.effective]++
+  const driftCounts = { match: 0, drifted: 0, unknown: 0, not_applicable: 0 }
+  for (const s of services) driftCounts[s.drift.drift.status]++
   return {
     generated_at: '2026-08-30T12:00:00Z',
     baseline: 'development',
     summary: { total: services.length, ...counts },
+    drift_summary: driftCounts,
     services,
     regression_health: { availability: 'unavailable', phases: null, freshness: null },
     data_sources: { compose: 'available', docker: 'available', application_probe: 'available', prometheus: 'not_configured', regression_health: 'unavailable' },
@@ -82,7 +95,11 @@ describe('DeploymentHealthPage', () => {
     vi.mocked(fetchDeploymentHealth).mockResolvedValue(response(services) as any)
     render(<DeploymentHealthPage />)
     expect(await screen.findByText('Total Services')).toBeInTheDocument()
-    expect(screen.getByText('4')).toBeInTheDocument()
+    // "4" legitimately appears twice here -- Total Services, and Drift
+    // Summary's "Matched" (all four fixtures share the default 'match'
+    // drift status) -- a coincidence of the fixture data, not a bug; see
+    // the Drift Summary-specific tests below for drift count assertions.
+    expect(screen.getAllByText('4').length).toBeGreaterThanOrEqual(1)
     // one of each count
     expect(screen.getAllByText('1').length).toBeGreaterThanOrEqual(4)
   })
@@ -271,6 +288,156 @@ describe('DeploymentHealthPage', () => {
     fireEvent.click(await screen.findByText('Auth'))
     await screen.findByText('Close')
     const forbidden = ['Restart', 'Stop', 'Start', 'Kill', 'Delete', 'Recreate', 'Deploy', 'Rollback', 'Scale', 'Cancel']
+    for (const word of forbidden) {
+      expect(screen.queryByText(word)).not.toBeInTheDocument()
+    }
+  })
+
+  // -------------------------------------------------------------------
+  // DH-5: source/commit/image drift
+  // -------------------------------------------------------------------
+
+  function driftedService() {
+    return service({
+      service_id: 'auth-service', display_name: 'Auth',
+      drift: {
+        source: { repository: 'omnibioai-auth', expected_revision: null, revision_type: 'unknown' },
+        configured: { image: 'ghcr.io/omnibioai/omnibioai-auth:latest', tag: 'latest', digest: null },
+        running: { image_id: 'sha256:running-old', revision: null, source: null, version: null },
+        drift: {
+          status: 'drifted',
+          reason: "running container's image id differs from the currently locally-tagged image for its configured reference -- likely rebuilt without being recreated",
+          evidence: [{ source: 'docker_inspect', detail: "running image id compared against the currently locally-tagged image for 'ghcr.io/omnibioai/omnibioai-auth:latest'" }],
+        },
+      },
+    })
+  }
+
+  function unknownDriftService() {
+    return service({
+      service_id: 'api-gateway', display_name: 'ApiGateway',
+      drift: {
+        source: { repository: 'omnibioai-api-gateway', expected_revision: null, revision_type: 'unknown' },
+        configured: { image: 'ghcr.io/omnibioai/omnibioai-api-gateway:latest', tag: 'latest', digest: null },
+        running: { image_id: null, revision: null, source: null, version: null },
+        drift: { status: 'unknown', reason: 'no running container / resolved image identity evidence available', evidence: [] },
+      },
+    })
+  }
+
+  function notApplicableDriftService() {
+    return service({
+      service_id: 'mysql', display_name: 'MySQL', repository: null,
+      drift: {
+        source: { repository: null, expected_revision: null, revision_type: 'unknown' },
+        configured: { image: 'mysql:8.0', tag: '8.0', digest: null },
+        running: { image_id: 'sha256:mysql', revision: null, source: null, version: null },
+        drift: {
+          status: 'not_applicable',
+          reason: 'no OmniBioAI repository ownership evidence for this service -- likely third-party infrastructure with nothing to compare against',
+          evidence: [],
+        },
+      },
+    })
+  }
+
+  it('renders all four drift states in the service table', async () => {
+    const services = [driftedService(), unknownDriftService(), notApplicableDriftService(), service({ service_id: 'match-svc', display_name: 'MatchedSvc' })]
+    vi.mocked(fetchDeploymentHealth).mockResolvedValue(response(services) as any)
+    render(<DeploymentHealthPage />)
+    await screen.findByText('Auth')
+    expect(screen.getByText('drifted')).toBeInTheDocument()
+    expect(screen.getAllByText('unknown').length).toBeGreaterThan(0)
+    expect(screen.getByText('not_applicable')).toBeInTheDocument()
+    expect(screen.getByText('match')).toBeInTheDocument()
+  })
+
+  it('keeps health and drift visually and semantically independent (HEALTHY + DRIFTED)', async () => {
+    const svc = driftedService()
+    // intrinsic/effective health stay healthy even though drift is drifted --
+    // drift must never influence or be confused with health.
+    vi.mocked(fetchDeploymentHealth).mockResolvedValue(response([svc]) as any)
+    render(<DeploymentHealthPage />)
+    await screen.findByText('Auth')
+    expect(screen.getAllByText('healthy').length).toBeGreaterThan(0)
+    expect(screen.getByText('drifted')).toBeInTheDocument()
+    // DRIFTED must never render as the same text/semantic as UNHEALTHY.
+    expect(screen.queryByText('unhealthy')).not.toBeInTheDocument()
+  })
+
+  it('never renders drifted or not_applicable as the health words healthy/unhealthy', async () => {
+    const services = [driftedService(), notApplicableDriftService()]
+    vi.mocked(fetchDeploymentHealth).mockResolvedValue(response(services) as any)
+    render(<DeploymentHealthPage />)
+    await screen.findByText('Auth')
+    // Both fixtures declare effective health "healthy" -- confirm the
+    // drift badges render their own distinct words, not health words.
+    expect(screen.queryByText('drifted', { selector: 'span' })).toBeInTheDocument()
+    expect(screen.queryByText('not_applicable', { selector: 'span' })).toBeInTheDocument()
+  })
+
+  it('shows Source/Configured/Running/Drift provenance in the service detail panel', async () => {
+    const svc = driftedService()
+    vi.mocked(fetchDeploymentHealth).mockResolvedValue(response([svc]) as any)
+    render(<DeploymentHealthPage />)
+    fireEvent.click(await screen.findByText('Auth'))
+    expect(await screen.findByText('Source / Commit / Image Drift')).toBeInTheDocument()
+    expect(screen.getByText('sha256:running-old')).toBeInTheDocument()
+    expect(screen.getByText('ghcr.io/omnibioai/omnibioai-auth:latest')).toBeInTheDocument()
+    // Appears in both the table's compact DriftCell and the detail
+    // panel's own reason line -- both stay visible at once.
+    expect(screen.getAllByText(/likely rebuilt without being recreated/).length).toBeGreaterThan(0)
+    expect(screen.getByText('omnibioai-auth', { selector: 'code' })).toBeInTheDocument()
+  })
+
+  it('renders missing running/expected-revision metadata as explicit Unknown, never blank or fabricated', async () => {
+    const svc = unknownDriftService()
+    vi.mocked(fetchDeploymentHealth).mockResolvedValue(response([svc]) as any)
+    render(<DeploymentHealthPage />)
+    fireEvent.click(await screen.findByText('ApiGateway'))
+    await screen.findByText('Source / Commit / Image Drift')
+    expect(screen.getAllByText('Unknown').length).toBeGreaterThan(0)
+  })
+
+  it('renders empty drift evidence as an explicit empty state, not blank', async () => {
+    const svc = unknownDriftService()
+    vi.mocked(fetchDeploymentHealth).mockResolvedValue(response([svc]) as any)
+    render(<DeploymentHealthPage />)
+    fireEvent.click(await screen.findByText('ApiGateway'))
+    expect(await screen.findByText('Drift evidence')).toBeInTheDocument()
+    expect(screen.getByText('No evidence recorded')).toBeInTheDocument()
+  })
+
+  it('renders third-party services as not_applicable drift, never a failure', async () => {
+    const svc = notApplicableDriftService()
+    vi.mocked(fetchDeploymentHealth).mockResolvedValue(response([svc]) as any)
+    render(<DeploymentHealthPage />)
+    await screen.findByText('MySQL')
+    expect(screen.getByText('not_applicable')).toBeInTheDocument()
+    expect(screen.queryByText('drifted')).not.toBeInTheDocument()
+  })
+
+  it('renders the Drift Summary section as a distinct dimension from the health Summary', async () => {
+    const services = [driftedService(), unknownDriftService(), notApplicableDriftService(), service({ service_id: 'match-svc', display_name: 'MatchedSvc' })]
+    vi.mocked(fetchDeploymentHealth).mockResolvedValue(response(services) as any)
+    render(<DeploymentHealthPage />)
+    await screen.findByText('Total Services')
+    expect(screen.getByText('Drift Summary')).toBeInTheDocument()
+    expect(screen.getByText('Matched')).toBeInTheDocument()
+    expect(screen.getByText('Not Applicable')).toBeInTheDocument()
+    // Health summary's own labels remain, untouched by the new section.
+    expect(screen.getByText('Healthy')).toBeInTheDocument()
+    expect(screen.getByText('Degraded')).toBeInTheDocument()
+    expect(screen.getByText('Unhealthy')).toBeInTheDocument()
+  })
+
+  it('contains no destructive or mutating controls in the drift detail section', async () => {
+    const svc = driftedService()
+    vi.mocked(fetchDeploymentHealth).mockResolvedValue(response([svc]) as any)
+    render(<DeploymentHealthPage />)
+    fireEvent.click(await screen.findByText('Auth'))
+    await screen.findByText('Source / Commit / Image Drift')
+    const forbidden = ['Restart', 'Stop', 'Start', 'Kill', 'Delete', 'Recreate', 'Deploy', 'Rollback', 'Rebuild', 'Pull', 'Redeploy']
     for (const word of forbidden) {
       expect(screen.queryByText(word)).not.toBeInTheDocument()
     }
