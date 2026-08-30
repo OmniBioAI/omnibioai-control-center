@@ -109,6 +109,22 @@ class TestNginxApiProxyConfig(unittest.TestCase):
             "the SPA route must not be claimed by an API proxy location",
         )
 
+    def test_deployment_health_api_is_separate_from_spa_route(self) -> None:
+        # DH-3: same REG-010 route-collision check, for Deployment Health's
+        # own SPA (/deployment-health) vs. API (/deployment-health/data)
+        # split.
+        self.assertRegex(
+            self.api_proxy_conf,
+            r"location\s+=\s+/deployment-health/data\s*\{[\s\S]*?"
+            r"rewrite\s+\^/deployment-health/data\$\s+/deployment-health\s+break;[\s\S]*?"
+            r"proxy_pass\s+http://\$control_center_upstream;",
+        )
+        self.assertNotRegex(
+            self.api_proxy_conf,
+            r"location\s+(?:=\s+)?/deployment-health\s*\{",
+            "the SPA route must not be claimed by an API proxy location",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

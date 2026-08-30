@@ -183,6 +183,141 @@ export async function fetchRegressionHealth(): Promise<RegressionHealthResponse>
   return r.json()
 }
 
+// ── Deployment Health (DH-3) ────────────────────────────────────────────────
+// Types below are transcribed directly from the real DH-2 response shape
+// (control_center/deployment_health_runtime.py's build_deployment_health_response
+// and _service_view -- not inferred from a task description). Route path
+// mirrors regression-health's own SPA/API separation (REG-010): the SPA
+// route is /deployment-health, the API is the distinct /deployment-health/data,
+// nginx rewriting the latter to the backend's real GET /deployment-health
+// (see docker/nginx/api-proxy.conf) so the two never collide.
+export type DeploymentHealthState = 'healthy' | 'degraded' | 'unhealthy' | 'unknown'
+
+export type DeploymentDependencyRelationship = 'hard' | 'soft' | 'routed_through' | 'observability_only'
+
+export type DeploymentEvidenceSource =
+  | 'compose_service' | 'compose_depends_on' | 'compose_image' | 'compose_build_context'
+  | 'static_ownership_mapping' | 'docker_inspect' | 'http_probe' | 'prometheus' | 'regression_artifact'
+
+export type DeploymentServiceCategory =
+  | 'control_plane' | 'security' | 'execution' | 'scientific_data' | 'ai_model'
+  | 'observability' | 'user_interface' | 'infrastructure' | 'database_storage' | 'unknown'
+
+export type DeploymentImageComparisonStatus = 'match' | 'mismatch' | 'unknown'
+
+export type DeploymentSourceAvailability = 'available' | 'unavailable' | 'not_configured'
+
+export type DeploymentBaselineSource = 'development' | 'release' | 'unknown'
+
+export interface DeploymentEvidenceItem {
+  source: DeploymentEvidenceSource
+  detail: string
+}
+
+export interface DeploymentImageReference {
+  raw: string
+  registry: string | null
+  repository: string | null
+  tag: string | null
+  digest: string | null
+  has_variable: boolean
+  is_untagged: boolean
+  is_latest_tag: boolean
+}
+
+export interface DeploymentMetadataCompleteness {
+  repository_known: boolean
+  category_known: boolean
+  dependencies_known: boolean
+  missing_fields: string[]
+  is_complete: boolean
+}
+
+export interface DeploymentServiceDependency {
+  to_service: string
+  relationship: DeploymentDependencyRelationship
+  target_intrinsic_health: DeploymentHealthState
+}
+
+export interface DeploymentServiceRuntime {
+  present: boolean
+  running: boolean | null
+  docker_health: string | null
+  image: string | null
+  match_evidence: DeploymentEvidenceItem | null
+}
+
+export interface DeploymentServiceView {
+  service_id: string
+  display_name: string
+  category: DeploymentServiceCategory
+  repository: string | null
+  deployment: {
+    image: DeploymentImageReference | null
+    build_configured: boolean
+    healthcheck_configured: boolean
+    ports: number[]
+  }
+  runtime: DeploymentServiceRuntime
+  health: {
+    intrinsic: DeploymentHealthState
+    intrinsic_evidence: DeploymentEvidenceItem
+    effective: DeploymentHealthState
+    effective_evidence: DeploymentEvidenceItem[]
+  }
+  image_comparison: {
+    status: DeploymentImageComparisonStatus
+    configured: string | null
+    running: string | null
+  }
+  dependencies: DeploymentServiceDependency[]
+  evidence: DeploymentEvidenceItem[]
+  completeness: DeploymentMetadataCompleteness
+}
+
+export interface DeploymentHealthSummary {
+  total: number
+  healthy: number
+  degraded: number
+  unhealthy: number
+  unknown: number
+}
+
+export interface DeploymentHealthDataSources {
+  compose: DeploymentSourceAvailability
+  docker: DeploymentSourceAvailability
+  application_probe: DeploymentSourceAvailability
+  prometheus: DeploymentSourceAvailability
+  regression_health: DeploymentSourceAvailability
+}
+
+export interface DeploymentRegressionPhaseSummary {
+  status: string
+  certification_status: string
+}
+
+export interface DeploymentHealthRegressionContext {
+  availability: DeploymentSourceAvailability | null
+  phases: Record<string, DeploymentRegressionPhaseSummary> | null
+  freshness: { status: string; age_seconds?: number; stale_after_hours?: number } | null
+}
+
+export interface DeploymentHealthResponse {
+  generated_at: string
+  baseline: DeploymentBaselineSource
+  summary: DeploymentHealthSummary
+  services: DeploymentServiceView[]
+  regression_health: DeploymentHealthRegressionContext
+  data_sources: DeploymentHealthDataSources
+  warnings: string[]
+}
+
+export async function fetchDeploymentHealth(): Promise<DeploymentHealthResponse> {
+  const r = await apiFetch(`${BASE}/deployment-health/data`)
+  if (!r.ok) throw new Error(`/deployment-health/data ${r.status}`)
+  return r.json()
+}
+
 export async function fetchConfig(): Promise<string> {
   const r = await apiFetch(`${BASE}/config`)
   if (!r.ok) throw new Error(`/config ${r.status}`)

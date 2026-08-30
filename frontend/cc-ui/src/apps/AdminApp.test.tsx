@@ -42,6 +42,7 @@ vi.mock('../api', () => ({
 vi.mock('../pages/DashboardPage', () => ({ default: () => <div data-testid="DashboardPage" /> }))
 vi.mock('../pages/HealthPage', () => ({ default: () => <div data-testid="HealthPage" /> }))
 vi.mock('../pages/RegressionHealthPage', () => ({ default: () => <div data-testid="RegressionHealthPage" /> }))
+vi.mock('../pages/DeploymentHealthPage', () => ({ default: () => <div data-testid="DeploymentHealthPage" /> }))
 vi.mock('../pages/DockerPage', () => ({ default: () => <div data-testid="DockerPage" /> }))
 vi.mock('../pages/EcosystemPage', () => ({ default: () => <div data-testid="EcosystemPage" /> }))
 vi.mock('../pages/ConfigPage', () => ({ default: () => <div data-testid="ConfigPage" /> }))
@@ -205,6 +206,48 @@ describe('AdminApp auth gate', () => {
     clickNav('Regression Health')
     expect(await screen.findByTestId('RegressionHealthPage')).toBeInTheDocument()
     expect(window.location.pathname).toBe('/regression-health')
+  })
+
+  it('reaches Deployment Health only with platform.manage_infra permission', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-456')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPermission).mockImplementation(permission => permission === 'platform.manage_infra')
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+    clickNav('Deployment Health')
+    expect(await screen.findByTestId('DeploymentHealthPage')).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/deployment-health')
+  })
+
+  it('does not render Deployment Health without platform.manage_infra permission', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-456')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPermission).mockReturnValue(false)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+    expect(screen.queryByText('Deployment Health')).not.toBeInTheDocument()
+  })
+
+  it('deep-links directly to Deployment Health on initial load', async () => {
+    window.history.pushState(null, '', '/deployment-health')
+    vi.mocked(auth.getToken).mockReturnValue('token-456')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPermission).mockImplementation(permission => permission === 'platform.manage_infra')
+
+    render(<AdminApp />)
+    expect(await screen.findByTestId('DeploymentHealthPage')).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/deployment-health')
   })
 
   it('drops back to the login screen when a gated request reports 401', async () => {

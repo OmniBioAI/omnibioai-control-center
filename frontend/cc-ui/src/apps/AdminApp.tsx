@@ -11,6 +11,7 @@ import { ComingSoon } from '../components/ui'
 import DashboardPage from '../pages/DashboardPage'
 import HealthPage from '../pages/HealthPage'
 import RegressionHealthPage from '../pages/RegressionHealthPage'
+import DeploymentHealthPage from '../pages/DeploymentHealthPage'
 import DockerPage from '../pages/DockerPage'
 import EcosystemPage from '../pages/EcosystemPage'
 import ConfigPage from '../pages/ConfigPage'
@@ -135,6 +136,9 @@ function billingOrgIdFromPath(): number | null {
 function AdminDashboard() {
   const canSeeOps = hasAdminAccess()
   const canSeeRegressionHealth = hasPermission('platform.manage_infra')
+  // DH-3: same gate as Regression Health above -- DH-2's own backend
+  // route requires platform.manage_infra, no new permission.
+  const canSeeDeploymentHealth = hasPermission('platform.manage_infra')
   const canSeeOrganizations = hasOrganizationsAccess()
   const canSeeUsers = hasPlatformAdminAccess()
   // PR11.4b: same gate as 'users' -- GET /platform/audit-events is
@@ -166,6 +170,7 @@ function AdminDashboard() {
 
   const [active, setActive] = useState<PageKey>(() => {
     if (window.location.pathname === '/regression-health') return 'regression-health'
+    if (window.location.pathname === '/deployment-health') return 'deployment-health'
     if (window.location.pathname.startsWith('/organizations')) return 'organizations'
     if (window.location.pathname.startsWith('/users')) return 'users'
     // /iam/service-accounts must be checked before the bare /iam prefix
@@ -253,6 +258,7 @@ function AdminDashboard() {
       : active === 'saml' ? (selectedSamlOrgId != null ? `/security/saml/${selectedSamlOrgId}` : '/security/saml')
       : active === 'billing' ? (selectedBillingOrgId != null ? `/billing/${selectedBillingOrgId}` : '/billing')
       : active === 'regression-health' ? '/regression-health'
+      : active === 'deployment-health' ? '/deployment-health'
       : '/'
     if (window.location.pathname !== path) {
       window.history.pushState(null, '', path)
@@ -263,6 +269,8 @@ function AdminDashboard() {
     const onPopState = () => {
       if (window.location.pathname === '/regression-health') {
         setActive('regression-health')
+      } else if (window.location.pathname === '/deployment-health') {
+        setActive('deployment-health')
       } else if (window.location.pathname.startsWith('/organizations')) {
         setActive('organizations')
         setSelectedOrgId(orgIdFromPath())
@@ -374,7 +382,7 @@ function AdminDashboard() {
       </div>}
     >
       {renderPage(active, {
-        canSeeOps, canSeeRegressionHealth, canSeeOrganizations, canSeeUsers, canSeeAuditLogs, canSeeInteractions, canSeeAnalytics, canSeeSecurityOverview,
+        canSeeOps, canSeeRegressionHealth, canSeeDeploymentHealth, canSeeOrganizations, canSeeUsers, canSeeAuditLogs, canSeeInteractions, canSeeAnalytics, canSeeSecurityOverview,
         canSeeComplianceReport, canSeeHipaaCompliance, refreshKey,
         selectedOrgId, setSelectedOrgId, selectedUserId, setSelectedUserId,
         teamsOrgHint, rolesOrgHint, onViewTeams: handleViewTeams, onViewRoles: handleViewRoles,
@@ -392,6 +400,7 @@ function AdminDashboard() {
 interface RenderCtx {
   canSeeOps: boolean
   canSeeRegressionHealth: boolean
+  canSeeDeploymentHealth: boolean
   canSeeOrganizations: boolean
   canSeeUsers: boolean
   canSeeAuditLogs: boolean
@@ -443,6 +452,7 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
     case 'infrastructure':
     case 'health':    return ctx.canSeeOps ? <HealthPage    refreshKey={ctx.refreshKey} /> : null
     case 'regression-health': return ctx.canSeeRegressionHealth ? <RegressionHealthPage /> : null
+    case 'deployment-health': return ctx.canSeeDeploymentHealth ? <DeploymentHealthPage /> : null
     case 'docker':    return ctx.canSeeOps ? <DockerPage    refreshKey={ctx.refreshKey} /> : null
     case 'ecosystem': return ctx.canSeeOps ? <EcosystemPage refreshKey={ctx.refreshKey} /> : null
     case 'config':    return ctx.canSeeOps ? <ConfigPage    refreshKey={ctx.refreshKey} /> : null

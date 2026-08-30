@@ -1,6 +1,6 @@
 import {
   Activity, Bot, BookOpen, BrainCircuit, Building2, ClipboardCheck, Clock, Cloud, Container,
-  CreditCard, FlaskConical, KeyRound, KeySquare, LayoutDashboard, Network,
+  CreditCard, FlaskConical, HeartPulse, KeyRound, KeySquare, LayoutDashboard, Network,
   Plug, ScrollText, Server, Settings, Settings2, ShieldCheck, Sparkles, Users,
   UsersRound, Workflow, Wrench,
 } from 'lucide-react'
@@ -17,6 +17,7 @@ const ICONS: Partial<Record<PageKey, IconComponent>> = {
   infrastructure: Server,
   health: Activity,
   'regression-health': ClipboardCheck,
+  'deployment-health': HeartPulse,
   docker: Container,
   ecosystem: Network,
   config: Settings2,

@@ -52,6 +52,18 @@ const KNOWN: Record<string, { bg: string; color: string }> = {
   live_validated: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
   tested: { bg: 'rgba(0,148,255,0.12)', color: 'var(--blue)' },
   not_live_validated: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
+  // DH-3: Deployment Health's four runtime/effective health states.
+  // 'unknown' already exists above (shared, same gray/muted look this
+  // badge already gives every other "no evidence yet" status) --
+  // deliberately not redefined here, this extension is purely additive.
+  // 'healthy' reuses the same green 'active'/'pass'/'certified' already
+  // use; 'degraded' the same amber 'partial'/'paused'/'stale' use;
+  // 'unhealthy' the same red 'suspended'/'blocked'/'failed' use -- no
+  // new color language, just Deployment Health's own vocabulary mapped
+  // onto colors this badge already had.
+  healthy: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
+  degraded: { bg: 'var(--amber-bg)', color: 'var(--amber)' },
+  unhealthy: { bg: 'var(--red-bg)', color: 'var(--red)' },
 }
 
 export default function StatusBadge({ status }: Props) {
