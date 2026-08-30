@@ -447,6 +447,81 @@ export async function fetchDeploymentHealth(): Promise<DeploymentHealthResponse>
   return r.json()
 }
 
+// Integration Health V1: this is a read-only view of the backend's cached
+// provider evidence. The browser never calls provider endpoints or a probe
+// trigger; /integration-health/data is rewritten by nginx to the backend's
+// protected GET /integration-health.
+export type IntegrationStatus = 'AVAILABLE' | 'DEGRADED' | 'UNAVAILABLE' | 'UNKNOWN' | 'NOT_CHECKED'
+export type IntegrationReadiness = 'READY' | 'DEGRADED' | 'NOT_READY' | 'DISABLED' | 'UNKNOWN'
+export type IntegrationFreshness = 'CURRENT' | 'STALE' | 'UNKNOWN'
+export type IntegrationConfiguration = 'CONFIGURED' | 'PARTIAL' | 'NOT_CONFIGURED' | 'NOT_REQUIRED' | 'UNKNOWN'
+export type IntegrationAuthRequirement = 'PUBLIC' | 'OPTIONAL_AUTH' | 'AUTH_REQUIRED' | 'UNKNOWN'
+
+export interface IntegrationEvidenceItem {
+  source: string
+  status: string
+  description: string
+  timestamp: string | null
+}
+
+export interface IntegrationProviderView {
+  name: string
+  api_type: string
+  endpoint_family: string | null
+  status: IntegrationStatus
+  last_checked: string | null
+  failure_reason: string | null
+  version: string | null
+}
+
+export interface IntegrationHealthRecord {
+  integration_id: string
+  display_name: string
+  provider: IntegrationProviderView
+  category: string
+  plugin: string
+  implementation_status: string
+  enabled_status: 'ENABLED' | 'DISABLED' | 'UNKNOWN'
+  configuration_status: IntegrationConfiguration
+  authentication: {
+    requirement: IntegrationAuthRequirement
+    credential_configured: boolean | null
+  }
+  plugin_status: string
+  readiness_status: IntegrationReadiness
+  freshness: IntegrationFreshness
+  health_signal_capability: string
+  version: string | null
+  test_status: string
+  certification_status: string
+  evidence: IntegrationEvidenceItem[]
+  warnings: string[]
+}
+
+export interface IntegrationHealthSummary {
+  total: number
+  ready: number
+  degraded: number
+  not_ready: number
+  disabled: number
+  unknown: number
+}
+
+export interface IntegrationHealthResponse {
+  schema_version: string
+  generated_at: string
+  summary: IntegrationHealthSummary
+  integrations: IntegrationHealthRecord[]
+  data_sources: Record<string, string>
+  warnings: string[]
+}
+
+export async function fetchIntegrationHealth(): Promise<IntegrationHealthResponse> {
+  const r = await apiFetch(`${BASE}/integration-health/data`)
+  if (!r.ok) throw new Error(`/integration-health/data ${r.status}`)
+  return r.json()
+}
+
 export async function fetchConfig(): Promise<string> {
   const r = await apiFetch(`${BASE}/config`)
   if (!r.ok) throw new Error(`/config ${r.status}`)

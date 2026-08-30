@@ -12,6 +12,7 @@ import DashboardPage from '../pages/DashboardPage'
 import HealthPage from '../pages/HealthPage'
 import RegressionHealthPage from '../pages/RegressionHealthPage'
 import DeploymentHealthPage from '../pages/DeploymentHealthPage'
+import IntegrationHealthPage from '../pages/IntegrationHealthPage'
 import DockerPage from '../pages/DockerPage'
 import EcosystemPage from '../pages/EcosystemPage'
 import ConfigPage from '../pages/ConfigPage'
@@ -173,6 +174,7 @@ function AdminDashboard() {
   const [active, setActive] = useState<PageKey>(() => {
     if (window.location.pathname === '/regression-health') return 'regression-health'
     if (window.location.pathname === '/deployment-health') return 'deployment-health'
+    if (window.location.pathname === '/integration-health') return 'integration-health'
     if (window.location.pathname === '/security-posture') return 'security-posture'
     if (window.location.pathname.startsWith('/organizations')) return 'organizations'
     if (window.location.pathname.startsWith('/users')) return 'users'
@@ -262,6 +264,7 @@ function AdminDashboard() {
       : active === 'billing' ? (selectedBillingOrgId != null ? `/billing/${selectedBillingOrgId}` : '/billing')
       : active === 'regression-health' ? '/regression-health'
       : active === 'deployment-health' ? '/deployment-health'
+      : active === 'integration-health' ? '/integration-health'
       : active === 'security-posture' ? '/security-posture'
       : '/'
     if (window.location.pathname !== path) {
@@ -275,6 +278,8 @@ function AdminDashboard() {
         setActive('regression-health')
       } else if (window.location.pathname === '/deployment-health') {
         setActive('deployment-health')
+      } else if (window.location.pathname === '/integration-health') {
+        setActive('integration-health')
       } else if (window.location.pathname === '/security-posture') {
         setActive('security-posture')
       } else if (window.location.pathname.startsWith('/organizations')) {
@@ -460,6 +465,7 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
     case 'health':    return ctx.canSeeOps ? <HealthPage    refreshKey={ctx.refreshKey} /> : null
     case 'regression-health': return ctx.canSeeRegressionHealth ? <RegressionHealthPage /> : null
     case 'deployment-health': return ctx.canSeeDeploymentHealth ? <DeploymentHealthPage /> : null
+    case 'integration-health': return ctx.canSeeRegressionHealth ? <IntegrationHealthPage /> : null
     case 'docker':    return ctx.canSeeOps ? <DockerPage    refreshKey={ctx.refreshKey} /> : null
     case 'ecosystem': return ctx.canSeeOps ? <EcosystemPage refreshKey={ctx.refreshKey} /> : null
     case 'config':    return ctx.canSeeOps ? <ConfigPage    refreshKey={ctx.refreshKey} /> : null

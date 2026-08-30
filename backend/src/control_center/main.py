@@ -56,6 +56,7 @@ from control_center.compliance.router import router as compliance_router
 from control_center.api.routes_hipaa_compliance import router as hipaa_compliance_router
 from control_center.api.routes_cloud import router as cloud_router
 from control_center.api.routes_integrations import router as integrations_router
+from control_center.api.routes_integration_health import router as integration_health_router
 from control_center.core.auth import require_permission
 from control_center.api.routes_config import router as config_router
 from control_center.api.routes_cron import router as cron_router
@@ -153,6 +154,7 @@ app.include_router(summary_router, dependencies=[Depends(require_permission("pla
 app.include_router(regression_health_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(security_posture_router)
 app.include_router(deployment_health_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
+app.include_router(integration_health_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(report_router)
 app.include_router(config_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(cron_router)

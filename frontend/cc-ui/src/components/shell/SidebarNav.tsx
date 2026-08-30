@@ -18,6 +18,7 @@ const ICONS: Partial<Record<PageKey, IconComponent>> = {
   health: Activity,
   'regression-health': ClipboardCheck,
   'deployment-health': HeartPulse,
+  'integration-health': Plug,
   docker: Container,
   ecosystem: Network,
   config: Settings2,
