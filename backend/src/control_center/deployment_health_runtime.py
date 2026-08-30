@@ -68,6 +68,11 @@ from control_center.deployment_health import (
     EvidenceSource,
     parse_image_reference,
 )
+from control_center.deployment_health_drift import (
+    ServiceDrift,
+    build_service_drift,
+    drift_summary,
+)
 
 
 class RuntimeHealth(str, Enum):
@@ -400,6 +405,7 @@ def _service_view(
     effective_evidence: tuple[DeploymentEvidence, ...],
     dependency_views: list[dict[str, Any]],
     image_comparison: tuple[ImageComparisonStatus, str | None, str | None],
+    drift: ServiceDrift,
 ) -> dict[str, Any]:
     comparison_status, configured_image, running_image = image_comparison
     return {
@@ -425,6 +431,12 @@ def _service_view(
             "configured": configured_image,
             "running": running_image,
         },
+        # DH-5: source/commit/image drift -- an independent operational
+        # dimension from `health` above, never folded into it. See
+        # deployment_health_drift.py's own module docstring for the full
+        # evidence model and why a mutable configured tag alone can never
+        # produce `match`.
+        "drift": drift.to_public_dict(),
         "dependencies": dependency_views,
         "evidence": [e.to_public_dict() for e in service.evidence],
         "completeness": service.completeness.to_public_dict(),
@@ -439,14 +451,30 @@ def build_deployment_health_response(
     probe_results: dict[str, dict[str, Any]] | None,
     prometheus_availability: SourceAvailability,
     regression_context: dict[str, Any],
+    local_image_ids: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Pure assembly function -- see module docstring. `containers=None`
     means Docker is unavailable; `probe_results=None` means the
     application-probe config couldn't be loaded. Both degrade gracefully,
     never fail the response (only a Compose/DH-1 failure does that, and
-    that's handled one layer up before this function is ever called)."""
+    that's handled one layer up before this function is ever called).
+
+    `local_image_ids` (DH-5, optional, defaults to `{}` -- omitting it
+    keeps every existing caller's behavior unchanged) is the result of
+    `routes_docker.get_local_image_ids()` for this inventory's own
+    `deployment_health_drift.image_refs_to_inspect()` -- a single,
+    already-deduplicated Docker call made one layer up, not by this pure
+    function."""
     known_ids = {s.service_id for s in inventory.services}
     runtime_states, runtime_warnings = build_runtime_states(known_ids, containers)
+    local_image_ids = local_image_ids or {}
+    # DH-5: matched containers, independently of DH-2's own RuntimeState
+    # (which stays byte-for-byte unchanged) -- see deployment_health_drift.py's
+    # module docstring for why this is a second, cheap, pure in-memory
+    # match rather than a change to RuntimeState's public contract.
+    matched_containers = (
+        match_containers_to_services(known_ids, containers)[0] if containers is not None else {}
+    )
     probe_source_available = probe_results is not None
     probe_results = probe_results or {}
 
@@ -471,6 +499,7 @@ def build_deployment_health_response(
 
     services_view: list[dict[str, Any]] = []
     counts = {"healthy": 0, "degraded": 0, "unhealthy": 0, "unknown": 0}
+    drift_by_service: dict[str, ServiceDrift] = {}
 
     for service in inventory.services:
         sid = service.service_id
@@ -482,16 +511,30 @@ def build_deployment_health_response(
 
         comparison = compare_image(service.image, runtime_states[sid].image_raw)
 
+        match = matched_containers.get(sid)
+        drift = build_service_drift(
+            service=service,
+            running_container=match["container"] if match else None,
+            running_present=runtime_states[sid].present,
+            local_image_ids=local_image_ids,
+        )
+        drift_by_service[sid] = drift
+
         services_view.append(_service_view(
             service, runtime_states[sid], probe_results.get(sid),
             intrinsic, intrinsic_evidence_by_service[sid],
             effective, effective_evidence,
             dependents_view_by_service.get(sid, []),
             comparison,
+            drift,
         ))
 
     total = len(inventory.services)
     summary = {"total": total, **counts}
+    # DH-5: a separate summary dimension from the health `summary` above --
+    # never replaces it, never merged into it (section 18 of this
+    # milestone's brief).
+    drift_summary_counts = drift_summary(drift_by_service)
 
     data_sources = {
         "compose": SourceAvailability.AVAILABLE.value,
@@ -507,6 +550,7 @@ def build_deployment_health_response(
         "generated_at": generated_at,
         "baseline": inventory.baseline_source.value,
         "summary": summary,
+        "drift_summary": drift_summary_counts,
         "services": services_view,
         "regression_health": {
             "availability": regression_context.get("availability"),

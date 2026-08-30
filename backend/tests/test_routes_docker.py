@@ -12,6 +12,7 @@ import jwt
 import pytest
 from fastapi.testclient import TestClient
 
+from control_center.api.routes_docker import get_local_image_ids
 from control_center.core.jwt_verify import JWT_SECRET
 from control_center.main import app
 
@@ -118,6 +119,72 @@ class TestGetContainers:
         with patch("control_center.api.routes_docker.subprocess.run", return_value=result):
             resp = client.get("/docker/containers")
         assert len(resp.json()["containers"]) == 1
+
+
+# ===========================================================================
+# get_local_image_ids (DH-5)
+# ===========================================================================
+
+class TestGetLocalImageIds:
+    def test_empty_refs_short_circuits_without_a_subprocess_call(self):
+        with patch("control_center.api.routes_docker.subprocess.run") as run:
+            assert get_local_image_ids([]) == {}
+        run.assert_not_called()
+
+    def test_resolves_by_repo_tag_not_argument_order(self):
+        payload = json.dumps([
+            {"Id": "sha256:aaa", "RepoTags": ["mysql:8.0"]},
+            {"Id": "sha256:bbb", "RepoTags": ["redis:7-alpine"]},
+        ])
+        result = MagicMock(stdout=payload, returncode=0)
+        with patch("control_center.api.routes_docker.subprocess.run", return_value=result):
+            ids = get_local_image_ids(["mysql:8.0", "redis:7-alpine"])
+        assert ids == {"mysql:8.0": "sha256:aaa", "redis:7-alpine": "sha256:bbb"}
+
+    def test_one_missing_reference_does_not_fail_the_batch(self):
+        # Real docker behavior: nonzero exit, but stdout still holds a
+        # valid JSON array for every reference that *did* resolve.
+        payload = json.dumps([{"Id": "sha256:aaa", "RepoTags": ["mysql:8.0"]}])
+        result = MagicMock(stdout=payload, returncode=1)
+        with patch("control_center.api.routes_docker.subprocess.run", return_value=result):
+            ids = get_local_image_ids(["mysql:8.0", "nonexistent:latest"])
+        assert ids == {"mysql:8.0": "sha256:aaa"}
+        assert "nonexistent:latest" not in ids
+
+    def test_docker_not_found_returns_empty_dict_not_raise(self):
+        with patch("control_center.api.routes_docker.subprocess.run", side_effect=FileNotFoundError):
+            assert get_local_image_ids(["mysql:8.0"]) == {}
+
+    def test_timeout_returns_empty_dict_not_raise(self):
+        with patch(
+            "control_center.api.routes_docker.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="docker", timeout=30),
+        ):
+            assert get_local_image_ids(["mysql:8.0"]) == {}
+
+    def test_malformed_json_returns_empty_dict_not_raise(self):
+        result = MagicMock(stdout="not-json", returncode=0)
+        with patch("control_center.api.routes_docker.subprocess.run", return_value=result):
+            assert get_local_image_ids(["mysql:8.0"]) == {}
+
+    def test_empty_stdout_returns_empty_dict(self):
+        result = MagicMock(stdout="", returncode=1)
+        with patch("control_center.api.routes_docker.subprocess.run", return_value=result):
+            assert get_local_image_ids(["mysql:8.0"]) == {}
+
+    def test_entry_without_an_id_is_skipped(self):
+        payload = json.dumps([{"RepoTags": ["mysql:8.0"]}])
+        result = MagicMock(stdout=payload, returncode=0)
+        with patch("control_center.api.routes_docker.subprocess.run", return_value=result):
+            assert get_local_image_ids(["mysql:8.0"]) == {}
+
+    def test_image_with_multiple_repo_tags_maps_each_tag(self):
+        payload = json.dumps([{"Id": "sha256:aaa", "RepoTags": ["mysql:8.0", "mysql:latest"]}])
+        result = MagicMock(stdout=payload, returncode=0)
+        with patch("control_center.api.routes_docker.subprocess.run", return_value=result):
+            ids = get_local_image_ids(["mysql:8.0"])
+        assert ids["mysql:8.0"] == "sha256:aaa"
+        assert ids["mysql:latest"] == "sha256:aaa"
 
 
 # ===========================================================================

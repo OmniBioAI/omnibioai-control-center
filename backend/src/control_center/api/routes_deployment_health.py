@@ -37,14 +37,16 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from control_center.analytics import prometheus as prometheus_client
-from control_center.api.routes_docker import get_containers_status
+from control_center.api.routes_docker import get_containers_status, get_local_image_ids
 from control_center.core.runner import run_all_checks
 from control_center.core.settings import load_settings
 from control_center.deployment_health import (
     BaselineSource,
     DeploymentHealthUnavailable,
+    DeploymentInventory,
     load_compose_file,
 )
+from control_center.deployment_health_drift import image_refs_to_inspect
 from control_center.deployment_health_runtime import (
     SourceAvailability,
     build_deployment_health_response,
@@ -109,6 +111,19 @@ def _docker_containers() -> list[dict] | None:
     return status.get("containers", [])
 
 
+def _local_image_ids(inventory: DeploymentInventory, docker_available: bool) -> dict[str, str]:
+    """DH-5: one bounded, deduplicated `docker image inspect` call for
+    this inventory's own known configured image references. Never called
+    at all when Docker is already known to be unavailable (same
+    `docker` CLI path would just fail again); `get_local_image_ids`
+    itself never raises either way, so a failure here only ever degrades
+    every service's drift to UNKNOWN, never the whole endpoint."""
+    if not docker_available:
+        return {}
+    refs = image_refs_to_inspect(list(inventory.services))
+    return get_local_image_ids(refs)
+
+
 async def _prometheus_availability() -> SourceAvailability:
     if not prometheus_client.is_configured():
         return SourceAvailability.NOT_CONFIGURED
@@ -160,12 +175,14 @@ async def get_deployment_health() -> JSONResponse:
         log.warning("Deployment health status unavailable: %s", error.code)
         return _unavailable_response()
 
+    containers = _docker_containers()
     response = build_deployment_health_response(
         inventory,
         generated_at=datetime.now(UTC).isoformat(),
-        containers=_docker_containers(),
+        containers=containers,
         probe_results=_load_probe_results(),
         prometheus_availability=await _prometheus_availability(),
         regression_context=_regression_context(),
+        local_image_ids=_local_image_ids(inventory, docker_available=containers is not None),
     )
     return JSONResponse(response)
