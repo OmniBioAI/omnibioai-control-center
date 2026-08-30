@@ -1,10 +1,8 @@
 import {
-  Activity, Bot, BookOpen, BrainCircuit, Building2, Cloud, Container,
+  Activity, Bot, BookOpen, BrainCircuit, Building2, ClipboardCheck, Clock, Cloud, Container,
   CreditCard, FlaskConical, KeyRound, KeySquare, LayoutDashboard, Network,
-  Plug, ScrollText, Server, Settings, Settings2, ShieldCheck, Clock, Sparkles, Users,
+  Plug, ScrollText, Server, Settings, Settings2, ShieldCheck, Sparkles, Users,
   UsersRound, Workflow, Wrench,
-  Plug, ScrollText, Server, Settings, Settings2, ShieldCheck, Clock, Users,
-  UsersRound, Workflow, Wrench, ClipboardCheck,
 } from 'lucide-react'
 import { NAVIGATION, isNavItemVisible } from '../../navigation'
 import type { NavItem, PageKey } from '../../navigation'
