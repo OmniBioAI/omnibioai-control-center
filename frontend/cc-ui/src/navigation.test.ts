@@ -288,13 +288,24 @@ describe('navigation: Deployment Health placement', () => {
     expect(found).toHaveLength(1)
   })
 
-  it('places the full chain Health -> Regression Health -> Deployment Health -> Docker in order', () => {
+  it('places the full chain Health -> Regression Health -> Deployment Health -> Integration Health -> Docker in order', () => {
     const operations = NAVIGATION.find(section => section.key === 'operations')!
     const infrastructure = operations.items.find(item => item.key === 'infrastructure')!
     const keys = infrastructure.children!.map(item => item.key)
     expect(keys.indexOf('regression-health')).toBe(keys.indexOf('health') + 1)
     expect(keys.indexOf('deployment-health')).toBe(keys.indexOf('regression-health') + 1)
-    expect(keys.indexOf('docker')).toBe(keys.indexOf('deployment-health') + 1)
+    expect(keys.indexOf('integration-health')).toBe(keys.indexOf('deployment-health') + 1)
+    expect(keys.indexOf('docker')).toBe(keys.indexOf('integration-health') + 1)
+  })
+
+  it('is functional and uses the same platform.manage_infra gate', () => {
+    const operations = NAVIGATION.find(section => section.key === 'operations')!
+    const infrastructure = operations.items.find(item => item.key === 'infrastructure')!
+    const item = infrastructure.children!.find(child => child.key === 'integration-health')!
+    const regressionItem = infrastructure.children!.find(child => child.key === 'regression-health')!
+    expect(item.label).toBe('Integration Health')
+    expect(item.functional).toBe(true)
+    expect(item.visible).toBe(regressionItem.visible)
   })
 
   it('is functional and gated by the existing platform.manage_infra permission (same as Regression Health)', () => {

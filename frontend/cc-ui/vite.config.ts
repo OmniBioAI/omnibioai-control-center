@@ -67,6 +67,7 @@ export default defineConfig({
       '/model-registry': { target: 'http://localhost:7070', changeOrigin: true },
       '/workflow-bundles': { target: 'http://localhost:7070', changeOrigin: true },
       '/rag': { target: 'http://localhost:7070', changeOrigin: true },
+      '/integration-health/data': { target: 'http://localhost:7070', changeOrigin: true },
       // Agentic AI nav item (feature/agentic-ai-navbar), proxied through
       // control-center's own backend (routes_agent_orchestrator_proxy.py)
       // to omnibioai-workbench's agent_orchestrator service. Added
