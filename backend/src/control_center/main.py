@@ -65,6 +65,7 @@ from control_center.api.routes_infra import router as infra_router
 from control_center.api.routes_known_issues import router as known_issues_router
 from control_center.api.routes_llm import router as llm_router
 from control_center.api.routes_reference import router as reference_router
+from control_center.api.routes_regression_health import router as regression_health_router
 from control_center.api.routes_report import router as report_router
 from control_center.api.routes_services import router as services_router
 from control_center.api.routes_storage import router_storage
@@ -146,6 +147,7 @@ app.include_router(health_router)
 # are below.
 app.include_router(services_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(summary_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
+app.include_router(regression_health_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(report_router)
 app.include_router(config_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(cron_router)
