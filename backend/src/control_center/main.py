@@ -60,6 +60,7 @@ from control_center.core.auth import require_permission
 from control_center.api.routes_config import router as config_router
 from control_center.api.routes_cron import router as cron_router
 from control_center.api.routes_dashboard import router as dashboard_router
+from control_center.api.routes_deployment_health import router as deployment_health_router
 from control_center.api.routes_docker import router as docker_router
 from control_center.api.routes_health import router as health_router
 from control_center.api.routes_infra import router as infra_router
@@ -149,6 +150,7 @@ app.include_router(health_router)
 app.include_router(services_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(summary_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(regression_health_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
+app.include_router(deployment_health_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(report_router)
 app.include_router(config_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(cron_router)
