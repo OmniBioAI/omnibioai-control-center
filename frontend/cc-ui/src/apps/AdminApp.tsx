@@ -20,6 +20,7 @@ import ScheduledJobsPage from '../pages/ScheduledJobsPage'
 import KnownIssuesPage from '../pages/KnownIssuesPage'
 import ToolExecutionPage from '../pages/operations/ToolExecutionPage'
 import AIModelsPage from '../pages/operations/AIModelsPage'
+import AgenticAIPage from '../pages/operations/AgenticAIPage'
 import WorkflowsPage from '../pages/operations/WorkflowsPage'
 import RAGPage from '../pages/operations/RAGPage'
 import PlatformSettingsPage from '../pages/PlatformSettingsPage'
@@ -459,6 +460,12 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
     // model-registry has no organization concept to pick one for.
     case 'ai-models':
       return ctx.canSeeOps ? <AIModelsPage /> : null
+
+    // feature/agentic-ai-navbar: no org picker, same reasoning as
+    // 'tool-execution'/'ai-models' above -- agent_orchestrator's graph
+    // catalog isn't org-owned.
+    case 'agentic-ai':
+      return ctx.canSeeOps ? <AgenticAIPage /> : null
 
     // PR A3: no org picker, same reasoning as 'tool-execution'/
     // 'ai-models' above -- workflow catalog isn't org-owned, and

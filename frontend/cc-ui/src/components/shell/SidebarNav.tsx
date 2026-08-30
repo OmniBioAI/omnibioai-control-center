@@ -1,7 +1,7 @@
 import {
   Activity, Bot, BookOpen, BrainCircuit, Building2, Cloud, Container,
   CreditCard, FlaskConical, KeyRound, KeySquare, LayoutDashboard, Network,
-  Plug, ScrollText, Server, Settings, Settings2, ShieldCheck, Clock, Users,
+  Plug, ScrollText, Server, Settings, Settings2, ShieldCheck, Clock, Sparkles, Users,
   UsersRound, Workflow, Wrench,
 } from 'lucide-react'
 import { NAVIGATION, isNavItemVisible } from '../../navigation'
@@ -24,6 +24,7 @@ const ICONS: Partial<Record<PageKey, IconComponent>> = {
   workflows: Workflow,
   'tool-execution': Wrench,
   'ai-models': BrainCircuit,
+  'agentic-ai': Sparkles,
   iam: KeyRound,
   'audit-logs': ScrollText,
   sessions: Clock,

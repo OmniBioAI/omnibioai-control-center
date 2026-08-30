@@ -48,6 +48,7 @@ from control_center.api.routes_tes_proxy import router as tes_proxy_router
 from control_center.api.routes_model_registry_proxy import router as model_registry_proxy_router
 from control_center.api.routes_workflow_bundles_proxy import router as workflow_bundles_proxy_router
 from control_center.api.routes_rag_proxy import router as rag_proxy_router
+from control_center.api.routes_agent_orchestrator_proxy import router as agent_orchestrator_proxy_router
 from control_center.api.routes_platform_config_proxy import router as platform_config_proxy_router
 from control_center.api.routes_platform_interactions_proxy import router as platform_interactions_proxy_router
 from control_center.analytics.router import router as analytics_router
@@ -176,6 +177,12 @@ app.include_router(tes_proxy_router)
 app.include_router(model_registry_proxy_router)
 app.include_router(workflow_bundles_proxy_router)
 app.include_router(rag_proxy_router)
+# Agentic AI nav item (feature/agentic-ai-navbar): same "no blanket
+# permission dependency" posture as model_registry_proxy_router/
+# rag_proxy_router immediately above -- GET /api/agent/graphs/ has no
+# auth requirement upstream (see routes_agent_orchestrator_proxy.py's own
+# module comment).
+app.include_router(agent_orchestrator_proxy_router)
 app.include_router(platform_config_proxy_router)
 app.include_router(platform_interactions_proxy_router)
 # No blanket permission dependency here, unlike summary/docker/config/
