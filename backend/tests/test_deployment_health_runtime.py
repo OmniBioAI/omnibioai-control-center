@@ -583,3 +583,142 @@ services:
     assert service["repository"] is None
     assert service["category"] == "unknown"
     assert service["health"]["intrinsic"] == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# DH-5: drift integration -- `local_image_ids` is an optional, keyword-only,
+# defaulted parameter; every test above this section omits it entirely and
+# already proves backward compatibility (existing callers/tests untouched,
+# no signature break). These tests cover the new `drift` / `drift_summary`
+# wiring itself, end to end through `build_deployment_health_response`.
+# ---------------------------------------------------------------------------
+
+
+def test_drift_key_present_for_every_service_and_defaults_safely():
+    """No containers, no local_image_ids: mysql (no repository ownership
+    evidence) is NOT_APPLICABLE; the two OmniBioAI-owned services are
+    UNKNOWN (no running container to compare against) -- never a
+    fabricated MATCH."""
+    inventory = _inventory()
+    response = build_deployment_health_response(
+        inventory, generated_at="2026-08-30T00:00:00Z",
+        containers=[], probe_results={},
+        prometheus_availability=SourceAvailability.NOT_CONFIGURED,
+        regression_context={"availability": "unavailable", "phases": None, "freshness": None},
+    )
+    by_id = {s["service_id"]: s for s in response["services"]}
+    for service_id in ("mysql", "auth-service", "api-gateway"):
+        assert "drift" in by_id[service_id]
+        for key in ("source", "configured", "running", "drift"):
+            assert key in by_id[service_id]["drift"]
+    assert by_id["mysql"]["drift"]["drift"]["status"] == "not_applicable"
+    assert by_id["auth-service"]["drift"]["drift"]["status"] == "unknown"
+    assert by_id["api-gateway"]["drift"]["drift"]["status"] == "unknown"
+
+
+def test_drift_summary_present_and_matches_per_service_counts():
+    inventory = _inventory()
+    response = build_deployment_health_response(
+        inventory, generated_at="2026-08-30T00:00:00Z",
+        containers=[], probe_results={},
+        prometheus_availability=SourceAvailability.NOT_CONFIGURED,
+        regression_context={"availability": "unavailable", "phases": None, "freshness": None},
+    )
+    assert response["drift_summary"] == {"match": 0, "drifted": 0, "unknown": 2, "not_applicable": 1}
+    assert sum(response["drift_summary"].values()) == response["summary"]["total"]
+    # drift_summary is a distinct dimension from the health summary --
+    # never replacing or merging into it.
+    assert set(response["summary"]) == {"total", "healthy", "degraded", "unhealthy", "unknown"}
+
+
+def test_drift_match_end_to_end_via_local_image_ids():
+    inventory = _inventory()
+    containers = [
+        _container(
+            "auth-1", service_label="auth-service",
+            labels_extra="com.docker.compose.image=sha256:abc123",
+        ),
+    ]
+    local_image_ids = {"ghcr.io/omnibioai/omnibioai-auth:latest": "sha256:abc123"}
+    response = build_deployment_health_response(
+        inventory, generated_at="2026-08-30T00:00:00Z",
+        containers=containers, probe_results={},
+        prometheus_availability=SourceAvailability.NOT_CONFIGURED,
+        regression_context={"availability": "unavailable", "phases": None, "freshness": None},
+        local_image_ids=local_image_ids,
+    )
+    by_id = {s["service_id"]: s for s in response["services"]}
+    drift = by_id["auth-service"]["drift"]
+    assert drift["drift"]["status"] == "match"
+    assert drift["running"]["image_id"] == "sha256:abc123"
+    assert len(drift["drift"]["evidence"]) == 1
+    assert response["drift_summary"]["match"] == 1
+
+
+def test_drift_drifted_end_to_end_when_local_image_id_differs():
+    inventory = _inventory()
+    containers = [
+        _container(
+            "auth-1", service_label="auth-service",
+            labels_extra="com.docker.compose.image=sha256:running-old",
+        ),
+    ]
+    local_image_ids = {"ghcr.io/omnibioai/omnibioai-auth:latest": "sha256:rebuilt-new"}
+    response = build_deployment_health_response(
+        inventory, generated_at="2026-08-30T00:00:00Z",
+        containers=containers, probe_results={},
+        prometheus_availability=SourceAvailability.NOT_CONFIGURED,
+        regression_context={"availability": "unavailable", "phases": None, "freshness": None},
+        local_image_ids=local_image_ids,
+    )
+    by_id = {s["service_id"]: s for s in response["services"]}
+    assert by_id["auth-service"]["drift"]["drift"]["status"] == "drifted"
+    assert response["drift_summary"]["drifted"] == 1
+
+
+def test_drift_third_party_service_stays_not_applicable_regardless_of_docker_state():
+    inventory = _inventory()
+    for containers in (None, [], [_container("mysql-1", service_label="mysql")]):
+        response = build_deployment_health_response(
+            inventory, generated_at="2026-08-30T00:00:00Z",
+            containers=containers, probe_results={},
+            prometheus_availability=SourceAvailability.NOT_CONFIGURED,
+            regression_context={"availability": "unavailable", "phases": None, "freshness": None},
+        )
+        by_id = {s["service_id"]: s for s in response["services"]}
+        assert by_id["mysql"]["drift"]["drift"]["status"] == "not_applicable"
+
+
+def test_docker_unavailable_drift_degrades_to_unknown_not_fabricated_match():
+    inventory = _inventory()
+    response = build_deployment_health_response(
+        inventory, generated_at="2026-08-30T00:00:00Z",
+        containers=None, probe_results=None,
+        prometheus_availability=SourceAvailability.NOT_CONFIGURED,
+        regression_context={"availability": "unavailable", "phases": None, "freshness": None},
+    )
+    by_id = {s["service_id"]: s for s in response["services"]}
+    assert by_id["auth-service"]["drift"]["drift"]["status"] == "unknown"
+    assert by_id["api-gateway"]["drift"]["drift"]["status"] == "unknown"
+    assert response["drift_summary"]["match"] == 0
+    assert response["drift_summary"]["drifted"] == 0
+
+
+def test_drift_never_leaks_sensitive_data_in_full_response():
+    inventory = _inventory()
+    containers = [
+        _container(
+            "auth-1", service_label="auth-service",
+            labels_extra="com.docker.compose.image=sha256:abc123",
+        ),
+    ]
+    response = build_deployment_health_response(
+        inventory, generated_at="2026-08-30T00:00:00Z",
+        containers=containers, probe_results={},
+        prometheus_availability=SourceAvailability.NOT_CONFIGURED,
+        regression_context={"availability": "unavailable", "phases": None, "freshness": None},
+        local_image_ids={"ghcr.io/omnibioai/omnibioai-auth:latest": "sha256:abc123"},
+    )
+    payload_lower = json.dumps(response).lower()
+    for marker in ("/home/", "password", "secret", "token", "container_id"):
+        assert marker not in payload_lower

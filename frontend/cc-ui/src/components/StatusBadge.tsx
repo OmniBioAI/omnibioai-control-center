@@ -64,6 +64,21 @@ const KNOWN: Record<string, { bg: string; color: string }> = {
   healthy: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
   degraded: { bg: 'var(--amber-bg)', color: 'var(--amber)' },
   unhealthy: { bg: 'var(--red-bg)', color: 'var(--red)' },
+  // DH-5: drift is a separate operational dimension from health above --
+  // its badge must never be confusable with a health badge at a glance.
+  // 'match' reuses the same green 'healthy' uses (a positive, confirmed
+  // state); 'unknown' already renders gray/muted from the shared entry
+  // above (never green -- an unproven match is never shown as good).
+  // 'drifted' deliberately does NOT reuse 'unhealthy'/'degraded' red or
+  // amber -- drift is not a health failure, so it gets its own color
+  // (the app's existing --purple accent, used nowhere else in this
+  // badge) to stay visually unmistakable from both. 'not_applicable' is
+  // a neutral non-finding (third-party service, nothing to compare) --
+  // same non-alarming muted gray 'not_configured'/'not_implemented' use,
+  // never red.
+  match: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
+  drifted: { bg: 'rgba(168,85,247,0.15)', color: 'var(--purple)' },
+  not_applicable: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
 }
 
 export default function StatusBadge({ status }: Props) {

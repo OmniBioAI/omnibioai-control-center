@@ -247,6 +247,53 @@ export interface DeploymentServiceRuntime {
   match_evidence: DeploymentEvidenceItem | null
 }
 
+// DH-5: source/commit/image drift -- an independent operational dimension
+// from `health` above, never folded into it. See the backend's
+// deployment_health_drift.py module docstring for the full evidence model
+// and why a mutable configured tag alone can never produce `match`.
+export type DeploymentDriftStatus = 'match' | 'drifted' | 'unknown' | 'not_applicable'
+
+export type DeploymentRevisionType = 'oci_label' | 'unknown'
+
+export interface DeploymentSourceVersion {
+  repository: string | null
+  expected_revision: string | null
+  revision_type: DeploymentRevisionType
+}
+
+export interface DeploymentConfiguredArtifact {
+  image: string | null
+  tag: string | null
+  digest: string | null
+}
+
+export interface DeploymentRunningArtifact {
+  image_id: string | null
+  revision: string | null
+  source: string | null
+  version: string | null
+}
+
+export interface DeploymentDriftResult {
+  status: DeploymentDriftStatus
+  reason: string
+  evidence: DeploymentEvidenceItem[]
+}
+
+export interface DeploymentServiceDrift {
+  source: DeploymentSourceVersion
+  configured: DeploymentConfiguredArtifact
+  running: DeploymentRunningArtifact
+  drift: DeploymentDriftResult
+}
+
+export interface DeploymentDriftSummary {
+  match: number
+  drifted: number
+  unknown: number
+  not_applicable: number
+}
+
 export interface DeploymentServiceView {
   service_id: string
   display_name: string
@@ -270,6 +317,7 @@ export interface DeploymentServiceView {
     configured: string | null
     running: string | null
   }
+  drift: DeploymentServiceDrift
   dependencies: DeploymentServiceDependency[]
   evidence: DeploymentEvidenceItem[]
   completeness: DeploymentMetadataCompleteness
@@ -306,6 +354,7 @@ export interface DeploymentHealthResponse {
   generated_at: string
   baseline: DeploymentBaselineSource
   summary: DeploymentHealthSummary
+  drift_summary: DeploymentDriftSummary
   services: DeploymentServiceView[]
   regression_health: DeploymentHealthRegressionContext
   data_sources: DeploymentHealthDataSources

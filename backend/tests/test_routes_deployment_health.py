@@ -13,11 +13,12 @@ from fastapi import HTTPException
 from control_center.api.routes_deployment_health import (
     _baseline_source,
     _load_probe_results,
+    _local_image_ids,
     _regression_context,
     get_deployment_health,
 )
 from control_center.core.auth import require_permission
-from control_center.deployment_health import BaselineSource
+from control_center.deployment_health import BaselineSource, parse_compose_text
 from control_center.main import app
 from control_center.regression_health import RegressionHealthUnavailable
 
@@ -141,6 +142,101 @@ class ValidResponseTestCase(unittest.IsolatedAsyncioTestCase):
                 response = await get_deployment_health()
         body = json.loads(response.body)
         assert body["generated_at"]
+
+
+# ---------------------------------------------------------------------------
+# DH-5: drift wiring at the route layer (section 27)
+# ---------------------------------------------------------------------------
+
+
+class DriftIntegrationTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_response_shape_includes_drift_and_drift_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_compose(tmp)
+            with patch.dict(os.environ, {"DEPLOYMENT_HEALTH_COMPOSE_PATH": path}), \
+                 patch("control_center.api.routes_deployment_health.get_containers_status",
+                       return_value={"containers": [], "running": 0, "stopped": 0}), \
+                 patch("control_center.api.routes_deployment_health.get_local_image_ids",
+                       return_value={}), \
+                 patch("control_center.api.routes_deployment_health.load_settings",
+                       side_effect=FileNotFoundError()), \
+                 patch("control_center.api.routes_deployment_health.load_regression_health",
+                       side_effect=RegressionHealthUnavailable("artifact_missing")):
+                response = await get_deployment_health()
+
+        body = json.loads(response.body)
+        assert "drift_summary" in body
+        assert set(body["drift_summary"]) == {"match", "drifted", "unknown", "not_applicable"}
+        for service in body["services"]:
+            assert "drift" in service
+            assert set(service["drift"]) == {"source", "configured", "running", "drift"}
+
+    async def test_docker_unavailable_never_calls_get_local_image_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_compose(tmp)
+            with patch.dict(os.environ, {"DEPLOYMENT_HEALTH_COMPOSE_PATH": path}), \
+                 patch("control_center.api.routes_deployment_health.get_containers_status",
+                       return_value={"error": "docker not found", "containers": []}), \
+                 patch("control_center.api.routes_deployment_health.get_local_image_ids") as mock_local_ids, \
+                 patch("control_center.api.routes_deployment_health.load_settings",
+                       side_effect=FileNotFoundError()):
+                response = await get_deployment_health()
+
+        mock_local_ids.assert_not_called()
+        body = json.loads(response.body)
+        assert response.status_code == 200
+        by_id = {s["service_id"]: s for s in body["services"]}
+        # mysql has no OmniBioAI repository ownership evidence -> not_applicable;
+        # auth-service is OmniBioAI-owned but Docker is unavailable -> unknown,
+        # never a fabricated match.
+        assert by_id["mysql"]["drift"]["drift"]["status"] == "not_applicable"
+        assert by_id["auth-service"]["drift"]["drift"]["status"] == "unknown"
+
+    async def test_matching_local_image_id_produces_match_end_to_end(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _write_compose(tmp)
+            containers = [{
+                "Names": "auth-1",
+                "Status": "Up 3 hours",
+                "Image": "ghcr.io/omnibioai/omnibioai-auth:latest",
+                "Labels": "com.docker.compose.service=auth-service,"
+                          "com.docker.compose.image=sha256:abc123",
+            }]
+            with patch.dict(os.environ, {"DEPLOYMENT_HEALTH_COMPOSE_PATH": path}), \
+                 patch("control_center.api.routes_deployment_health.get_containers_status",
+                       return_value={"containers": containers, "running": 1, "stopped": 0}), \
+                 patch("control_center.api.routes_deployment_health.get_local_image_ids",
+                       return_value={"ghcr.io/omnibioai/omnibioai-auth:latest": "sha256:abc123"}) as mock_local_ids, \
+                 patch("control_center.api.routes_deployment_health.load_settings",
+                       side_effect=FileNotFoundError()):
+                response = await get_deployment_health()
+
+        mock_local_ids.assert_called_once()
+        body = json.loads(response.body)
+        by_id = {s["service_id"]: s for s in body["services"]}
+        assert by_id["auth-service"]["drift"]["drift"]["status"] == "match"
+        assert body["drift_summary"]["match"] == 1
+
+
+class LocalImageIdsHelperTestCase(unittest.TestCase):
+    def _inventory(self):
+        return parse_compose_text(_VALID_COMPOSE, baseline_source=BaselineSource.UNKNOWN)
+
+    def test_docker_unavailable_short_circuits_without_a_call(self) -> None:
+        with patch("control_center.api.routes_deployment_health.get_local_image_ids") as mock_local_ids:
+            result = _local_image_ids(self._inventory(), docker_available=False)
+        mock_local_ids.assert_not_called()
+        assert result == {}
+
+    def test_docker_available_delegates_to_get_local_image_ids(self) -> None:
+        with patch("control_center.api.routes_deployment_health.get_local_image_ids",
+                    return_value={"mysql:8.0": "sha256:xyz"}) as mock_local_ids:
+            result = _local_image_ids(self._inventory(), docker_available=True)
+        mock_local_ids.assert_called_once()
+        (called_refs,), _ = mock_local_ids.call_args
+        assert "mysql:8.0" in called_refs
+        assert "ghcr.io/omnibioai/omnibioai-auth:latest" in called_refs
+        assert result == {"mysql:8.0": "sha256:xyz"}
 
 
 # ---------------------------------------------------------------------------

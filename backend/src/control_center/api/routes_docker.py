@@ -98,6 +98,44 @@ def get_containers_status() -> dict:
         return {"error": str(e), "containers": [], "running": 0, "stopped": 0}
 
 
+def get_local_image_ids(image_refs: list[str]) -> dict[str, str]:
+    """DH-5: one bounded, deduplicated `docker image inspect` call for the
+    given (already-deduplicated by the caller) configured image
+    references -- reusing the same `docker` CLI / Docker Socket Proxy
+    path every other function in this module already uses (`GET
+    /images/{name}/json` was already on the proxy's allowlist for this
+    module's own `/docker/plugin-images`; no proxy change needed).
+
+    Returns {raw_reference: local_image_id}. A reference that isn't
+    resolvable locally (never built/pulled, or genuinely missing) is
+    simply absent from the result -- one bad reference never fails the
+    whole batch: `docker image inspect a b c` still prints a valid JSON
+    array for every name it *could* resolve, even when it exits nonzero
+    because one of them wasn't found (confirmed against the real
+    daemon), so the result is parsed from stdout regardless of the
+    process's exit code. Matched by `RepoTags`, not argument order --
+    order-position mapping would be unsafe once an entry can be skipped.
+    """
+    if not image_refs:
+        return {}
+    try:
+        result = subprocess.run(
+            ["docker", "image", "inspect", *image_refs],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        data = json.loads(result.stdout) if result.stdout.strip() else []
+    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        return {}
+    by_tag: dict[str, str] = {}
+    for item in data:
+        image_id = item.get("Id")
+        if not image_id:
+            continue
+        for tag in item.get("RepoTags") or []:
+            by_tag[tag] = image_id
+    return by_tag
+
+
 @router.get("/docker/containers")
 def get_containers() -> JSONResponse:
     status = get_containers_status()
