@@ -1,5 +1,13 @@
 import { canSeeAnalytics, hasAdminAccess, hasOrganizationsAccess, hasPermission, hasPlatformAdminAccess } from './auth'
 
+// DH-3: shared reference (not a fresh arrow function per item) so
+// Regression Health and Deployment Health -- both gated by the exact
+// same platform.manage_infra permission DH-2's own backend route
+// requires -- can be asserted as literally the same gate in
+// navigation.test.ts, the same "shared function reference" convention
+// 'saml'/'iam' below already establish for their own shared gate.
+const hasManageInfraAccess = () => hasPermission('platform.manage_infra')
+
 /**
  * Admin Console Phase 2: the single source of truth for the sectioned
  * navigation tree -- SidebarNav, the dashboard's stat cards, and
@@ -22,7 +30,7 @@ import { canSeeAnalytics, hasAdminAccess, hasOrganizationsAccess, hasPermission,
 
 export type PageKey =
   | 'overview'
-  | 'health' | 'regression-health' | 'docker' | 'ecosystem' | 'config' | 'llms' | 'cloud'
+  | 'health' | 'regression-health' | 'deployment-health' | 'docker' | 'ecosystem' | 'config' | 'llms' | 'cloud'
   | 'actions' | 'scheduled-jobs' | 'known-issues'
   | 'organizations' | 'users' | 'teams' | 'roles'
   | 'infrastructure' | 'workflows' | 'tool-execution' | 'ai-models' | 'agentic-ai'
@@ -89,7 +97,15 @@ export const NAVIGATION: NavSection[] = [
         key: 'infrastructure', label: 'Infrastructure', functional: true, visible: hasAdminAccess,
         children: [
           { key: 'health', label: 'Health', functional: true, visible: hasAdminAccess },
-          { key: 'regression-health', label: 'Regression Health', functional: true, visible: () => hasPermission('platform.manage_infra') },
+          { key: 'regression-health', label: 'Regression Health', functional: true, visible: hasManageInfraAccess },
+          // DH-3: Deployment Health -- placed immediately after
+          // Regression Health and before Docker, per the DH-3 task
+          // brief's explicit ordering. Same platform.manage_infra gate
+          // 'regression-health' immediately above uses (and DH-2's own
+          // backend route requires) -- not a new permission, the
+          // frontend visibility signal and the real backend
+          // authorization are the same check.
+          { key: 'deployment-health', label: 'Deployment Health', functional: true, visible: hasManageInfraAccess },
           { key: 'docker', label: 'Docker', functional: true, visible: hasAdminAccess },
           { key: 'ecosystem', label: 'Ecosystem Report', functional: true, visible: hasAdminAccess },
           { key: 'config', label: 'Config', functional: true, visible: hasAdminAccess },

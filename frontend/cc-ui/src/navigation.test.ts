@@ -246,15 +246,14 @@ describe('navigation: HIPAA Compliance placement', () => {
 })
 
 describe('navigation: Regression Health placement', () => {
-  it('places Regression Health after Health and before Docker', () => {
+  it('places Regression Health after Health', () => {
     const operations = NAVIGATION.find(section => section.key === 'operations')!
     const infrastructure = operations.items.find(item => item.key === 'infrastructure')!
     expect(infrastructure.children?.map(item => item.key)).toEqual(
-      expect.arrayContaining(['health', 'regression-health', 'docker'])
+      expect.arrayContaining(['health', 'regression-health'])
     )
     const keys = infrastructure.children!.map(item => item.key)
     expect(keys.indexOf('regression-health')).toBe(keys.indexOf('health') + 1)
-    expect(keys.indexOf('docker')).toBe(keys.indexOf('regression-health') + 1)
   })
 
   it('is functional and gated by the existing platform.manage_infra permission', () => {
@@ -264,5 +263,48 @@ describe('navigation: Regression Health placement', () => {
     expect(item.label).toBe('Regression Health')
     expect(item.functional).toBe(true)
     expect(item.visible).toBeDefined()
+  })
+})
+
+// DH-3: Deployment Health, immediately after Regression Health and
+// before Docker -- the DH-3 task brief's explicit ordering. This
+// supersedes Regression Health's own "before Docker" assertion above
+// (which now has Deployment Health in between); that block above only
+// asserts "after Health" for exactly this reason -- the full
+// Health -> Regression Health -> Deployment Health -> Docker chain is
+// asserted once, here, rather than in two places that could drift.
+
+describe('navigation: Deployment Health placement', () => {
+  it('has exactly one "deployment-health" entry across the entire tree', () => {
+    const found: { sectionKey: string; parentKey?: string }[] = []
+    for (const section of NAVIGATION) {
+      for (const item of section.items) {
+        if (item.key === 'deployment-health') found.push({ sectionKey: section.key })
+        for (const child of item.children ?? []) {
+          if (child.key === 'deployment-health') found.push({ sectionKey: section.key, parentKey: item.key })
+        }
+      }
+    }
+    expect(found).toHaveLength(1)
+  })
+
+  it('places the full chain Health -> Regression Health -> Deployment Health -> Docker in order', () => {
+    const operations = NAVIGATION.find(section => section.key === 'operations')!
+    const infrastructure = operations.items.find(item => item.key === 'infrastructure')!
+    const keys = infrastructure.children!.map(item => item.key)
+    expect(keys.indexOf('regression-health')).toBe(keys.indexOf('health') + 1)
+    expect(keys.indexOf('deployment-health')).toBe(keys.indexOf('regression-health') + 1)
+    expect(keys.indexOf('docker')).toBe(keys.indexOf('deployment-health') + 1)
+  })
+
+  it('is functional and gated by the existing platform.manage_infra permission (same as Regression Health)', () => {
+    const operations = NAVIGATION.find(section => section.key === 'operations')!
+    const infrastructure = operations.items.find(item => item.key === 'infrastructure')!
+    const item = infrastructure.children!.find(child => child.key === 'deployment-health')!
+    const regressionItem = infrastructure.children!.find(child => child.key === 'regression-health')!
+    expect(item.label).toBe('Deployment Health')
+    expect(item.functional).toBe(true)
+    expect(item.visible).toBeDefined()
+    expect(item.visible).toBe(regressionItem.visible)
   })
 })

@@ -1,6 +1,6 @@
 # OmniBioAI Control Center
 
-> README last reviewed: **2026-08-24**
+> README last reviewed: **2026-08-30**
 
 **Operational health dashboard, ecosystem report server, and observability hub for the OmniBioAI stack.**
 
@@ -11,7 +11,9 @@ The Control Center is a FastAPI service that aggregates health status across all
 ## What It Does
 
 - **Health monitoring** — TCP, HTTP, and disk checks across all ecosystem services
-- **Enterprise Admin Console** — a separate frontend build served at `admin.omnibioai.org`: Organizations, Users, Teams, Roles & Permissions, MFA Policy, IAM/SSO Management, Audit Logs, API Keys/Service Accounts, Billing, Workflows, Tool Execution, AI Models, RAG/PubMed, Settings — see [Admin Console](#admin-console) below
+- **Enterprise Admin Console** — a separate frontend build served at `admin.omnibioai.org`: Organizations, Users, Teams, Roles & Permissions, Security (Security Overview, MFA Policy, IAM/SSO Management, SAML, Audit Logs, Compliance Report, Sessions, Interactions, API Keys/Service Accounts), HIPAA Compliance, Billing, Usage Analytics, Workflows, Tool Execution, AI Models, Agentic AI, RAG/PubMed, Integrations, Settings, plus an Operations → Infrastructure group (Health, Regression Health, Deployment Health, Docker, Ecosystem Report, Config, LLMs, Cloud, Actions, Scheduled Jobs, Known Issues) — see [Admin Console](#admin-console) below
+- **Regression Health** — reads a reviewed, promoted end-to-end certification artifact (never inferred from a pytest run) and exposes it read-only — see [Regression Health](#regression-health)
+- **Deployment Health (V1, certified)** — read-only, dependency-aware deployment and runtime health for the ecosystem, combining Compose metadata, Docker state, and application probes — see [Deployment Health](#deployment-health)
 - **Ecosystem report** — interactive HTML report (architecture · projects · languages · coverage · health) served at `/`; `/dashboard` redirects here (its live per-service cards and generate button were folded into the report's header status chip and Admin tab)
 - **JSON API** — machine-readable health summary at `/summary` for CI/CD and external monitoring
 - **Scheduled report generation** — auto-regenerates the ecosystem report every N hours (configurable via REPORT_SCHEDULE_HOURS)
@@ -187,6 +189,8 @@ omnibioai-control-center/
 │   │   │   ├── routes_config.py    # GET /config, POST /config/service
 │   │   │   ├── routes_cron.py      # /cron/jobs + pause/resume/schedule
 │   │   │   ├── routes_docker.py    # /docker/*
+│   │   │   ├── routes_regression_health.py # GET /regression-health (SPA: /regression-health/data via nginx)
+│   │   │   ├── routes_deployment_health.py # GET /deployment-health (SPA: /deployment-health/data via nginx)
 │   │   │   ├── routes_known_issues.py  # /known-issues CRUD
 │   │   │   ├── routes_llm.py       # GET /llms, /knowledge-base
 │   │   │   ├── routes_cloud.py     # GET /cloud
@@ -202,6 +206,9 @@ omnibioai-control-center/
 │   │   │       billing,tes,model_registry,workflow_bundles,rag,platform_config}_proxy.py
 │   │   │                           # Admin Console enterprise proxy layer (15 files) —
 │   │   │                           # see "Admin Console" below
+│   │   ├── regression_health.py    # Reads/validates the promoted RH-1 certification artifact
+│   │   ├── deployment_health.py    # DH-1: static Compose service/dependency model (no I/O)
+│   │   ├── deployment_health_runtime.py # DH-2: Docker/probe/dependency merge -> effective health
 │   │   ├── checks/
 │   │   │   ├── http.py / tcp.py / disk.py          # Core checks — HTTP, TCP (MySQL/Redis), disk
 │   │   │   ├── cron_jobs.py        # Host-crontab status + pause/resume/reschedule logic
@@ -219,7 +226,7 @@ omnibioai-control-center/
 │   │   │   └── discord.py          # Discord webhook alerts (known issues, GPU temp)
 │   │   └── utils/
 │   │       └── summary_client.py   # Fetches /summary for report generation
-│   └── tests/                      # 1,394 collected tests at last review — see "Running Tests" below
+│   └── tests/                      # 1,554 collected tests at last review — see "Running Tests" below
 │
 ├── frontend/cc-ui/src/
 │   ├── apps/
@@ -271,6 +278,8 @@ omnibioai-control-center/
 | `/docker/containers`   | GET    | Platform container list with status |
 | `/docker/sif-images`   | GET    | Tool SIF image inventory and sizes |
 | `/docker/plugin-images`| GET    | Plugin Docker image inventory |
+| `/regression-health`   | GET    | **`platform.manage_infra`-gated.** Reviewed end-to-end certification status, read from the promoted RH-1 artifact — see [Regression Health](#regression-health) |
+| `/deployment-health`   | GET    | **`platform.manage_infra`-gated.** Read-only, dependency-aware deployment/runtime health — see [Deployment Health](#deployment-health) |
 | `/metrics`             | GET    | Prometheus metrics endpoint |
 | `/llms`                | GET    | Local LLM models + API key status |
 | `/cloud`               | GET    | Cloud/HPC execution backend status |
@@ -290,6 +299,8 @@ omnibioai-control-center/
 | `/integrity`           | GET    | Configured symlink/mount integrity checks |
 
 "Admin-gated" endpoints require a valid JWT carrying the `admin` role, checked twice independently: once by nginx's `auth_request` (any valid JWT) and once inside the app itself via `require_admin` (the specific role) — so an nginx misconfiguration alone can't expose a write endpoint. All other endpoints above are fully open, no auth required.
+
+`/regression-health` and `/deployment-health` above are the **backend** routes. Each also has a human-facing Admin Console SPA page at the same path (`/regression-health`, `/deployment-health`) that a browser navigates to directly — nginx keeps these distinct by rewriting a separate `/regression-health/data` / `/deployment-health/data` request path to the backend route (`docker/nginx/api-proxy.conf`), rather than letting the SPA route and the API route collide (the exact mistake, internally tracked as REG-010, that this split was introduced to fix). The frontend always calls the `/data` path; only a browser's own document navigation should ever hit the bare path.
 
 This table covers the original ops-console surface. A separate, larger set of `/orgs/*`, `/platform/*`, `/billing/*`, `/tes/*`, `/model-registry/*`, `/workflow-bundles/*`, `/rag/*`, and `/auth/config` proxy routes backs the Admin Console — see [Admin Console → Enterprise proxy routes](#enterprise-proxy-routes) below rather than duplicating all ~35 of them here; each is gated by whatever permission its owning service already requires (`omnibioai-auth`'s `manage_all_orgs`/org-membership checks, `omnibioai-billing`'s org-scoped IAM, etc.) — Control Center's own `require_admin`/nginx layer above doesn't apply to them.
 
@@ -479,6 +490,11 @@ The redirect URI must exactly match Auth's `LIMS_SSO_REDIRECT_URI` value.
 | `JWKS_TIMEOUT_SECONDS` / `JWKS_CACHE_TTL_SECONDS` | `5` / `300`  | JWKS fetch timeout and key-set cache lifetime |
 | `CRONTAB_SPOOL_PATH`    | `/var/spool/cron/crontabs/manish` | Host crontab spool file, bind-mounted in so `/cron/jobs/{id}/pause\|resume\|schedule` can read/write it directly |
 | `DISCORD_ALERT_WEBHOOK_URL` | *(empty)*                 | Discord webhook for new high-severity known-issue alerts — empty disables alerting gracefully, same pattern as `SENTRY_DSN` |
+| `REGRESSION_HEALTH_ARTIFACT_PATH` | `$WORKSPACE_ROOT/omnibioai-ecosystem-regression/status/regression-health.json` | Read-only promoted certification artifact — see [Regression Health](#regression-health) |
+| `REGRESSION_HEALTH_STALE_AFTER_HOURS` | `168` | Freshness threshold; a stale artifact keeps its certification fields, only `freshness` changes |
+| `DEPLOYMENT_HEALTH_COMPOSE_PATH` | *(unset — required)* | Path to the authoritative Compose baseline — see [Deployment Health](#deployment-health) |
+| `DEPLOYMENT_HEALTH_BASELINE_SOURCE` | `unknown` | `development` / `release` / `unknown` |
+| `DEPLOYMENT_HEALTH_DEPLOYMENT_REPOSITORY` | *(unset)* | Optional logical repo name for ownership attribution on a relative build context |
 
 ---
 
@@ -647,28 +663,28 @@ don't appear in it at all), so this is a genuinely smaller bundle, not
 hidden-but-shipped UI. Both apps share `AuthGate.tsx` (session/login state
 machine) and `Header.tsx`.
 
-### Navigation (25 functional pages)
+### Navigation (36 functional nav entries, 35 distinct pages)
 
-Single source of truth: `frontend/cc-ui/src/navigation.ts`.
+Single source of truth: `frontend/cc-ui/src/navigation.ts`. Every entry
+below is `functional: true` — this app's `<ComingSoon/>` placeholder
+convention still exists in the framework (an unwired entry would render
+it, never hidden), but no current entry uses it.
 
 | Section | Page(s) | Notes |
 |---|---|---|
 | — | Overview | Stat cards via `/dashboard/summary` |
 | Administration | Organizations, Users, Teams, Roles & Permissions | |
-| Operations | Infrastructure (Health, Docker, Ecosystem Report, Config, LLMs, Cloud) | The 6 pre-existing ops pages, grouped under one expandable parent |
-| | Workflows, Tool Execution, AI Models | Proxy `omnibioai-workflow-bundles`, `omnibioai-tes`, `omnibioai-model-registry` directly — authorization is entirely each upstream service's own, per-request |
-| Security | Security Overview, MFA Policy, IAM/SSO Management, Audit Logs, API Keys/Service Accounts | |
-| | Sessions | **Placeholder (`functional: false`)** — no session-list/revoke backend exists yet |
-| Business | Billing | Proxies `omnibioai-billing`'s existing read APIs |
+| Operations → Infrastructure | Health, Regression Health, Deployment Health, Docker, Ecosystem Report, Config, LLMs, Cloud, Actions, Scheduled Jobs, Known Issues | One expandable parent; Regression Health and Deployment Health both require `platform.manage_infra`, the rest require only general admin access |
+| Operations | Workflows, Tool Execution, AI Models, Agentic AI | Proxy `omnibioai-workflow-bundles`, `omnibioai-tes`, `omnibioai-model-registry`, and `omnibioai-workbench`'s agent-orchestrator service directly — authorization is entirely each upstream service's own, per-request |
+| Security | Security Overview, MFA Policy, IAM/SSO Management, SAML Settings, Audit Logs, Compliance Report, Sessions, Interactions, API Keys/Service Accounts | Compliance Report here is the org-scoped HIPAA *usage/access-log* export (v0.8.0) — distinct from the platform-engineering HIPAA Compliance section below |
+| Compliance | HIPAA Compliance | The platform's own HIPAA remediation history (which PRs closed which control gaps) — not org data |
+| Business | Billing, Usage Analytics | Billing proxies `omnibioai-billing`'s read APIs; Usage Analytics is scoped server-side to the caller (`platform_admin`/`org_admin`/`team_admin`) |
 | Knowledge | RAG, PubMed | Both point at one page — RAG's only indexed corpus today is PubMed abstracts |
-| Platform | Settings | Read-only view of `omnibioai-auth`'s `GET /auth/config`; the corresponding `PUT` (platform-wide LLM/cloud credentials) is deliberately not proxied yet |
-| | Integrations | **Placeholder (`functional: false`)** — no integration/CRUD entity exists yet |
+| Platform | Integrations, Settings | Integrations reports env-derived third-party status (Sentry, Discord); Settings is a read-only view of `omnibioai-auth`'s `GET /auth/config` — the corresponding `PUT` (platform-wide LLM/cloud credentials) is deliberately not proxied yet |
 
-Placeholder items still appear in the nav (rendered as "Coming Soon," per
-this app's own convention — never hidden) rather than being removed.
-Every `functional: true` page is wired to a real backend; none renders a
-`<ComingSoon/>` fallthrough while claiming to be functional (re-verified
-in `docs/pr-e-admin-console-production-hardening.md`).
+Every page above is wired to a real backend; see
+[docs/admin-console/README.md](docs/admin-console/README.md) for the full
+navigation/feature catalog with per-page authorization reasoning.
 
 ### Enterprise proxy routes
 
@@ -718,6 +734,187 @@ edit `/etc/cloudflared/config.yml`, and a DNS record for
 alone don't create DNS). Cloudflare Access policy coverage for the new
 hostname is separately not yet done either. See `docs/admin-console-build.md`
 for the exact target-state diagram and rollout prerequisites.
+
+---
+
+## Regression Health
+
+Reviewed, end-to-end **certification** status for the OmniBioAI ecosystem —
+distinct from both [`/health`](#health)'s live reachability check and
+[Deployment Health](#deployment-health)'s deployment/runtime health below.
+Certification is a human/process judgment about whether a capability has
+actually been validated end-to-end; it is **never inferred directly from a
+`pytest` exit code** inside this service.
+
+```
+Reviewed regression run (omnibioai-ecosystem-regression)
+        │  promotes a single JSON artifact once reviewed
+        ▼
+Read-only artifact mount (REGRESSION_HEALTH_ARTIFACT_PATH)
+        │
+        ▼
+Control Center backend (regression_health.py — reads and validates only,
+        │                never regenerates or infers the artifact)
+        ▼
+GET /regression-health   (platform.manage_infra)
+        │
+        ▼
+Admin Console → Operations → Infrastructure → Regression Health
+```
+
+The artifact reports, per **P0/P1/P2 phase**: status and certification
+status; a list of **capabilities**, each with implementation/test/live/
+certification status; **REG-\*** **findings** (fixed/open/closed, with a
+validation status); and **technical debt**/paused items. A `freshness`
+field — `CURRENT` / `STALE` / `UNKNOWN`, derived from `generated_at`
+against `REGRESSION_HEALTH_STALE_AFTER_HOURS` (default 168h) — is added by
+Control Center at read time; a stale artifact keeps its certification
+fields exactly as promoted, never silently downgraded.
+
+Any failure to read or validate the artifact (missing file, malformed
+JSON, schema mismatch, or a value that looks like it could be sensitive)
+returns a safe `503 {"status": "STATUS_UNAVAILABLE", ...}` — never the
+configured path, the raw exception, or a stack trace. `GET
+/regression-health` requires `platform.manage_infra`; there is no write
+path anywhere in this feature, in either direction — the artifact is
+produced entirely outside Control Center.
+
+---
+
+## Deployment Health
+
+**V1, certified.** Read-only, dependency-aware deployment and runtime
+health for every Compose-defined service in the ecosystem — what's
+*declared* (Compose), what's *actually running* (Docker), and what's
+*actually responding* (application probes), merged into one inventory
+with an explicit evidence trail for every fact.
+
+```
+Compose deployment baseline (an explicitly-configured file — see below)
+        │
+        ▼
+Static service/dependency model (deployment_health.py — ownership,
+        │                        category, HARD/SOFT dependency edges;
+        │                        no Docker, no network, no live service)
+        ▼
+Runtime merge (deployment_health_runtime.py) ──┬── Docker (existing
+        │                                      │    routes_docker.py
+        │                                      │    inspection, reused
+        │                                      │    verbatim, via the
+        │                                      │    Docker Socket Proxy —
+        │                                      │    never a raw socket)
+        │                                      ├── Application probes
+        │                                      │    (existing
+        │                                      │    core.runner, the same
+        │                                      │    source /services and
+        │                                      │    /summary expose)
+        │                                      ├── Regression Health
+        │                                      │    (compact, global
+        │                                      │    context only)
+        │                                      └── Prometheus (bare
+        │                                           availability flag —
+        │                                           see below)
+        ▼
+GET /deployment-health   (platform.manage_infra)
+        │
+        ▼
+Admin Console → Operations → Infrastructure → Deployment Health
+```
+
+### Intrinsic vs. effective health
+
+Every service carries two independent health values — `HEALTHY` /
+`DEGRADED` / `UNHEALTHY` / `UNKNOWN` — never collapsed into one:
+
+- **Intrinsic health** is the service's own observed health, in strict
+  precedence order: an application probe result, then a Docker
+  healthcheck, then bare "container is running," then `UNKNOWN`. A
+  running container with no probe and no healthcheck is `UNKNOWN`, not
+  `HEALTHY` — a container running is not proof a service is healthy.
+- **Effective health** adjusts intrinsic health for `HARD` dependency
+  evidence only (from Compose `depends_on` conditions;
+  `service_healthy`/`service_completed_successfully` are `HARD`,
+  `service_started` or no condition is `SOFT`). A failing `SOFT`
+  dependency never changes effective health. `UNHEALTHY` is reserved
+  exclusively for intrinsic failure — a dependency problem can push a
+  service to `DEGRADED` at most, never rewrite its own intrinsic state.
+  Propagation looks only at each dependency's *intrinsic* value, one hop,
+  which is what makes it safe against dependency cycles by construction
+  rather than something detected at runtime.
+
+**`UNKNOWN` does not mean unhealthy.** It means there wasn't enough
+evidence to say either way — a service with no configured application
+probe and no Docker healthcheck, a one-shot init container that has
+already exited, or a source (Docker, Regression Health) that's
+temporarily unavailable. None of these are ever silently reported as
+`HEALTHY`.
+
+### Ownership and third-party services
+
+Each service's owning repository is derived from real evidence — a
+Compose build-context path segment, a published image reference, or a
+small curated fallback table — never guessed from a name pattern.
+Genuine third-party infrastructure (MySQL, Redis, Neo4j, Prometheus,
+Grafana, OPA, and similar) legitimately has no OmniBioAI repository and
+reports `repository: null` — this is a normal, expected state, entirely
+independent of and never implying anything about that service's health.
+
+### Evidence and data-source availability
+
+Every health determination is backed by an `evidence` entry naming its
+`source` and a safe (never-sensitive) `detail`. The response's
+`data_sources` block reports each source's own current state:
+
+| Source | States | Notes |
+|---|---|---|
+| Compose | `available` | The only source whose failure is fatal to the whole endpoint (503) — every other one below degrades independently |
+| Docker | `available` / `unavailable` | Via the existing Docker Socket Proxy; unavailable → every dependent service's runtime falls to `UNKNOWN`, never a fabricated `HEALTHY` |
+| Application Probe | `available` / `unavailable` | The existing `config/control_center.yaml`-driven checks |
+| Regression Health | `available` / `unavailable` | Compact context only — see [Regression Health](#regression-health); never mapped to individual services, since certification is capability-oriented, not per-service |
+| Prometheus | `not_configured` (current deployments) / `available` / `unavailable` | No scrape configuration exists anywhere in this workspace as of V1 — reported honestly as **deferred**, not presented as integrated. No per-service Prometheus correlation exists yet |
+
+### Configuration
+
+| Variable | Description |
+|---|---|
+| `DEPLOYMENT_HEALTH_COMPOSE_PATH` | Path to the authoritative Compose file. Unset → the endpoint returns the same safe unavailable response as a missing artifact; there is no built-in default path |
+| `DEPLOYMENT_HEALTH_BASELINE_SOURCE` | `development` / `release` / `unknown` (default) — which Compose baseline the supplied path represents; never guessed |
+| `DEPLOYMENT_HEALTH_DEPLOYMENT_REPOSITORY` | Optional logical repo name (e.g. `omnibioai-studio`) used only to attribute ownership for a service whose build context is a genuinely relative path inside that same repository |
+
+Deployment Health does not require its own dedicated mount — in every
+currently certified deployment, the Compose file it reads was already
+reachable through a mount that existed for unrelated, pre-existing
+reasons; these three variables only point the parser at it. No `.env`
+value is ever read into the model, and no environment value, secret,
+absolute host path, container ID, or backend handle is ever part of a
+response — every serialized field is drawn from an explicit allowlist,
+never a recursive dump of a Docker or Compose structure.
+
+### V1 certification
+
+Deployment Health V1 has been certified against a real, live deployment —
+not only automated tests: a live authorization matrix (401 anonymous, 403
+authenticated-without-permission, 200 authorized), the real service
+inventory, Docker/runtime merge, intrinsic-vs-effective health (including
+a real `HARD`-dependency-triggered degradation), Docker-unavailable and
+Compose-missing/invalid failure semantics, Regression Health source
+failure, image-reference comparison (`MATCH`/`MISMATCH`/`UNKNOWN`,
+`latest` never treated as a verified release), Admin Console rendering,
+and read-only enforcement. At certification time the live baseline had
+41 services and 87 dependency edges — **counts like these are a snapshot
+of that run, not a fixed architecture fact**, and will change as the
+underlying Compose baseline does. Full certification record:
+`docs/DEPLOYMENT_HEALTH_DH1.md` through `DH4.md`.
+
+Deployment Health V1 is **strictly read-only**. It does not provide
+restart, stop, kill, deploy, recreate, scale, image-pull, arbitrary
+Docker control, arbitrary Slurm control, or any health-override action —
+`GET` is the only method the endpoint accepts (verified live: every other
+method returns `405`).
+
+Not yet built, deliberately: source/commit/image-digest drift beyond the
+narrow tag comparison above, multi-file Compose overlay resolution, and
+per-service Prometheus correlation.
 
 ---
 
@@ -777,6 +974,11 @@ pytest tests/ -v
 | `test_routes_model_registry_proxy.py` | `/model-registry/*` proxy routes |
 | `test_routes_workflow_bundles_proxy.py` | `/workflow-bundles/*` proxy routes |
 | `test_routes_rag_proxy.py` | `/rag/*` proxy routes |
+| `test_routes_regression_health.py` | `regression_health.py` artifact reading/validation + `GET /regression-health` (freshness, safe unavailable, authorization) |
+| `test_deployment_health.py` | `deployment_health.py` — DH-1 static Compose service/dependency parsing |
+| `test_deployment_health_runtime.py` | `deployment_health_runtime.py` — DH-2 Docker/probe merge, intrinsic/effective health, dependency propagation |
+| `test_routes_deployment_health.py` | `GET /deployment-health` — authorization, safe failure semantics, data-source degradation |
+| `test_nginx_config.py` | Static assertions on `docker/nginx/api-proxy.conf` — the resolved-upstream `$control_center_upstream` pattern, and the Regression/Deployment Health SPA-vs-API route separation |
 
 Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem fixtures, no real external services). The `checks/*.py` and `routes_docker.py`/`routes_llm.py` suites additionally mock `subprocess` (docker/nvidia-smi CLI calls) and network clients (`httpx`, `redis`, `pymysql`, `neo4j`, `celery`) at the call site — no real database, broker, GPU, or Docker daemon is required at test time.
 
@@ -794,6 +996,8 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 - **Structured logging** — all key events (startup, report triggered/finished/failed, scheduler) emitted as JSON to stdout
 - **Defense-in-depth on writes** — every admin-gated endpoint checks the JWT's role independently inside the app (`require_admin`), rather than trusting nginx's `auth_request` alone
 - **Honest scope over convenience** — `/coverage/generate` only runs on control-center itself rather than faking full-ecosystem coverage from inside a container that can't actually run the other repos' test suites (see `/coverage/generate` in API Endpoints)
+- **No raw Docker socket** — every Docker-touching endpoint, including Deployment Health, goes through the Docker Socket Proxy's own restricted allowlist; this service never bind-mounts `/var/run/docker.sock` directly
+- **Read-only where read-only is claimed** — Regression Health and Deployment Health each expose only `GET`; neither has a write path in this service (Regression Health's artifact is produced entirely outside it), and Deployment Health V1 has no restart/stop/deploy/scale/config-edit/health-override action of any kind
 
 ---
 
@@ -805,7 +1009,7 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 
 ---
 
-## Current Status — repository snapshot (2026-08-23)
+## Current Status — repository snapshot (2026-08-30)
 
 | Feature | Status |
 |---------|--------|
@@ -818,7 +1022,7 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 | Ecosystem report — Languages | ✓ Stable |
 | Ecosystem report — Coverage | ✓ Stable |
 | Ecosystem report — Health tab | ✓ Stable |
-| Unit tests | ✓ 1,394 tests collected at last review; configured coverage gate is 98%, but the current checkout requires coverage work before that gate is met |
+| Unit tests | ✓ 1,554 tests collected at last review; configured coverage gate is 98%, but the current checkout requires coverage work before that gate is met |
 | Docker deployment | ✓ Root Dockerfile is current; Compose file is an ecosystem template with an external build context |
 | Prometheus metrics (/metrics) | ✓ Stable |
 | Scheduled report generation | ✓ Stable |
@@ -850,14 +1054,20 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 | Audit Trail (/audit-trail) | ✓ Stable |
 | CVE Trend | ✓ Stable |
 | Admin Console — Organizations, Users, Teams, Roles & Permissions | ✓ Stable |
-| Admin Console — Security (MFA Policy, IAM/SSO, Audit Logs, API Keys/Service Accounts) | ✓ Stable |
-| Admin Console — Billing, Workflows, Tool Execution, AI Models, RAG/PubMed, Settings | ✓ Stable |
-| Admin Console — Sessions, Integrations | Placeholder (`functional: false`, "Coming Soon") |
+| Admin Console — Security (Security Overview, MFA Policy, IAM/SSO, SAML, Audit Logs, Compliance Report, Sessions, Interactions, API Keys/Service Accounts) | ✓ Stable |
+| Admin Console — HIPAA Compliance | ✓ Stable |
+| Admin Console — Billing, Usage Analytics, Workflows, Tool Execution, AI Models, Agentic AI, RAG/PubMed, Integrations, Settings | ✓ Stable |
+| Regression Health V1 | ✓ **Implemented / Certified** — see [Regression Health](#regression-health) |
+| Deployment Health V1 | ✓ **Implemented / Certified** — see [Deployment Health](#deployment-health). Certification-time live baseline: 41 services, 87 dependency edges — a snapshot of that run, not a fixed count |
 | Admin Console dual-build (`dist-admin`/`dist-control`, nginx host-based split) | ✓ Implemented and locally verifiable; external deployment is separate |
 | Admin Console external domain cutover (`admin.omnibioai.org` via Cloudflare Tunnel) | Pending — requires DNS, tunnel-host access, and Cloudflare Access policy |
 | Historical tracking | Planned |
 | Alert hooks (Slack, email) | Planned |
 | `/auth/login` audit trail | Planned — needs deliberate design, see Planned Enhancements |
+| Deployment Health — source/commit/image drift beyond image-tag comparison | Future |
+| Deployment Health — multi-file Compose overlay resolution | Future |
+| Deployment Health — Prometheus per-service correlation | Future — no scrape config exists anywhere in this workspace yet |
+| Deployment Health — historical health/trend views | Future |
 
 ---
 

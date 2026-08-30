@@ -61,6 +61,21 @@ def get_containers_status() -> dict:
             ["docker", "ps", "--format", "{{json .}}"],
             capture_output=True, text=True, timeout=30,
         )
+        # DH-4 finding: `subprocess.run` doesn't raise on a nonzero exit
+        # code (no `check=True`), so a docker CLI that can't reach its
+        # daemon (e.g. DOCKER_HOST pointing at a dead socket) used to fall
+        # straight through to the success path below with empty stdout --
+        # silently reported as "0 containers running" rather than an
+        # error, indistinguishable from a genuinely idle Docker with zero
+        # containers. Caught live: DEPLOYMENT_HEALTH's data_sources.docker
+        # read "available" under exactly this condition. A real failure
+        # here always has a nonzero return code (confirmed against a live
+        # broken DOCKER_HOST); a legitimate zero-container environment
+        # always exits 0 -- this check doesn't touch that existing,
+        # already-tested case.
+        if result.returncode != 0:
+            message = result.stderr.strip() or f"docker exited {result.returncode}"
+            return {"error": message, "containers": [], "running": 0, "stopped": 0}
         containers: list[dict] = []
         for line in result.stdout.strip().splitlines():
             line = line.strip()

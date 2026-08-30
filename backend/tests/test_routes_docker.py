@@ -82,6 +82,27 @@ class TestGetContainers:
         assert resp.status_code == 500
         assert "fail" in resp.json()["error"]
 
+    def test_nonzero_returncode_is_an_error_not_zero_containers(self):
+        # DH-4 finding, live-reproduced: a docker CLI that can't reach its
+        # daemon exits nonzero with empty/error output, not an exception --
+        # subprocess.run doesn't raise for that. Confirm it's now reported
+        # as an error (500, distinct from the docker-not-found 503),
+        # not silently folded into "0 containers running".
+        result = MagicMock(stdout="", stderr="Cannot connect to the Docker daemon", returncode=1)
+        with patch("control_center.api.routes_docker.subprocess.run", return_value=result):
+            resp = client.get("/docker/containers")
+        assert resp.status_code == 500
+        assert "Cannot connect to the Docker daemon" in resp.json()["error"]
+
+    def test_returncode_zero_empty_stdout_still_zero_containers(self):
+        # The legitimate case this fix must not disturb: a real, reachable
+        # Docker with genuinely zero containers still exits 0.
+        result = MagicMock(stdout="", stderr="", returncode=0)
+        with patch("control_center.api.routes_docker.subprocess.run", return_value=result):
+            resp = client.get("/docker/containers")
+        assert resp.status_code == 200
+        assert resp.json()["containers"] == []
+
     def test_invalid_json_lines_skipped(self):
         bad_output = '{"Names": "/ok", "State": "running", "Status": "Up", "Image": "x", "Ports": "", "RunningFor": "1h"}\nnot-json\n'
         result = MagicMock(stdout=bad_output, returncode=0)
