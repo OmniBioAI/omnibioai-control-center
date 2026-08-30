@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse
-
 from control_center.regression_health import (
     RegressionHealthUnavailable,
     load_regression_health,
 )
+from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 router = APIRouter()
 log = logging.getLogger(__name__)

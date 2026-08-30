@@ -178,8 +178,8 @@ export interface RegressionHealthResponse {
 }
 
 export async function fetchRegressionHealth(): Promise<RegressionHealthResponse> {
-  const r = await apiFetch(`${BASE}/regression-health`)
-  if (!r.ok) throw new Error(`/regression-health ${r.status}`)
+  const r = await apiFetch(`${BASE}/regression-health/data`)
+  if (!r.ok) throw new Error(`/regression-health/data ${r.status}`)
   return r.json()
 }
 
