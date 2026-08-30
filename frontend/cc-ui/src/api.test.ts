@@ -5,7 +5,7 @@ vi.mock('./auth', () => ({
   reportUnauthorized: vi.fn(),
 }))
 
-import { fetchRegressionHealth } from './api'
+import { fetchRegressionHealth, fetchSecurityPosture } from './api'
 
 describe('fetchRegressionHealth', () => {
   beforeEach(() => vi.unstubAllGlobals())
@@ -25,5 +25,16 @@ describe('fetchRegressionHealth', () => {
         headers: { Authorization: 'Bearer <test-token>' },
       }),
     )
+  })
+})
+
+describe('fetchSecurityPosture', () => {
+  it('uses the browser data path separate from the SPA route', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) })
+    vi.stubGlobal('fetch', fetchMock)
+    await fetchSecurityPosture()
+    expect(fetchMock).toHaveBeenCalledWith('/security-posture/data', expect.objectContaining({
+      headers: { Authorization: 'Bearer <test-token>' },
+    }))
   })
 })

@@ -43,6 +43,7 @@ import AnalyticsDashboard from '../pages/AnalyticsDashboard'
 import ComplianceReport from '../pages/ComplianceReport'
 import HipaaCompliancePage from '../pages/compliance/HipaaCompliancePage'
 import SecurityDashboardPage from '../pages/security/SecurityDashboardPage'
+import SecurityPosturePage from '../pages/security/SecurityPosturePage'
 import OrganizationMFAPolicyPage from '../pages/security/OrganizationMFAPolicyPage'
 import SAMLSettingsPage from '../pages/identity/SAMLSettingsPage'
 import AuthGate from './AuthGate'
@@ -158,6 +159,7 @@ function AdminDashboard() {
   // GET /platform/orgs, GET /platform/audit-events (everything the
   // Security Dashboard reads) are all manage_all_orgs-gated.
   const canSeeSecurityOverview = hasPlatformAdminAccess()
+  const canSeeSecurityPosture = hasPlatformAdminAccess()
   // HIPAA Basic Compliance Report v0.8.0: same reasoning as
   // canSeeAuditLogs -- GET /compliance/hipaa-report is manage_all_orgs-
   // gated, not org-scoped (org_admin access deferred to v0.9.0).
@@ -171,6 +173,7 @@ function AdminDashboard() {
   const [active, setActive] = useState<PageKey>(() => {
     if (window.location.pathname === '/regression-health') return 'regression-health'
     if (window.location.pathname === '/deployment-health') return 'deployment-health'
+    if (window.location.pathname === '/security-posture') return 'security-posture'
     if (window.location.pathname.startsWith('/organizations')) return 'organizations'
     if (window.location.pathname.startsWith('/users')) return 'users'
     // /iam/service-accounts must be checked before the bare /iam prefix
@@ -259,6 +262,7 @@ function AdminDashboard() {
       : active === 'billing' ? (selectedBillingOrgId != null ? `/billing/${selectedBillingOrgId}` : '/billing')
       : active === 'regression-health' ? '/regression-health'
       : active === 'deployment-health' ? '/deployment-health'
+      : active === 'security-posture' ? '/security-posture'
       : '/'
     if (window.location.pathname !== path) {
       window.history.pushState(null, '', path)
@@ -271,6 +275,8 @@ function AdminDashboard() {
         setActive('regression-health')
       } else if (window.location.pathname === '/deployment-health') {
         setActive('deployment-health')
+      } else if (window.location.pathname === '/security-posture') {
+        setActive('security-posture')
       } else if (window.location.pathname.startsWith('/organizations')) {
         setActive('organizations')
         setSelectedOrgId(orgIdFromPath())
@@ -382,7 +388,7 @@ function AdminDashboard() {
       </div>}
     >
       {renderPage(active, {
-        canSeeOps, canSeeRegressionHealth, canSeeDeploymentHealth, canSeeOrganizations, canSeeUsers, canSeeAuditLogs, canSeeInteractions, canSeeAnalytics, canSeeSecurityOverview,
+        canSeeOps, canSeeRegressionHealth, canSeeDeploymentHealth, canSeeOrganizations, canSeeUsers, canSeeAuditLogs, canSeeInteractions, canSeeAnalytics, canSeeSecurityOverview, canSeeSecurityPosture,
         canSeeComplianceReport, canSeeHipaaCompliance, refreshKey,
         selectedOrgId, setSelectedOrgId, selectedUserId, setSelectedUserId,
         teamsOrgHint, rolesOrgHint, onViewTeams: handleViewTeams, onViewRoles: handleViewRoles,
@@ -407,6 +413,7 @@ interface RenderCtx {
   canSeeInteractions: boolean
   canSeeAnalytics: boolean
   canSeeSecurityOverview: boolean
+  canSeeSecurityPosture: boolean
   canSeeComplianceReport: boolean
   canSeeHipaaCompliance: boolean
   refreshKey: number
@@ -595,6 +602,10 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
     case 'security-overview':
       if (!ctx.canSeeSecurityOverview) return null
       return <SecurityDashboardPage />
+
+    case 'security-posture':
+      if (!ctx.canSeeSecurityPosture) return null
+      return <SecurityPosturePage />
 
     // PR11.5.6: MFA policy is per-org, so this destination is a "pick
     // an org, then manage its MFA policy" flow, same list -> detail

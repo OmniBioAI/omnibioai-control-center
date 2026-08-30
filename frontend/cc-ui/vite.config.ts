@@ -82,6 +82,12 @@ export default defineConfig({
       // "missing here means npm run dev 404s" gap class every entry
       // above already warns about.
       '/hipaa-compliance': { target: 'http://localhost:7070', changeOrigin: true },
+      // SP-3 -- keep the Security Posture SPA deep link separate from its
+      // browser data path; production nginx applies the same rewrite.
+      '/security-posture/data': {
+        target: 'http://localhost:7070', changeOrigin: true,
+        rewrite: path => path.replace(/^\/security-posture\/data$/, '/security-posture'),
+      },
     },
   },
 })
