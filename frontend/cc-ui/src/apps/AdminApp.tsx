@@ -179,6 +179,7 @@ function AdminDashboard() {
     if (window.location.pathname === '/deployment-health') return 'deployment-health'
     if (window.location.pathname === '/integration-health') return 'integration-health'
     if (window.location.pathname === '/security-posture') return 'security-posture'
+    if (window.location.pathname === '/workflows') return 'workflows'
     if (window.location.pathname.startsWith('/organizations')) return 'organizations'
     if (window.location.pathname.startsWith('/users')) return 'users'
     // /iam/service-accounts must be checked before the bare /iam prefix
@@ -269,6 +270,7 @@ function AdminDashboard() {
       : active === 'deployment-health' ? '/deployment-health'
       : active === 'integration-health' ? '/integration-health'
       : active === 'security-posture' ? '/security-posture'
+      : active === 'workflows' ? '/workflows'
       : '/'
     if (window.location.pathname !== path) {
       window.history.pushState(null, '', path)
@@ -287,6 +289,8 @@ function AdminDashboard() {
         setActive('integration-health')
       } else if (window.location.pathname === '/security-posture') {
         setActive('security-posture')
+      } else if (window.location.pathname === '/workflows') {
+        setActive('workflows')
       } else if (window.location.pathname.startsWith('/organizations')) {
         setActive('organizations')
         setSelectedOrgId(orgIdFromPath())
