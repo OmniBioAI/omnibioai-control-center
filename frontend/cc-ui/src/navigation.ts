@@ -34,7 +34,7 @@ export type PageKey =
   | 'actions' | 'scheduled-jobs' | 'known-issues'
   | 'organizations' | 'users' | 'teams' | 'roles'
   | 'infrastructure' | 'workflows' | 'tool-execution' | 'ai-models' | 'agentic-ai'
-  | 'security-overview' | 'security-posture' | 'mfa-policy' | 'iam' | 'saml' | 'audit-logs' | 'sessions' | 'interactions' | 'api-keys' | 'compliance-report'
+  | 'security-overview' | 'security-posture' | 'mfa-policy' | 'iam' | 'saml' | 'audit-logs' | 'audit-explorer' | 'sessions' | 'interactions' | 'api-keys' | 'compliance-report'
   | 'hipaa-compliance'
   | 'analytics'
   | 'billing'
@@ -252,6 +252,7 @@ export const NAVIGATION: NavSection[] = [
       // only thing that matters for security; this only decides
       // whether the nav entry renders.
       { key: 'audit-logs', label: 'Audit Logs', functional: true, visible: hasPlatformAdminAccess },
+      { key: 'audit-explorer', label: 'Audit Explorer', functional: true, visible: hasOrganizationsAccess },
       // HIPAA Basic Compliance Report v0.8.0. Same hasPlatformAdminAccess
       // gate 'audit-logs' immediately above uses, for the identical
       // reason -- GET /compliance/hipaa-report is manage_all_orgs-gated
