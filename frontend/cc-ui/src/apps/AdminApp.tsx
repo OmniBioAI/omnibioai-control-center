@@ -270,6 +270,7 @@ function AdminDashboard() {
       : active === 'deployment-health' ? '/deployment-health'
       : active === 'integration-health' ? '/integration-health'
       : active === 'security-posture' ? '/security-posture'
+      : active === 'audit-explorer' ? '/audit-explorer'
       : active === 'workflows' ? '/workflows'
       : '/'
     if (window.location.pathname !== path) {
