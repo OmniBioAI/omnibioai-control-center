@@ -125,6 +125,23 @@ class TestNginxApiProxyConfig(unittest.TestCase):
             "the SPA route must not be claimed by an API proxy location",
         )
 
+    def test_integration_health_api_is_separate_from_spa_route(self) -> None:
+        # IH-4: the exact location must close before the next location starts;
+        # otherwise nginx parses Security Posture as a nested location and
+        # refuses to start.
+        self.assertRegex(
+            self.api_proxy_conf,
+            r"location\s+=\s+/integration-health/data\s*\{\s*"
+            r"rewrite\s+\^/integration-health/data\$\s+/integration-health\s+break;\s*"
+            r"proxy_pass\s+http://\$control_center_upstream;\s*"
+            r"proxy_set_header\s+Host\s+\$host;\s*\}",
+        )
+        self.assertNotRegex(
+            self.api_proxy_conf,
+            r"location\s+(?:=\s+)?/integration-health\s*\{",
+            "the SPA route must not be claimed by an API proxy location",
+        )
+
     def test_security_posture_api_is_separate_from_spa_route(self) -> None:
         self.assertRegex(
             self.api_proxy_conf,
