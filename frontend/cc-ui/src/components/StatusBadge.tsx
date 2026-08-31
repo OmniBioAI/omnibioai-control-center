@@ -58,8 +58,6 @@ const KNOWN: Record<string, { bg: string; color: string }> = {
   unavailable: { bg: 'var(--red-bg)', color: 'var(--red)' },
   disabled: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
   stale: { bg: 'var(--amber-bg)', color: 'var(--amber)' },
-  available: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
-  unavailable: { bg: 'var(--red-bg)', color: 'var(--red)' },
   current: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
   fixed: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
   live_validated: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
