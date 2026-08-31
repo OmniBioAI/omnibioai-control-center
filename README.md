@@ -1,6 +1,6 @@
 # OmniBioAI Control Center
 
-> README last reviewed: **2026-08-30**
+> README last reviewed: **2026-08-31**
 
 **Operational health dashboard, ecosystem report server, and observability hub for the OmniBioAI stack.**
 
@@ -11,7 +11,7 @@ The Control Center is a FastAPI service that aggregates health status across all
 ## What It Does
 
 - **Health monitoring** — TCP, HTTP, and disk checks across all ecosystem services
-- **Enterprise Admin Console** — a separate frontend build served at `admin.omnibioai.org`: Organizations, Users, Teams, Roles & Permissions, Security (Security Overview, MFA Policy, IAM/SSO Management, SAML, Audit Logs, Compliance Report, Sessions, Interactions, API Keys/Service Accounts), HIPAA Compliance, Billing, Usage Analytics, Workflows, Tool Execution, AI Models, Agentic AI, RAG/PubMed, Integrations, Settings, plus an Operations → Infrastructure group (Health, Regression Health, Deployment Health, Docker, Ecosystem Report, Config, LLMs, Cloud, Actions, Scheduled Jobs, Known Issues) — see [Admin Console](#admin-console) below
+- **Enterprise Admin Console** — the operational and administrative interface, served as a separate frontend build at `admin.omnibioai.org`: Organizations, Users, Teams, Roles & Permissions, Security (Security Overview, Security Posture, MFA Policy, IAM/SSO Management, SAML, Audit Logs, Audit Explorer, Compliance Report, Sessions, Interactions, API Keys/Service Accounts), HIPAA Compliance, Billing, Usage Analytics, Workflows, Tool Execution, AI Models, Agentic AI, RAG/PubMed, Integrations, Settings, plus an Operations → Infrastructure group (Health, Regression Health, Deployment Health, Integration Health, Docker, Ecosystem Report, Config, LLMs, Cloud, Actions, Scheduled Jobs, Known Issues) — see [Admin Console](#admin-console) below
 - **Regression Health** — reads a reviewed, promoted end-to-end certification artifact (never inferred from a pytest run) and exposes it read-only — see [Regression Health](#regression-health)
 - **Deployment Health (V1, certified)** — read-only, dependency-aware deployment and runtime health for the ecosystem, combining Compose metadata, Docker state, and application probes — see [Deployment Health](#deployment-health)
 - **Ecosystem report** — interactive HTML report (architecture · projects · languages · coverage · health) served at `/`; `/dashboard` redirects here (its live per-service cards and generate button were folded into the report's header status chip and Admin tab)
@@ -663,7 +663,7 @@ don't appear in it at all), so this is a genuinely smaller bundle, not
 hidden-but-shipped UI. Both apps share `AuthGate.tsx` (session/login state
 machine) and `Header.tsx`.
 
-### Navigation (36 functional nav entries, 35 distinct pages)
+### Navigation and feature catalog
 
 Single source of truth: `frontend/cc-ui/src/navigation.ts`. Every entry
 below is `functional: true` — this app's `<ComingSoon/>` placeholder
@@ -674,9 +674,9 @@ it, never hidden), but no current entry uses it.
 |---|---|---|
 | — | Overview | Stat cards via `/dashboard/summary` |
 | Administration | Organizations, Users, Teams, Roles & Permissions | |
-| Operations → Infrastructure | Health, Regression Health, Deployment Health, Docker, Ecosystem Report, Config, LLMs, Cloud, Actions, Scheduled Jobs, Known Issues | One expandable parent; Regression Health and Deployment Health both require `platform.manage_infra`, the rest require only general admin access |
+| Operations → Infrastructure | Health, Regression Health, Deployment Health, Integration Health, Docker, Ecosystem Report, Config, LLMs, Cloud, Actions, Scheduled Jobs, Known Issues | One expandable parent; Regression Health, Deployment Health, and Integration Health require `platform.manage_infra`; the remaining pages require general admin access |
 | Operations | Workflows, Tool Execution, AI Models, Agentic AI | Proxy `omnibioai-workflow-bundles`, `omnibioai-tes`, `omnibioai-model-registry`, and `omnibioai-workbench`'s agent-orchestrator service directly — authorization is entirely each upstream service's own, per-request |
-| Security | Security Overview, MFA Policy, IAM/SSO Management, SAML Settings, Audit Logs, Compliance Report, Sessions, Interactions, API Keys/Service Accounts | Compliance Report here is the org-scoped HIPAA *usage/access-log* export (v0.8.0) — distinct from the platform-engineering HIPAA Compliance section below |
+| Security | Security Overview, Security Posture, MFA Policy, IAM/SSO Management, SAML Settings, Audit Logs, Audit Explorer, Compliance Report, Sessions, Interactions, API Keys/Service Accounts | Audit Logs is Auth's identity-audit ledger; Audit Explorer is the read-only Security Audit event query surface. Compliance Report is the org-scoped HIPAA usage/access-log export, distinct from the platform-engineering HIPAA Compliance section below |
 | Compliance | HIPAA Compliance | The platform's own HIPAA remediation history (which PRs closed which control gaps) — not org data |
 | Business | Billing, Usage Analytics | Billing proxies `omnibioai-billing`'s read APIs; Usage Analytics is scoped server-side to the caller (`platform_admin`/`org_admin`/`team_admin`) |
 | Knowledge | RAG, PubMed | Both point at one page — RAG's only indexed corpus today is PubMed abstracts |
@@ -686,11 +686,131 @@ Every page above is wired to a real backend; see
 [docs/admin-console/README.md](docs/admin-console/README.md) for the full
 navigation/feature catalog with per-page authorization reasoning.
 
+### Supported routes and health surfaces
+
+The Admin Console uses the browser History API for its supported direct routes.
+`/workflows` is the Workflows page route and supports an authenticated direct
+deep link, hard refresh, sidebar navigation, and browser Back/Forward history.
+The separate `/workflow-operations` path is not a supported committed Admin
+Console route; Workflow Operations functionality is represented by the
+Workflows page and the workflow-bundles proxy.
+
+The implemented health/status surfaces are:
+
+- **Health** — generic infrastructure and service reachability.
+- **Deployment Health** — Compose, Docker runtime, dependency, and application
+  probe evidence.
+- **Regression Health** — the reviewed external certification artifact.
+- **Integration Health** — configured integration inventory and provider
+  readiness; inventory is derived from the configured Workbench plugin
+  registry, not a hard-coded count.
+- **Security Posture** — evidence-backed security implementation, test, live,
+  certification, and freshness status.
+
+### Audit Logs and Audit Explorer
+
+**Audit Logs** is the Auth-backed identity/audit ledger exposed through
+`/platform/audit-events`. **Audit Explorer** is a different, read-only surface:
+it queries Security Audit's durable `audit_events` SQL store through the safe
+event contract. The browser never calls Security Audit directly:
+
+```text
+Browser → Control Center → Security Audit GET /audit/events/safe
+                                      ↓
+                              durable audit_events SQL store
+```
+
+Control Center forwards authenticated safe queries, while Security Audit
+remains authoritative for tenant scope, authorization, filtering, and the safe
+projection. Organization callers cannot widen tenant scope. Where required by
+that upstream contract, `GLOBAL` and `UNKNOWN` events are excluded. Metadata
+is allowlisted, the interface is read-only, and freshness/retention remain
+`UNKNOWN` when authoritative evidence is absent. See the [Audit Explorer
+design and evidence](docs/admin-console/audit-explorer.md).
+
+### Admin Console architecture
+
+```mermaid
+flowchart TD
+    Browser[User Browser] --> Admin[Admin Console]
+    Admin --> Control[Control Center API]
+    Control --> Auth[Auth]
+    Control --> Audit[Security Audit]
+    Control --> Bundles[Workflow Bundles]
+    Control --> TES[TES]
+    Control --> RAG[RAG]
+    Control --> Models[Model Registry]
+    Control --> Other[Other supported services]
+
+    Producers[Gateway · TES · RAG · Workflow Bundles · LIMS] --> Signed[Signed ingestion]
+    Signed --> Audit
+    Audit --> SQL[(SQL audit_events)]
+    SQL --> Safe[GET /audit/events/safe]
+    Safe --> Control
+    Control --> Explorer[Audit Explorer]
+```
+
+### Security Audit SAT status
+
+The Security Audit implementation is reconciled against the dedicated audit
+documentation; these statuses describe implementation and evidence without
+inventing freshness, retention, or ingestion-lag claims:
+
+| SAT | Current state |
+|---|---|
+| SAT-1 | Tenant contract (`organization_id`, `tenant_scope`), signing/integrity, and durable SQL persistence are implemented; legacy behavior remains `UNKNOWN` where evidence is absent. |
+| SAT-2 | Producer propagation is merged for confirmed producers: Gateway, TES, RAG, Workflow Bundles, and LIMS. Gateway/RAG/LIMS have live evidence; TES/Workflow Bundles remain fixture-limited. Model Registry is not a confirmed producer; Security SDK adoption remains future work. |
+| SAT-3 | Safe tenant-aware audit query authorization is implemented server-side. |
+| SAT-4 | Evidence and source semantics are explicit; freshness, retention, and ingestion lag are not inferred. |
+
+### Production status matrix
+
+Implementation status and live evidence are separate dimensions. The Admin
+Console as a whole is not yet production-certified.
+
+| Surface | Implementation | Live/evidence status |
+|---|---|---|
+| Admin authentication | IMPLEMENTED | LIVE-CERTIFIED |
+| Deployment Health | IMPLEMENTED | LIVE-CERTIFIED |
+| Regression Health | IMPLEMENTED | LIVE-CERTIFIED |
+| Integration Health | IMPLEMENTED | LIVE-CERTIFIED |
+| Security Posture | IMPLEMENTED | LIVE-CERTIFIED |
+| Audit Explorer | MERGED | PARTIALLY LIVE-CERTIFIED — platform-admin flow certified; populated organization browser evidence remains limited |
+| Workflows | MERGED | LIVE-CERTIFIED — direct route, hard refresh, sidebar, and history navigation |
+| Tool Execution | IMPLEMENTED | EVIDENCE LIMITED |
+| AI Models | IMPLEMENTED | EVIDENCE LIMITED |
+| Agentic AI | IMPLEMENTED | EVIDENCE LIMITED |
+| Organization administration | IMPLEMENTED | EVIDENCE LIMITED — whole-console certification remains incomplete |
+
+### Architecture and certification limitations
+
+- Full-application `TestClient` coverage retains pre-existing lifecycle and
+  scheduler teardown debt; isolated async proxy tests pass.
+- Remaining unrelated Playwright assertion/regression debt is outside this
+  README reconciliation and does not invalidate the `/workflows` routing
+  certification.
+- TES and Workflow Bundles producer propagation has fixture-limited live
+  evidence. Workflow Bundles run history also remains an upstream limitation:
+  its current API is in-memory and does not enforce organization-level
+  filtering.
+- Audit Explorer has no populated organization browser case in the available
+  evidence, and its browser source-failure state lacks a safe temporary live
+  fixture; both are documented as evidence limitations rather than failures.
+- Whole-console production certification, beyond the explicitly tested
+  surfaces above, remains outstanding.
+
+For the implementation details and per-surface authorization boundaries, use
+the maintained [Admin Console guide](docs/admin-console/README.md), [Audit
+Explorer record](docs/admin-console/audit-explorer.md), and [Workflows
+record](docs/pr-a3-workflows-admin-page.md).
+
 ### Enterprise proxy routes
 
-Every Admin Console page is backed by a thin `routes_*_proxy.py` layer —
-Control Center holds no organization/user/role/billing data of its own,
-it forwards to the service that owns it:
+The Admin Console's enterprise service-backed pages use thin
+`routes_*_proxy.py` layers — Control Center holds no organization/user/role/
+billing data of its own; it forwards those requests to the service that owns
+them. The local health and report surfaces are implemented by Control Center
+itself:
 
 | Router | Example paths | Proxies to (env var) |
 |---|---|---|
@@ -724,16 +844,11 @@ a dedicated `control-center-web` container), host-based on the `Host`
 header, verified on `localhost:5174`. `control-center`'s FastAPI process
 itself is unchanged — it never serves static files itself.
 
-**PR14.7C (prepared, not yet applied):** the Cloudflare Tunnel cutover
-that makes both domains reachable externally —
-`control.omnibioai.org`'s ingress moving from `:7070` direct-to-backend to
-`:5174`, plus a new `admin.omnibioai.org` → `:5174` rule. Blocked on two
-things outside a coding agent's reach: root access on the tunnel host to
-edit `/etc/cloudflared/config.yml`, and a DNS record for
-`admin.omnibioai.org` (none exists yet — Cloudflare Tunnel ingress rules
-alone don't create DNS). Cloudflare Access policy coverage for the new
-hostname is separately not yet done either. See `docs/admin-console-build.md`
-for the exact target-state diagram and rollout prerequisites.
+**Current deployment status:** the Admin Console hostname is reachable for
+the authenticated live-certified flows recorded in the release evidence,
+including `/workflows` and Audit Explorer. This confirms the deployed serving
+path, not production certification of every Admin Console surface. See
+`docs/admin-console-build.md` for the build split and deployment architecture.
 
 ---
 
@@ -1009,7 +1124,7 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 
 ---
 
-## Current Status — repository snapshot (2026-08-30)
+## Current Status — repository snapshot (2026-08-31)
 
 | Feature | Status |
 |---------|--------|
@@ -1022,7 +1137,7 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 | Ecosystem report — Languages | ✓ Stable |
 | Ecosystem report — Coverage | ✓ Stable |
 | Ecosystem report — Health tab | ✓ Stable |
-| Unit tests | ✓ 1,554 tests collected at last review; configured coverage gate is 98%, but the current checkout requires coverage work before that gate is met |
+| Unit tests | ✓ Frontend and scoped backend suites pass; full-app `TestClient` lifecycle/scheduler teardown debt remains |
 | Docker deployment | ✓ Root Dockerfile is current; Compose file is an ecosystem template with an external build context |
 | Prometheus metrics (/metrics) | ✓ Stable |
 | Scheduled report generation | ✓ Stable |
@@ -1054,13 +1169,13 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 | Audit Trail (/audit-trail) | ✓ Stable |
 | CVE Trend | ✓ Stable |
 | Admin Console — Organizations, Users, Teams, Roles & Permissions | ✓ Stable |
-| Admin Console — Security (Security Overview, MFA Policy, IAM/SSO, SAML, Audit Logs, Compliance Report, Sessions, Interactions, API Keys/Service Accounts) | ✓ Stable |
+| Admin Console — Security (Security Overview, Security Posture, MFA Policy, IAM/SSO, SAML, Audit Logs, Audit Explorer, Compliance Report, Sessions, Interactions, API Keys/Service Accounts) | ✓ Implemented; selected surfaces live-certified |
 | Admin Console — HIPAA Compliance | ✓ Stable |
-| Admin Console — Billing, Usage Analytics, Workflows, Tool Execution, AI Models, Agentic AI, RAG/PubMed, Integrations, Settings | ✓ Stable |
+| Admin Console — Billing, Usage Analytics, Workflows, Tool Execution, AI Models, Agentic AI, RAG/PubMed, Integrations, Settings | ✓ Implemented; evidence varies by surface |
 | Regression Health V1 | ✓ **Implemented / Certified** — see [Regression Health](#regression-health) |
 | Deployment Health V1 | ✓ **Implemented / Certified** — see [Deployment Health](#deployment-health). Certification-time live baseline: 41 services, 87 dependency edges — a snapshot of that run, not a fixed count |
-| Admin Console dual-build (`dist-admin`/`dist-control`, nginx host-based split) | ✓ Implemented and locally verifiable; external deployment is separate |
-| Admin Console external domain cutover (`admin.omnibioai.org` via Cloudflare Tunnel) | Pending — requires DNS, tunnel-host access, and Cloudflare Access policy |
+| Admin Console dual-build (`dist-admin`/`dist-control`, nginx host-based split) | ✓ Implemented |
+| Admin Console tested production flows (`admin.omnibioai.org`) | LIVE-CERTIFIED — selected authenticated routes; whole-console certification remains incomplete |
 | Historical tracking | Planned |
 | Alert hooks (Slack, email) | Planned |
 | `/auth/login` audit trail | Planned — needs deliberate design, see Planned Enhancements |
