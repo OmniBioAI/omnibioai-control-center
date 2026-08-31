@@ -31,6 +31,7 @@ export default defineConfig({
       // reasoning as every entry above.
       '/orgs': { target: 'http://localhost:7070', changeOrigin: true },
       '/platform': { target: 'http://localhost:7070', changeOrigin: true },
+      '/audit': { target: 'http://localhost:7070', changeOrigin: true },
       // PR13 -- org-scoped custom role catalog CRUD (RolesPage.tsx),
       // proxied through control-center's own backend (routes_role_proxy.py)
       // to omnibioai-auth's newer /organizations/{id}/... surface. Missing

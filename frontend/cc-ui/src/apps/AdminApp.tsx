@@ -38,6 +38,7 @@ import SSOSettingsPage from '../pages/identity/SSOSettingsPage'
 import ServiceAccountsPage from '../pages/identity/ServiceAccountsPage'
 import BillingPage from '../pages/billing/BillingPage'
 import AuditLogsPage from '../pages/audit/AuditLogsPage'
+import AuditExplorerPage from '../pages/security/AuditExplorerPage'
 import SessionsPage from '../pages/security/SessionsPage'
 import InteractionsPage from '../pages/InteractionsPage'
 import AnalyticsDashboard from '../pages/AnalyticsDashboard'
@@ -147,6 +148,7 @@ function AdminDashboard() {
   // manage_all_orgs-gated, not org-scoped, so this is a flat platform-
   // wide page (no org-picker/deep-link, unlike 'iam'/'api-keys').
   const canSeeAuditLogs = hasPlatformAdminAccess()
+  const canSeeAuditExplorer = hasOrganizationsAccess()
   // PR-B5-B: same reasoning as canSeeAuditLogs -- GET /platform/
   // interactions is manage_all_orgs-gated, not org-scoped.
   const canSeeInteractions = hasPlatformAdminAccess()
@@ -172,6 +174,7 @@ function AdminDashboard() {
   const canSeeHipaaCompliance = hasPlatformAdminAccess()
 
   const [active, setActive] = useState<PageKey>(() => {
+    if (window.location.pathname === '/audit-explorer') return 'audit-explorer'
     if (window.location.pathname === '/regression-health') return 'regression-health'
     if (window.location.pathname === '/deployment-health') return 'deployment-health'
     if (window.location.pathname === '/integration-health') return 'integration-health'
@@ -274,7 +277,9 @@ function AdminDashboard() {
 
   useEffect(() => {
     const onPopState = () => {
-      if (window.location.pathname === '/regression-health') {
+      if (window.location.pathname === '/audit-explorer') {
+        setActive('audit-explorer')
+      } else if (window.location.pathname === '/regression-health') {
         setActive('regression-health')
       } else if (window.location.pathname === '/deployment-health') {
         setActive('deployment-health')
@@ -393,7 +398,7 @@ function AdminDashboard() {
       </div>}
     >
       {renderPage(active, {
-        canSeeOps, canSeeRegressionHealth, canSeeDeploymentHealth, canSeeOrganizations, canSeeUsers, canSeeAuditLogs, canSeeInteractions, canSeeAnalytics, canSeeSecurityOverview, canSeeSecurityPosture,
+        canSeeOps, canSeeRegressionHealth, canSeeDeploymentHealth, canSeeOrganizations, canSeeUsers, canSeeAuditLogs, canSeeAuditExplorer, canSeeInteractions, canSeeAnalytics, canSeeSecurityOverview, canSeeSecurityPosture,
         canSeeComplianceReport, canSeeHipaaCompliance, refreshKey,
         selectedOrgId, setSelectedOrgId, selectedUserId, setSelectedUserId,
         teamsOrgHint, rolesOrgHint, onViewTeams: handleViewTeams, onViewRoles: handleViewRoles,
@@ -415,6 +420,7 @@ interface RenderCtx {
   canSeeOrganizations: boolean
   canSeeUsers: boolean
   canSeeAuditLogs: boolean
+  canSeeAuditExplorer: boolean
   canSeeInteractions: boolean
   canSeeAnalytics: boolean
   canSeeSecurityOverview: boolean
@@ -544,6 +550,10 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
     case 'audit-logs':
       if (!ctx.canSeeAuditLogs) return null
       return <AuditLogsPage />
+
+    case 'audit-explorer':
+      if (!ctx.canSeeAuditExplorer) return null
+      return <AuditExplorerPage />
 
     // HIPAA Basic Compliance Report v0.8.0: flat platform-wide page, no
     // org-picker/deep-link -- same shape as 'audit-logs' immediately
