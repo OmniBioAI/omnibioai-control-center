@@ -45,6 +45,7 @@ vi.mock('../pages/RegressionHealthPage', () => ({ default: () => <div data-testi
 vi.mock('../pages/DeploymentHealthPage', () => ({ default: () => <div data-testid="DeploymentHealthPage" /> }))
 vi.mock('../pages/IntegrationHealthPage', () => ({ default: () => <div data-testid="IntegrationHealthPage" /> }))
 vi.mock('../pages/operations/WorkflowsPage', () => ({ default: () => <div data-testid="WorkflowsPage" /> }))
+vi.mock('../pages/security/AuditExplorerPage', () => ({ default: () => <div data-testid="AuditExplorerPage" /> }))
 vi.mock('../pages/DockerPage', () => ({ default: () => <div data-testid="DockerPage" /> }))
 vi.mock('../pages/EcosystemPage', () => ({ default: () => <div data-testid="EcosystemPage" /> }))
 vi.mock('../pages/ConfigPage', () => ({ default: () => <div data-testid="ConfigPage" /> }))
@@ -250,6 +251,56 @@ describe('AdminApp auth gate', () => {
     render(<AdminApp />)
     expect(await screen.findByTestId('DeploymentHealthPage')).toBeInTheDocument()
     expect(window.location.pathname).toBe('/deployment-health')
+  })
+
+  it('deep-links directly to Audit Explorer and preserves the path through initialization', async () => {
+    window.history.pushState(null, '', '/audit-explorer')
+    vi.mocked(auth.getToken).mockReturnValue('token-audit-initial')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+
+    expect(await screen.findByTestId('AuditExplorerPage')).toBeInTheDocument()
+    await waitFor(() => expect(window.location.pathname).toBe('/audit-explorer'))
+    expect(screen.queryByTestId('DashboardPage')).not.toBeInTheDocument()
+  })
+
+  it('selects Audit Explorer from the sidebar and pushes /audit-explorer', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-audit-sidebar')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    clickNav('Audit Explorer')
+
+    expect(await screen.findByTestId('AuditExplorerPage')).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/audit-explorer')
+  })
+
+  it('restores Audit Explorer when the browser emits an /audit-explorer popstate', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-audit-popstate')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    act(() => {
+      window.history.pushState(null, '', '/audit-explorer')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+
+    expect(await screen.findByTestId('AuditExplorerPage')).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/audit-explorer')
   })
 
   it('deep-links directly to Workflows on initial load and preserves the path', async () => {
