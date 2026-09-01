@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import type { IntegrationHealthRecord, IntegrationHealthResponse } from '../api'
 import { fetchIntegrationHealth } from '../api'
 import StatusBadge from '../components/StatusBadge'
-import { Card, EmptyState, ErrorState, LoadingState, PageContainer, SectionHeader } from '../components/ui'
+import { Card, EmptyState, ErrorState, LoadingState, SectionHeader } from '../components/ui'
 
 function isResponse(value: unknown): value is IntegrationHealthResponse {
   if (!value || typeof value !== 'object') return false
@@ -109,8 +109,8 @@ export default function IntegrationHealthPage() {
     })
   }, [category, configuration, data, providerStatus, readiness, search, signal])
 
-  if (loading) return <PageContainer><LoadingState label="Loading integration health…" /></PageContainer>
-  if (error || !data) return <PageContainer><SectionHeader title="Integration Health" description="Read-only biological and data-provider readiness." /><ErrorState message={error ?? 'Integration Health unavailable.'} /></PageContainer>
+  if (loading) return <div><LoadingState label="Loading integration health…" /></div>
+  if (error || !data) return <div><SectionHeader title="Integration Health" description="Read-only biological and data-provider readiness." /><ErrorState message={error ?? 'Integration Health unavailable.'} /></div>
 
   const categories = [...new Set(data.integrations.map(row => row.category))].sort()
   const providerStatuses = [...new Set(data.integrations.map(row => row.provider.status))].sort()
@@ -120,7 +120,7 @@ export default function IntegrationHealthPage() {
   const summary = data.summary
 
   return (
-    <PageContainer>
+    <div>
       <SectionHeader title="Integration Health" description="Read-only availability and readiness of external biological and data providers." />
       <Card style={{ marginBottom: 20 }}>
         <div style={{ color: 'var(--muted)', fontSize: 12 }}>Provider readiness is independent from plugin liveness, deployment health, and regression certification. This page reads cached server-side evidence and never starts probes.</div>
@@ -169,6 +169,6 @@ export default function IntegrationHealthPage() {
         </div>}
       </section>
       {data.warnings.length > 0 && <Card style={{ marginTop: 20, color: 'var(--amber)', fontSize: 12 }}>Warnings: {data.warnings.join('; ')}</Card>}
-    </PageContainer>
+    </div>
   )
 }
