@@ -73,7 +73,22 @@ export default function PublicEcosystemPage({ refreshKey }: { refreshKey: number
   }, [refreshKey, loadData, loadStatus])
 
   return (
-    <div style={{ background: C.bg, borderRadius: 14, padding: 20, margin: '-24px -28px -48px', minHeight: 'calc(100vh - 100px)', color: C.text }}>
+    // No negative margin here (this page used to carry `margin: '-24px
+    // -28px -48px'`, copied over from EcosystemPage.tsx's dark-card
+    // wrapper by the split -- see that file's own comment for the
+    // AdminApp/sidebar half of this history). In ControlApp this div
+    // sits inside a wrapper with `padding: '24px 28px 48px'`
+    // (ControlApp.tsx), and this page is the only one of ControlApp's
+    // tabs that tried to cancel it -- LlmPage/CloudPage both render a
+    // bare `<div>` and take that padding as-is. The negative margin
+    // pulled this tab's content flush to the container's outer edge
+    // and relied on its own `padding: 20` instead, so Ecosystem Report
+    // sat inset 20px from the content area while every sibling tab
+    // sat inset 24-28-48px -- a visible seam when switching tabs, not
+    // sidebar clipping (ControlApp has no sidebar), but the same root
+    // cause: this wrapper's own `padding: 20` is enough on its own,
+    // same as every sibling tab relies on the parent's padding alone.
+    <div style={{ background: C.bg, borderRadius: 14, padding: 20, minHeight: 'calc(100vh - 100px)', color: C.text }}>
       {/* Hero */}
       <div style={{ marginBottom: 20, paddingBottom: 16, borderBottom: `1px solid ${C.border}` }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: C.text, marginBottom: 4 }}>Ecosystem Report</h1>

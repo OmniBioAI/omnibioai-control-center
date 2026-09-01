@@ -533,7 +533,19 @@ export default function EcosystemPage({ refreshKey }: { refreshKey: number }) {
   const needsReport = (subTab === 'projects' || subTab === 'languages' || subTab === 'coverage' || subTab === 'gitStatus') && !reportData
 
   return (
-    <div style={{ background: C.bg, borderRadius: 14, padding: 20, margin: '-24px -28px -48px', minHeight: 'calc(100vh - 100px)', color: C.text }}>
+    // No negative margin here (this page used to carry `margin: '-24px
+    // -28px -48px'`) -- it was presumably meant to cancel some parent
+    // padding, but nothing in the actual AppShell/renderPage chain has
+    // any: every other page's content starts flush at the sidebar's
+    // right edge (x = sidebar width, confirmed by measuring the live
+    // DOM) with zero extra gutter, relying only on its own interior
+    // padding for spacing, same as this div's own `padding: 20` below.
+    // The negative margin shifted this div 28px further left than that
+    // baseline, and its own 20px padding only clawed back 20 of those
+    // 28 -- a net 8px past the sidebar boundary, clipping the leading
+    // edge of "Ecosystem Report"/"Architecture overview..." on every
+    // sub-tab of this page (they all share this one wrapper).
+    <div style={{ background: C.bg, borderRadius: 14, padding: 20, minHeight: 'calc(100vh - 100px)', color: C.text }}>
       {/* Hero */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 20, paddingBottom: 16, borderBottom: `1px solid ${C.border}` }}>
         <div>
