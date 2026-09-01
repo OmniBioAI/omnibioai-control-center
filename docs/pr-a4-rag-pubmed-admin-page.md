@@ -2,6 +2,38 @@
 
 Status: implemented. Backend proxy + frontend page + tests, read-only.
 
+> **Security fix (post-PR-A4 audit):** this doc originally asserted
+> "Admin Console visibility is controlled by control-center admin
+> authorization" without that control actually existing —
+> `routes_rag_proxy.py` had no `Depends(require_permission(...))` on any
+> route and no router-inclusion-level dependency in `main.py` either
+> (unlike `services_router`/`docker_router`/`config_router`, all gated
+> there behind `platform.manage_infra`). Because `/v1/studies` and
+> `/v1/cache/stats` authenticate via the `RAGBIO_API_KEY` service
+> credential rather than the caller's own token, there was also no
+> upstream per-caller check to fall back on the way
+> `routes_org_proxy.py`/`routes_workflow_bundles_proxy.py` get "for free"
+> by forwarding the caller's `Authorization` header. Net effect,
+> confirmed live: a request to `/rag/studies` with **no** `Authorization`
+> header at all got a `200` with real data back — `hasAdminAccess()` in
+> `navigation.ts` is a client-side, locally-decoded-JWT check that never
+> reaches the backend, so it was the *only* thing that looked like a
+> gate, and calling the route directly bypassed it entirely.
+>
+> Fixed: `GET /rag/studies` and `GET /rag/cache-stats` now each require
+> `Depends(require_permission("platform.manage_infra"))` directly on the
+> route (not at router-inclusion time, since that would also gate
+> `GET /rag/health`, which stays open — it's a liveness probe with no
+> auth upstream either). `platform.manage_infra` is the same permission
+> every other `hasAdminAccess()`-gated Infra/Operations page already
+> requires server-side, and every account holding the `admin` role
+> `hasAdminAccess()` checks is seeded with it
+> (`omnibioai-auth/app/db/init_admin.py`), so the frontend nav gate and
+> this backend gate now agree on the same audience — the claim below is
+> true as of this fix, where it previously was not.
+
+
+
 ## What this PR does
 
 Exposes `omnibioai-rag`'s existing knowledge-base and query-cache

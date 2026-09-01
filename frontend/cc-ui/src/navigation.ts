@@ -392,11 +392,18 @@ export const NAVIGATION: NavSection[] = [
       // PubMed concept server-side to build a second page against.
       // Same hasAdminAccess() gate 'tool-execution'/'ai-models'/
       // 'workflows'/'infrastructure' above already use -- this only
-      // decides whether the nav entry renders; unlike those three,
-      // this page's underlying data isn't per-admin-authorized at all
-      // (see rag.ts), so this gate is the only real access control this
-      // page has, not a visibility layer in front of a separate backend
-      // check.
+      // decides whether the nav entry renders, same as those three.
+      // SECURITY FIX (post-PR-A4 audit): until this fix, GET /rag/studies
+      // and GET /rag/cache-stats had no backend check at all -- since
+      // this page's data isn't per-admin-authorized upstream the way TES/
+      // Workflows/AI Models are (see rag.ts), this client-side gate was
+      // the *only* thing standing in front of it, and it's trivially
+      // bypassed by calling the route directly with no token. Backend now
+      // requires platform.manage_infra on both routes
+      // (routes_rag_proxy.py) -- the same permission every "admin" role
+      // account is seeded with (omnibioai-auth's app/db/init_admin.py),
+      // so this gate agrees with, rather than substitutes for, the real
+      // one.
       { key: 'rag', label: 'RAG', functional: true, visible: hasAdminAccess },
       { key: 'pubmed', label: 'PubMed', functional: true, visible: hasAdminAccess },
       // PR E2 (re-verified PR D §3.2's finding, unchanged): removed, not
