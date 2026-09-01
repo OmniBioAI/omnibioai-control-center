@@ -1,6 +1,19 @@
 # Agentic AI Navbar — Report
 
-Branch: `feature/agentic-ai-navbar` (off `main`, not merged — open for review).
+> ⚠️ **HISTORICAL** — this report describes the state of `feature/agentic-ai-
+> navbar` at the moment it was opened for review. That branch has since
+> **merged to `main` as PR #60**, and four PRs have landed on top of it since:
+> #56 (test coverage expansion), #51 (report storage-unavailable fix), two
+> "preserve workflows deep-link routing" fixes, #70 (Audit Explorer deep-link
+> fix), and #71 (Admin Console E2E doc closure). The Step 1–4 technical
+> content below (the two disclosed upstream limitations, the cross-plugin
+> `AuthenticationMiddleware` discovery, the file list) is still accurate as
+> of `main` today — only the "Not merged" framing in the line immediately
+> below and the closing section are stale. See the "Post-merge status"
+> section at the end of this document.
+
+Branch: `feature/agentic-ai-navbar` (off `main`, not merged — open for review,
+**at the time this report was written**; see the historical banner above).
 
 ## Step 1 — What was actually there before this PR
 
@@ -233,5 +246,18 @@ than papered over:
   proxy entries for the new `/agent-orchestrator` prefix.
 - `docs/images/agentic-ai-navbar/*.png` — the screenshots above.
 
-Not merged to `main`. Opened as a PR from `feature/agentic-ai-navbar` for
-review.
+Not merged to `main` at the time of writing. Opened as a PR from
+`feature/agentic-ai-navbar` for review.
+
+## Post-merge status
+
+Merged to `main` as **PR #60** (`5f2ec82`). `navigation.ts`'s `agentic-ai`
+entry is `functional: true`, `AgenticAIPage.tsx` is wired into `AdminApp.tsx`,
+and `routes_agent_orchestrator_proxy.py` is registered in `main.py` — all
+confirmed live on `main` as of 2026-08-31. Landed on top since, in order:
+PR #56 (test coverage expansion), PR #51 (report storage-unavailable fix),
+two "preserve workflows deep-link routing" fixes, PR #70 (Audit Explorer
+deep-link fix), PR #71 (Admin Console E2E doc closure). None of these
+touched Agentic AI's own code path; the two disclosed upstream limitations
+(no `include_disabled` query param, no list-all-runs endpoint) remain
+accurate and unresolved upstream.
