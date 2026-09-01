@@ -3,9 +3,40 @@ from __future__ import annotations
 import os
 
 import httpx
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
+from control_center.core.auth import require_permission
+
+# SECURITY FIX (post-PR-A4 audit): /rag/studies and /rag/cache-stats were
+# reachable with NO caller authentication at all -- this router had no
+# router-inclusion-level dependency in main.py (unlike services_router/
+# docker_router/config_router/summary_router, all gated there behind
+# platform.manage_infra) and, because these two routes inject the
+# RAGBIO_API_KEY service credential instead of forwarding the caller's own
+# token (see _proxy below), there was also no upstream per-caller check to
+# fall back on the way routes_org_proxy.py/routes_workflow_bundles_proxy.py
+# get for free by forwarding the caller's Authorization header. Net effect,
+# confirmed live via TestClient with no Authorization header sent at all:
+# any unauthenticated caller who could reach this backend got a 200 with
+# real RAG/PubMed data. hasAdminAccess() in navigation.ts (frontend/cc-ui/
+# src/navigation.ts's 'rag'/'pubmed' nav items) was the only thing that
+# looked like a gate, and it's a client-side, locally-decoded-JWT check
+# that never reaches this backend -- trivially bypassed by calling the
+# route directly.
+#
+# Fixed by requiring platform.manage_infra directly on the two data-bearing
+# routes below (not at router-inclusion time in main.py, since that would
+# also gate /rag/health, which must stay open -- see its own route for
+# why). platform.manage_infra is the same permission every other
+# hasAdminAccess()-gated Infra/Operations-tier page already requires
+# server-side (services_router/docker_router/config_router/summary_router
+# in main.py), and every account holding the "admin" role hasAdminAccess()
+# checks is seeded with platform.manage_infra (omnibioai-auth's
+# app/db/init_admin.py) -- so the frontend nav gate and this backend gate
+# agree on the same audience, same invariant auth.ts's own ADMIN_PERMISSIONS
+# comment already documents for the sibling Infra pages.
+#
 # PR A4 (Admin Console Capability Parity -- RAG/PubMed). Same reasoning
 # as every other *_proxy.py: no authorization decision is made here.
 #
@@ -57,10 +88,25 @@ from fastapi.responses import JSONResponse
 # ignores it either way), same "forward whatever's present, fabricate
 # nothing" behavior every other proxy in this app already has for its
 # own unauthenticated routes (e.g. routes_tes_proxy.py's /tools).
+# Deliberately left without the platform.manage_infra dependency the two
+# routes below now carry -- it's a liveness probe, not RAG data, matching
+# every other unauthenticated health-style route in this app.
 router = APIRouter()
 
 RAG_URL = os.environ.get("RAG_URL", "http://rag:8096")
 RAGBIO_API_KEY = os.environ.get("RAGBIO_API_KEY", "")
+
+# Module-level singleton, not inlined into the route signatures below --
+# ruff's B008 (this file is in ci.yml's scoped "Admin Console milestone"
+# lint set, no extend-immutable-calls configured repo-wide) flags any
+# function call in an argument default, Depends(...) itself included, not
+# only fastapi's own allowlisted calls. Constructing it once here and
+# referencing the variable as the default satisfies that rule exactly the
+# way ruff's own B008 message recommends, with identical runtime
+# behavior -- FastAPI resolves a Depends(...) sentinel by object identity,
+# not by where it was constructed, and sharing one instance across both
+# routes below is the normal, supported way to reuse a dependency.
+_require_platform_manage_infra = Depends(require_permission("platform.manage_infra"))
 
 
 async def _proxy(path: str, request: Request, *, use_service_key: bool) -> JSONResponse:
@@ -101,12 +147,18 @@ async def _proxy(path: str, request: Request, *, use_service_key: bool) -> JSONR
 
 
 @router.get("/rag/studies")
-async def list_studies_proxy(request: Request) -> JSONResponse:
+async def list_studies_proxy(
+    request: Request,
+    _admin: dict = _require_platform_manage_infra,
+) -> JSONResponse:
     return await _proxy("/v1/studies", request, use_service_key=True)
 
 
 @router.get("/rag/cache-stats")
-async def cache_stats_proxy(request: Request) -> JSONResponse:
+async def cache_stats_proxy(
+    request: Request,
+    _admin: dict = _require_platform_manage_infra,
+) -> JSONResponse:
     return await _proxy("/v1/cache/stats", request, use_service_key=True)
 
 
