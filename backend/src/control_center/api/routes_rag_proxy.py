@@ -96,6 +96,18 @@ router = APIRouter()
 RAG_URL = os.environ.get("RAG_URL", "http://rag:8096")
 RAGBIO_API_KEY = os.environ.get("RAGBIO_API_KEY", "")
 
+# Module-level singleton, not inlined into the route signatures below --
+# ruff's B008 (this file is in ci.yml's scoped "Admin Console milestone"
+# lint set, no extend-immutable-calls configured repo-wide) flags any
+# function call in an argument default, Depends(...) itself included, not
+# only fastapi's own allowlisted calls. Constructing it once here and
+# referencing the variable as the default satisfies that rule exactly the
+# way ruff's own B008 message recommends, with identical runtime
+# behavior -- FastAPI resolves a Depends(...) sentinel by object identity,
+# not by where it was constructed, and sharing one instance across both
+# routes below is the normal, supported way to reuse a dependency.
+_require_platform_manage_infra = Depends(require_permission("platform.manage_infra"))
+
 
 async def _proxy(path: str, request: Request, *, use_service_key: bool) -> JSONResponse:
     headers = {"Content-Type": "application/json"}
@@ -137,7 +149,7 @@ async def _proxy(path: str, request: Request, *, use_service_key: bool) -> JSONR
 @router.get("/rag/studies")
 async def list_studies_proxy(
     request: Request,
-    _admin: dict = Depends(require_permission("platform.manage_infra")),
+    _admin: dict = _require_platform_manage_infra,
 ) -> JSONResponse:
     return await _proxy("/v1/studies", request, use_service_key=True)
 
@@ -145,7 +157,7 @@ async def list_studies_proxy(
 @router.get("/rag/cache-stats")
 async def cache_stats_proxy(
     request: Request,
-    _admin: dict = Depends(require_permission("platform.manage_infra")),
+    _admin: dict = _require_platform_manage_infra,
 ) -> JSONResponse:
     return await _proxy("/v1/cache/stats", request, use_service_key=True)
 
