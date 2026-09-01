@@ -523,7 +523,7 @@ def main() -> int:
 
     root     = args.root.resolve()
     repos    = args.repos or REPOS
-    work_dir = Path(os.environ.get("WORK_DIR", str(root / "omnibioai-work")))
+    work_dir = Path(os.environ.get("WORK_DIR", str(root / "work")))
     out_dir  = work_dir / "out" / "coverage"
     out_dir.mkdir(parents=True, exist_ok=True)
 

@@ -94,7 +94,7 @@ DEFAULT_TARGETS = [
 
 _work_dir = Path(os.environ.get(
     "WORK_DIR",
-    str(Path(__file__).resolve().parent.parent.parent / "omnibioai-work")
+    str(Path(__file__).resolve().parent.parent.parent / "work")
 ))
 
 DEFAULT_OUT_PATH = _work_dir / "out" / "reports" / "omnibioai_ecosystem_report.html"
@@ -565,7 +565,7 @@ def generate_report(ecosystem_root: Path,
         for lang, tot in per_lang.items():
             language_totals.setdefault(lang, Totals()).add(tot)
 
-    work_dir = Path(os.environ.get("WORK_DIR", str(ecosystem_root / "omnibioai-work")))
+    work_dir = Path(os.environ.get("WORK_DIR", str(ecosystem_root / "work")))
 
     if skip_coverage:
         print("→ Skipping coverage (--skip-coverage)")
