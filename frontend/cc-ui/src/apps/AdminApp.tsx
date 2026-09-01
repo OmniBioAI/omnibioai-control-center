@@ -615,7 +615,7 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
       if (!ctx.canSeeOrganizations) return null
       return ctx.selectedSsoOrgId != null
         ? <SSOSettingsPage orgId={ctx.selectedSsoOrgId} onBack={() => ctx.setSelectedSsoOrgId(null)} />
-        : <OrganizationsPage onSelect={ctx.setSelectedSsoOrgId} />
+        : <OrganizationsPage onSelect={ctx.setSelectedSsoOrgId} title="Select an organization — SSO Settings" description="Choose an organization to configure its SSO settings." />
 
     // PR11.5.6: flat, no org-picker/deep-link -- same shape as
     // 'audit-logs' above, for the identical reason (every API this page
@@ -637,7 +637,7 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
       if (!ctx.canSeeOrganizations) return null
       return ctx.selectedMfaPolicyOrgId != null
         ? <OrganizationMFAPolicyPage orgId={ctx.selectedMfaPolicyOrgId} onBack={() => ctx.setSelectedMfaPolicyOrgId(null)} />
-        : <OrganizationsPage onSelect={ctx.setSelectedMfaPolicyOrgId} />
+        : <OrganizationsPage onSelect={ctx.setSelectedMfaPolicyOrgId} title="Select an organization — MFA Policy" description="Choose an organization to configure its MFA policy." />
 
     // PR9: SAML config is per-org, so this destination is a "pick an
     // org, then manage its SAML settings" flow, same list -> detail
@@ -647,7 +647,7 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
       if (!ctx.canSeeOrganizations) return null
       return ctx.selectedSamlOrgId != null
         ? <SAMLSettingsPage orgId={ctx.selectedSamlOrgId} onBack={() => ctx.setSelectedSamlOrgId(null)} />
-        : <OrganizationsPage onSelect={ctx.setSelectedSamlOrgId} />
+        : <OrganizationsPage onSelect={ctx.setSelectedSamlOrgId} title="Select an organization — SAML Settings" description="Choose an organization to configure its SAML settings." />
 
     // PR11.4: API keys/OAuth clients are per-org, so this destination is
     // a "pick an org, then manage its service accounts" flow, same
@@ -668,7 +668,7 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
             initialTab={ctx.serviceAccountsInitialTab}
           />
         )
-        : <OrganizationsPage onSelect={ctx.setSelectedServiceAccountsOrgId} />
+        : <OrganizationsPage onSelect={ctx.setSelectedServiceAccountsOrgId} title="Select an organization — API Keys & Service Accounts" description="Choose an organization to manage its service accounts, OAuth clients, and API keys." />
 
     // PR14.5C: billing visibility/invoices are per-org, so this
     // destination is a "pick an org, then view its billing dashboard"
@@ -683,7 +683,7 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
       if (!ctx.canSeeOrganizations) return null
       return ctx.selectedBillingOrgId != null
         ? <BillingPage orgId={ctx.selectedBillingOrgId} onBack={() => ctx.setSelectedBillingOrgId(null)} />
-        : <OrganizationsPage onSelect={ctx.setSelectedBillingOrgId} />
+        : <OrganizationsPage onSelect={ctx.setSelectedBillingOrgId} title="Select an organization — Billing" description="Choose an organization to view its billing dashboard." />
 
     // Usage Analytics v1 (PR-D): flat, no org-picker/deep-link -- unlike
     // 'billing' immediately above, the page itself resolves/filters

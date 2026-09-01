@@ -47,6 +47,15 @@ function ErrBox({ msg }: { msg: string }) {
 
 interface Props {
   onSelect: (orgId: number) => void
+  // Optional override for the 5 call sites that reuse this page as an
+  // org-picker step in front of a per-org destination (saml, iam,
+  // mfa-policy, billing, api-keys) -- without these, the picker was
+  // pixel-identical to the real 'organizations' nav destination, which
+  // read as "the wrong page rendered" rather than "pick an org first".
+  // Omitted (the 'organizations' nav item itself) keeps the original
+  // heading/description below.
+  title?: string
+  description?: string
 }
 
 interface ViewProps extends Props {
@@ -282,7 +291,7 @@ function MyOrgsView({ onSelect, refreshSignal }: ViewProps) {
   )
 }
 
-export default function OrganizationsPage({ onSelect }: Props) {
+export default function OrganizationsPage({ onSelect, title, description }: Props) {
   // Evaluated once per mount, not memoized across the whole session --
   // hasPlatformAdminAccess() reads the live cached session claims, so a
   // token refresh that changes manage_all_orgs (PR0.2 x PR0.4) is
@@ -294,11 +303,11 @@ export default function OrganizationsPage({ onSelect }: Props) {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 4 }}>
         <div>
-          <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>Organizations</h2>
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>{title ?? 'Organizations'}</h2>
           <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
-            {isPlatformAdmin
+            {description ?? (isPlatformAdmin
               ? 'Every organization in the system. This view is only reachable with platform-admin permissions, enforced by the backend on every request.'
-              : 'Organizations you belong to.'}
+              : 'Organizations you belong to.')}
           </p>
         </div>
         <CreateOrgForm onCreated={() => setRefreshSignal(s => s + 1)} />
