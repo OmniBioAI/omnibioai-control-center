@@ -3,7 +3,7 @@ import type { SecurityControlItem, SecurityEvidenceItem, SecurityFindingItem, Se
 import { fetchSecurityPosture } from '../../api'
 import { classifyAuthError, formatDate } from '../../format'
 import StatusBadge from '../../components/StatusBadge'
-import { Card, EmptyState, ErrorState, LoadingState, PageContainer, SectionHeader, SessionExpiredState, StatCard } from '../../components/ui'
+import { Card, EmptyState, ErrorState, LoadingState, SectionHeader, SessionExpiredState, StatCard } from '../../components/ui'
 
 type LoadState =
   | { status: 'loading' }
@@ -150,14 +150,14 @@ export default function SecurityPosturePage() {
   }, [])
   useEffect(() => { load() }, [load])
 
-  if (state.status === 'loading') return <PageContainer><LoadingState label="Loading security posture…" /></PageContainer>
-  if (state.status === 'session') return <PageContainer><SessionExpiredState /></PageContainer>
-  if (state.status === 'denied') return <PageContainer><EmptyState title="Permission denied" description="Security Posture requires platform-wide security administration access." /></PageContainer>
-  if (state.status === 'error') return <PageContainer><ErrorState message={state.message} onRetry={load} /></PageContainer>
+  if (state.status === 'loading') return <div><LoadingState label="Loading security posture…" /></div>
+  if (state.status === 'session') return <div><SessionExpiredState /></div>
+  if (state.status === 'denied') return <div><EmptyState title="Permission denied" description="Security Posture requires platform-wide security administration access." /></div>
+  if (state.status === 'error') return <div><ErrorState message={state.message} onRetry={load} /></div>
 
   const { data } = state
   const control = selected ? data.controls.find(item => item.control_id === selected) : undefined
-  return <PageContainer>
+  return <div>
     <SectionHeader title="Security Posture" description="Evidence-backed verification of security controls across the OmniBioAI ecosystem." />
     <Card style={{ marginBottom: 20 }}><div style={{ fontSize: 13, color: 'var(--text2)' }}>Security Overview shows current operational activity. Security Posture shows the implementation, test, runtime, certification, and freshness evidence behind each control. This page is read-only.</div><div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>Schema {data.schema_version} · Generated {formatDate(data.generated_at)}</div></Card>
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 20 }}>
@@ -176,5 +176,5 @@ export default function SecurityPosturePage() {
       {control && <ControlDetails control={control} onClose={() => setSelected(null)} />}
       {(data.limitations.length > 0 || data.technical_debt.length > 0 || data.findings.length > 0) && <Card><h2 style={{ fontSize: 14, color: 'var(--text)', marginBottom: 12 }}>Posture limitations and findings</h2>{data.limitations.map(item => <div key={item} style={{ color: 'var(--muted)', fontSize: 12, marginBottom: 7 }}>{item}</div>)}{data.technical_debt.map(item => <div key={item.debt_id} style={{ color: 'var(--muted)', fontSize: 12, marginBottom: 7 }}><StatusBadge status="technical_debt" /> {item.summary}</div>)}<FindingList findings={data.findings} /></Card>}
     </div>
-  </PageContainer>
+  </div>
 }

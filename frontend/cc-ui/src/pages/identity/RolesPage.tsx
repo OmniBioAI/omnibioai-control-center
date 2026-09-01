@@ -11,7 +11,7 @@ import {
 } from '../../roles'
 import { fetchPermissionRegistry, type PermissionDescriptor } from '../../serviceAccounts'
 import { hasPlatformAdminAccess, hasOrgManageAccess } from '../../auth'
-import { PageContainer, SectionHeader, ActionToolbar, LoadingState, ErrorState, EmptyState, Card, Button } from '../../components/ui'
+import { SectionHeader, ActionToolbar, LoadingState, ErrorState, EmptyState, Card, Button } from '../../components/ui'
 import RoleBadge from '../../components/roles/RoleBadge'
 import PermissionSelector from '../../components/roles/PermissionSelector'
 
@@ -266,7 +266,7 @@ export default function RolesPage({ initialOrgId }: Props) {
   }
 
   return (
-    <PageContainer>
+    <div>
       <SectionHeader
         title="Roles & Permissions"
         description="Each organization's role catalog: platform-wide defaults plus that org's own custom roles. Platform-wide roles are managed by Platform Admins only; an organization's own custom roles are managed by that organization's admins."
@@ -389,6 +389,6 @@ export default function RolesPage({ initialOrgId }: Props) {
           onSaved={() => { setEditing(null); loadRoles() }}
         />
       )}
-    </PageContainer>
+    </div>
   )
 }

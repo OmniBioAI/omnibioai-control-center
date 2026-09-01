@@ -12,7 +12,6 @@ import {
   EmptyState,
   ErrorState,
   LoadingState,
-  PageContainer,
   SectionHeader,
   SessionExpiredState,
   StatCard,
@@ -336,22 +335,22 @@ export default function DeploymentHealthPage() {
     return state.data.services.find(s => s.service_id === selectedServiceId) ?? null
   }, [state, selectedServiceId])
 
-  if (state.status === 'loading') return <PageContainer><LoadingState label="Loading deployment health…" /></PageContainer>
-  if (state.status === 'session') return <PageContainer><SessionExpiredState /></PageContainer>
+  if (state.status === 'loading') return <div><LoadingState label="Loading deployment health…" /></div>
+  if (state.status === 'session') return <div><SessionExpiredState /></div>
   if (state.status === 'denied') {
     return (
-      <PageContainer>
+      <div>
         <SectionHeader title="Deployment Health" description="Read-only ecosystem deployment and dependency health." />
         <ErrorState message="You are not authorized to view deployment health." />
-      </PageContainer>
+      </div>
     )
   }
   if (state.status === 'error') {
     return (
-      <PageContainer>
+      <div>
         <SectionHeader title="Deployment Health" description="Read-only ecosystem deployment and dependency health." />
         <ErrorState message={state.message} onRetry={() => void load()} />
-      </PageContainer>
+      </div>
     )
   }
 
@@ -359,7 +358,7 @@ export default function DeploymentHealthPage() {
   const { summary } = data
 
   return (
-    <PageContainer>
+    <div>
       <SectionHeader
         title="Deployment Health"
         description="Read-only, dependency-aware deployment health for the OmniBioAI ecosystem, derived from Compose metadata, Docker state, and application probes."
@@ -457,6 +456,6 @@ export default function DeploymentHealthPage() {
       {selectedService && (
         <ServiceDetailPanel service={selectedService} onClose={() => setSelectedServiceId(null)} />
       )}
-    </PageContainer>
+    </div>
   )
 }

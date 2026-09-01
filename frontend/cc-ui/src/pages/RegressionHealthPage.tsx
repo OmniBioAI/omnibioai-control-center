@@ -13,7 +13,6 @@ import {
   EmptyState,
   ErrorState,
   LoadingState,
-  PageContainer,
   SectionHeader,
 } from '../components/ui'
 
@@ -92,19 +91,19 @@ export default function RegressionHealthPage() {
 
   useEffect(() => { void load() }, [load])
 
-  if (loading) return <PageContainer><LoadingState label="Loading regression health…" /></PageContainer>
+  if (loading) return <div><LoadingState label="Loading regression health…" /></div>
   if (error || !data) {
     return (
-      <PageContainer>
+      <div>
         <SectionHeader title="Regression Health" description="Read-only ecosystem certification status." />
         <ErrorState message={error ?? 'Regression health unavailable.'} onRetry={() => void load()} />
-      </PageContainer>
+      </div>
     )
   }
 
   const freshness = data.freshness.status
   return (
-    <PageContainer>
+    <div>
       <SectionHeader
         title="Regression Health"
         description="Read-only, reviewed end-to-end certification status for the OmniBioAI ecosystem."
@@ -197,6 +196,6 @@ export default function RegressionHealthPage() {
           </div>
         )}
       </section>
-    </PageContainer>
+    </div>
   )
 }

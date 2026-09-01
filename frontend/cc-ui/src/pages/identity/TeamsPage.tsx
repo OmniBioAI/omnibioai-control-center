@@ -4,7 +4,7 @@ import {
   type MyOrg, type PlatformOrgSummary,
 } from '../../organizations'
 import { hasPlatformAdminAccess } from '../../auth'
-import { PageContainer, SectionHeader, ActionToolbar, LoadingState, ErrorState, EmptyState } from '../../components/ui'
+import { SectionHeader, ActionToolbar, LoadingState, ErrorState, EmptyState } from '../../components/ui'
 import TeamsCard from '../../components/teams/TeamsCard'
 
 /**
@@ -67,7 +67,7 @@ export default function TeamsPage({ initialOrgId }: Props) {
   useEffect(load, [isPlatformAdmin])
 
   return (
-    <PageContainer>
+    <div>
       <SectionHeader
         title="Teams"
         description="Team membership across every organization you can see. Creating, renaming, and deleting teams -- and adding or removing members -- is enforced entirely by omnibioai-auth; this page only calls its existing endpoints."
@@ -95,6 +95,6 @@ export default function TeamsPage({ initialOrgId }: Props) {
       {!err && orgs && orgs.length > 0 && selectedOrgId != null && (
         <TeamsCard orgId={selectedOrgId} />
       )}
-    </PageContainer>
+    </div>
   )
 }

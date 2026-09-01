@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { fetchDashboardSummary } from '../dashboard'
 import type { DashboardSummary } from '../dashboard'
-import { PageContainer, SectionHeader } from '../components/ui'
+import { SectionHeader } from '../components/ui'
 import { AlertCard, DashboardGrid, HealthCard, MetricCard, StatusCard } from '../components/dashboard'
 
 function subscriptionTone(status: string | null): 'good' | 'bad' | 'neutral' {
@@ -58,7 +58,7 @@ export default function DashboardPage() {
   const business = data?.business
 
   return (
-    <PageContainer>
+    <div>
       <SectionHeader title="Overview" description="Live status across the OmniBioAI enterprise platform." />
 
       {error && (
@@ -147,6 +147,6 @@ export default function DashboardPage() {
           icon={ServerCog}
         />
       </DashboardGrid>
-    </PageContainer>
+    </div>
   )
 }
