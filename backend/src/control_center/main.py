@@ -174,11 +174,26 @@ app.include_router(config_router, dependencies=[Depends(require_permission("plat
 app.include_router(cron_router)
 app.include_router(docker_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(known_issues_router)
-# llm_router (GET /llms, GET /knowledge-base) previously had no gate at
-# all -- /knowledge-base in particular returns absolute internal
-# filesystem paths (pubmed_root/index_root). Gated the same way
-# docker_router/summary_router are, immediately above.
-app.include_router(llm_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
+# llm_router carries NO blanket router-level gate -- its two routes have
+# deliberately different exposure:
+#   - GET /llms is intentionally public (Ollama status + which API-key
+#     env vars are set as booleans, never key values). It backs
+#     ControlApp's anonymous LLMs page (frontend/cc-ui/src/apps/
+#     ControlApp.tsx, PublicEcosystemPage sibling) -- part of the Public
+#     Read-Only Control Center design (91755fb, docs/public-control-
+#     center.md), which ControlApp.tsx's own doc comment still names
+#     llm_router as no-dependency. Commit 8705cbf's route audit added a
+#     blanket platform.manage_infra dependency here that collapsed that
+#     public route into the admin gate along with /knowledge-base; the
+#     2026-09-02 investigation confirmed that was an accidental
+#     over-gate, reverted here.
+#   - GET /knowledge-base stays gated -- it returns absolute internal
+#     filesystem paths (pubmed_root/index_root) and is not part of the
+#     public surface (no ControlApp page calls it). Its
+#     platform.manage_infra check now lives directly on the route in
+#     routes_llm.py, the same per-route pattern routes_cron.py uses for
+#     its two gated GET routes.
+app.include_router(llm_router)
 app.include_router(infra_router)
 app.include_router(cloud_router)
 # PR-B6: same ungated posture as cloud_router directly above -- see
@@ -726,13 +741,21 @@ def report_generate(_admin: dict = Depends(require_permission("platform.manage_c
 
 
 @app.get("/report/status")
-def report_status(_admin: dict = Depends(require_permission("platform.manage_infra"))) -> JSONResponse:
+def report_status() -> JSONResponse:
     """Poll job state. Frontend polls this every 2s while running.
 
-    Gated: previously had no auth requirement at all, unlike
-    /report/generate above (which nginx's auth_request also gates in the
-    normal topology, but control.omnibioai.org routing directly to this
-    backend bypasses that -- see main.py's router-inclusion comments)."""
+    DELIBERATELY UNAUTHENTICATED. This route backs ControlApp's anonymous
+    Ecosystem Report page (PublicEcosystemPage.tsx polls it to know when a
+    report exists) -- part of the Public Read-Only Control Center design
+    (91755fb, docs/public-control-center.md). Commit 8705cbf's route audit
+    added a platform.manage_infra gate here; the 2026-09-02 investigation
+    confirmed that was an accidental over-gate (it broke the anonymous
+    dashboard it was auditing) and reverted it. /report/generate (POST,
+    above) stays platform.manage_content-gated, and GET / plus
+    GET /report/data stay platform.manage_infra-gated -- only this poll
+    route and GET /llms were restored. The response carries job state
+    plus report_exists/report_generated_at; `message` can hold report-job
+    stderr on failure -- a known minor follow-up, not re-scoped here."""
     state = _job.as_dict()
     report_path = _workspace_root() / "work" / "out" / "reports" / "omnibioai_ecosystem_report.html"
     state["report_exists"] = report_path.exists()
@@ -854,6 +877,168 @@ def report_data(_admin: dict = Depends(require_permission("platform.manage_infra
         return JSONResponse(_json.loads(data_path.read_text(encoding="utf-8")))
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ==============================================================================
+# GET /report/public-stats — deliberately unauthenticated ecosystem totals
+# ==============================================================================
+#
+# Unlike GET / and GET /report/data (both platform.manage_infra-gated),
+# this route is reachable with no token at all. It exposes ONLY a handful
+# of ecosystem-wide aggregate numbers and never the per-repo breakdowns
+# that make /report/data sensitive.
+#
+# Design intent: docs/public-control-center.md (the Public Read-Only
+# Control Center architecture, 91755fb / 3cbc785) established a
+# public/admin split. Commit 8705cbf's route audit gated GET /report/data
+# wholesale; the 2026-09-02 investigation deliberately declined to revert
+# that (its projects[]/languages[]/coverage[]/gitStatus[] arrays leak the
+# private repo roster and live dev state), and this narrow endpoint is the
+# agreed replacement for the one genuinely-public slice of that data --
+# "how many lines of code, how well tested", with nothing that names a
+# repo or reveals structure.
+#
+# CONTRACT (fail-closed, mirrors routes_dashboard.py's PUBLIC_FIELDS /
+# _apply_public_contract): the response is built by EXPLICIT ALLOWLIST.
+# _PUBLIC_STATS_FIELDS names every key; _build_public_stats() constructs a
+# fresh dict with exactly those keys, reading only named scalars out of
+# report_data.json. That file is never spread, merged, or filtered into
+# the response -- so projects[], languages[], the per-repo coverage[]
+# rows, and gitStatus[] cannot appear here under any code path, and a
+# sensitive field added to report_data.json later cannot leak by omission
+# (it simply isn't read).
+
+_PUBLIC_STATS_FIELDS = (
+    "generated_at",
+    "total_lines",
+    "total_files",
+    "ecosystem_coverage_percent",
+    "repos_measured",
+)
+
+# Returned verbatim when no report has been generated yet (or the data
+# file is unreadable/malformed) -- HTTP 200 with every value null, same
+# "fail to null, never 404 for an anonymous caller" posture
+# GET /dashboard/summary uses. repos_measured is 0 (a count), not null.
+_PUBLIC_STATS_NULL = {
+    "generated_at": None,
+    "total_lines": None,
+    "total_files": None,
+    "ecosystem_coverage_percent": None,
+    "repos_measured": 0,
+}
+
+# The null shape and the allowlist must stay in lockstep -- both paths
+# (report present / absent) return exactly these five keys.
+assert set(_PUBLIC_STATS_NULL) == set(_PUBLIC_STATS_FIELDS)
+
+
+def _build_public_stats(raw: dict) -> dict:
+    """Construct the /report/public-stats response from a parsed
+    report_data.json, naming every output key explicitly.
+
+    ecosystem_coverage_percent is a STATEMENT-WEIGHTED average:
+
+        100 * sum(stmts - missed) / sum(stmts)
+
+    over coverage[] rows that have a non-null `pct` AND numeric
+    `stmts`/`missed`. This is deliberately NOT the figure the HTML
+    report's Code Coverage tab shows -- that one
+    (scripts/sections/coverage.py: `valid["coverage_pct"].mean()`) is an
+    UNWEIGHTED mean of per-repo percentages, which over-weights small
+    repos. Weighted-by-statements is the more statistically honest
+    ecosystem-wide number; the two definitions are kept distinct on
+    purpose, so don't "reconcile" them.
+
+    Only aggregate scalars are read here: grand.code, grand.files,
+    generated_at, and (stmts, missed, pct) off each coverage row. The
+    per-repo identity of those rows -- coverage[].repo, and the entire
+    projects[]/languages[]/gitStatus[] arrays -- is never touched. See
+    this section's CONTRACT note.
+    """
+    grand = raw.get("grand")
+    grand = grand if isinstance(grand, dict) else {}
+
+    coverage_rows = raw.get("coverage")
+    coverage_rows = coverage_rows if isinstance(coverage_rows, list) else []
+
+    total_stmts = 0.0
+    covered_stmts = 0.0
+    repos_measured = 0
+    for row in coverage_rows:
+        if not isinstance(row, dict):
+            continue
+        pct = row.get("pct")
+        if pct is None:
+            continue
+        # repos_measured counts every row that actually produced a
+        # coverage percentage, matching the "with data" figure the HTML
+        # report shows.
+        repos_measured += 1
+        stmts = row.get("stmts")
+        missed = row.get("missed")
+        if (
+            isinstance(stmts, (int, float))
+            and not isinstance(stmts, bool)
+            and stmts > 0
+            and isinstance(missed, (int, float))
+            and not isinstance(missed, bool)
+        ):
+            total_stmts += stmts
+            covered_stmts += max(stmts - missed, 0)
+
+    ecosystem_coverage_percent = (
+        round(100.0 * covered_stmts / total_stmts, 2) if total_stmts > 0 else None
+    )
+
+    total_lines = grand.get("code")
+    total_files = grand.get("files")
+    built = {
+        "generated_at": raw.get("generated_at"),
+        "total_lines": total_lines if isinstance(total_lines, int) else None,
+        "total_files": total_files if isinstance(total_files, int) else None,
+        "ecosystem_coverage_percent": ecosystem_coverage_percent,
+        "repos_measured": repos_measured,
+    }
+    # Final projection through the allowlist: the response can only ever
+    # contain _PUBLIC_STATS_FIELDS keys, regardless of what `built`
+    # picked up. Belt-and-suspenders on top of `built` already being
+    # hand-constructed -- this is the line that makes "projects[]/
+    # languages[]/coverage[]/gitStatus[] can never appear here"
+    # structurally true rather than true-by-inspection.
+    return {k: built[k] for k in _PUBLIC_STATS_FIELDS}
+
+
+@app.get("/report/public-stats")
+def report_public_stats() -> JSONResponse:
+    """Ecosystem-wide aggregate code stats -- DELIBERATELY UNAUTHENTICATED.
+
+    No Depends(require_permission(...)), and this route is registered
+    directly on `app`, NOT on report_router (which main.py's
+    include_router() gates behind platform.manage_infra). Returns exactly
+    the five keys in _PUBLIC_STATS_FIELDS -- {generated_at, total_lines,
+    total_files, ecosystem_coverage_percent, repos_measured} -- and never
+    the per-repo projects[]/languages[]/coverage[]/gitStatus[] arrays that
+    keep GET /report/data admin-only. See the section comment above for
+    the full rationale (docs/public-control-center.md, the 2026-09-02
+    public/admin-split investigation).
+
+    Fails to null, not 404: with no report generated yet, returns HTTP 200
+    and _PUBLIC_STATS_NULL, matching GET /dashboard/summary's posture for
+    an anonymous caller."""
+    data_path = _workspace_root() / "work" / "out" / "reports" / "report_data.json"
+    if not data_path.exists():
+        return JSONResponse(dict(_PUBLIC_STATS_NULL))
+    try:
+        import json as _json
+        raw = _json.loads(data_path.read_text(encoding="utf-8"))
+    except Exception:
+        # Unreadable / malformed report data -- same null shape rather
+        # than surfacing a parse error to an anonymous caller.
+        return JSONResponse(dict(_PUBLIC_STATS_NULL))
+    if not isinstance(raw, dict):
+        return JSONResponse(dict(_PUBLIC_STATS_NULL))
+    return JSONResponse(_build_public_stats(raw))
 
 
 # ==============================================================================

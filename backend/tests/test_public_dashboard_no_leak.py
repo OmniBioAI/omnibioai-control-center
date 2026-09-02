@@ -14,7 +14,9 @@ otherwise silently reintroduce.
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
@@ -152,6 +154,50 @@ class TestPublicInfraEndpointsCarryNoForbiddenKeys(unittest.TestCase):
             ):
                 data = client.get("/integrity").json()
         self.assertEqual(_find_forbidden_keys(data), [])
+
+
+class TestReportPublicStatsCarriesNoForbiddenKeys(unittest.TestCase):
+    """2026-09-02 public/admin-split investigation: GET /report/public-stats
+    is deliberately anonymous. Its whole design is that it returns only
+    ecosystem-wide aggregate scalars -- so beyond the forbidden-key sweep
+    every other public endpoint gets, assert the per-repo arrays from
+    report_data.json never appear in it even when that file is fully
+    populated with them."""
+
+    _FULL = {
+        "generated_at": "2026-09-02T04:00:00+00:00",
+        "grand": {"files": 14820, "code": 1863200, "comment": 240100, "blank": 190500},
+        "projects": [{"full": "omnibioai-tes", "code": 120000, "pct": 6.44}],
+        "languages": [{"name": "Python", "code": 900000, "pct": 48.3}],
+        "coverage": [
+            {"repo": "omnibioai-tes", "pct": 92.5, "stmts": 4000, "missed": 300},
+            {"repo": "omnibioai-auth", "pct": 61.0, "stmts": 2000, "missed": 780},
+        ],
+        "gitStatus": [{"repo": "omnibioai-tes", "branch": "feat/wip", "unpushed": 2}],
+    }
+
+    def _get(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reports_dir = Path(tmp) / "work" / "out" / "reports"
+            reports_dir.mkdir(parents=True)
+            (reports_dir / "report_data.json").write_text(json.dumps(self._FULL))
+            with patch("control_center.main._workspace_root", return_value=Path(tmp)):
+                return client.get("/report/public-stats")
+
+    def test_no_forbidden_keys(self) -> None:
+        self.assertEqual(_find_forbidden_keys(self._get().json()), [])
+
+    def test_no_per_repo_arrays_or_repo_names(self) -> None:
+        resp = self._get()
+        body = resp.json()
+        self.assertEqual(
+            set(body),
+            {"generated_at", "total_lines", "total_files",
+             "ecosystem_coverage_percent", "repos_measured"},
+        )
+        for marker in ('"projects"', '"languages"', '"gitStatus"', '"coverage":',
+                       "omnibioai-tes", "omnibioai-auth", "feat/wip", "unpushed"):
+            self.assertNotIn(marker, resp.text)
 
 
 if __name__ == "__main__":

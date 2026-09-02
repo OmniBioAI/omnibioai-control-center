@@ -3,8 +3,10 @@ import asyncio
 import os
 from pathlib import Path
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+
+from control_center.core.auth import require_permission
 
 router = APIRouter()
 
@@ -12,6 +14,14 @@ OLLAMA_URL = os.environ.get("OLLAMA_BASE_URL", "http://ollama:11434")
 
 @router.get("/llms")
 async def get_llms() -> JSONResponse:
+    # DELIBERATELY UNAUTHENTICATED. No Depends(require_permission(...)),
+    # and llm_router is included in main.py with no router-level gate.
+    # This route backs ControlApp's anonymous LLMs page -- see main.py's
+    # llm_router include comment and docs/public-control-center.md. The
+    # response is boolean-only for secrets: `configured` flags, never key
+    # values (see api_keys below). Also called in-process by
+    # routes_dashboard.py's _ai_platform_section (a direct function call,
+    # unaffected by routing either way).
     # Ollama models
     models = []
     ollama_status = "unreachable"
@@ -137,7 +147,15 @@ def _index_size_bytes(index_root: Path) -> int:
 
 
 @router.get("/knowledge-base")
-async def get_knowledge_base() -> JSONResponse:
+async def get_knowledge_base(
+    _admin: dict = Depends(require_permission("platform.manage_infra")),
+) -> JSONResponse:
+    # Gated per-route (not via llm_router's include, which is ungated so
+    # GET /llms above can stay public). Returns absolute internal
+    # filesystem paths (pubmed_root/index_root) -- same platform.manage_infra
+    # bar as /summary/docker/config/storage. Commit 8705cbf first added
+    # this gate at the router level; the 2026-09-02 investigation moved it
+    # here so it no longer also covers /llms.
     workspace = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
 
     pubmed_root = None
