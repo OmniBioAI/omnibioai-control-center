@@ -156,12 +156,29 @@ app.include_router(regression_health_router, dependencies=[Depends(require_permi
 app.include_router(security_posture_router)
 app.include_router(deployment_health_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(integration_health_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
-app.include_router(report_router)
+# report_router is just GET /report -> redirect to / -- gated for
+# consistency with / itself (see root() below) rather than because the
+# redirect leaks anything on its own.
+app.include_router(report_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(config_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
+# cron_router is NOT gated here at router-inclusion time, unlike
+# docker_router/summary_router/etc. above: its own pause/resume/schedule
+# routes already require the narrower platform.manage_cron permission
+# in-function, and a blanket platform.manage_infra dependency here would
+# stack an *additional* requirement on top of those instead of just
+# closing the real gap -- GET /cron/jobs and GET /cron/jobs/{id}/log,
+# which had no gate at all (confirmed live-reachable with a raw crontab
+# job list + arbitrary log-file tail, no auth). Those two routes now
+# carry their own platform.manage_infra Depends directly in
+# routes_cron.py instead.
 app.include_router(cron_router)
 app.include_router(docker_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(known_issues_router)
-app.include_router(llm_router)
+# llm_router (GET /llms, GET /knowledge-base) previously had no gate at
+# all -- /knowledge-base in particular returns absolute internal
+# filesystem paths (pubmed_root/index_root). Gated the same way
+# docker_router/summary_router are, immediately above.
+app.include_router(llm_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(infra_router)
 app.include_router(cloud_router)
 # PR-B6: same ungated posture as cloud_router directly above -- see
@@ -169,7 +186,10 @@ app.include_router(cloud_router)
 # only, no internal topology, no credential values).
 app.include_router(integrations_router)
 app.include_router(reference_router)
-app.include_router(router_storage)
+# router_storage (GET /storage) previously had no gate -- disk usage
+# breakdown by directory plus `docker system df` output. Gated the same
+# way docker_router/summary_router are, above.
+app.include_router(router_storage, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(auth_proxy_router)
 app.include_router(org_proxy_router)
 app.include_router(user_proxy_router)
@@ -706,8 +726,13 @@ def report_generate(_admin: dict = Depends(require_permission("platform.manage_c
 
 
 @app.get("/report/status")
-def report_status() -> JSONResponse:
-    """Poll job state. Frontend polls this every 2s while running."""
+def report_status(_admin: dict = Depends(require_permission("platform.manage_infra"))) -> JSONResponse:
+    """Poll job state. Frontend polls this every 2s while running.
+
+    Gated: previously had no auth requirement at all, unlike
+    /report/generate above (which nginx's auth_request also gates in the
+    normal topology, but control.omnibioai.org routing directly to this
+    backend bypasses that -- see main.py's router-inclusion comments)."""
     state = _job.as_dict()
     report_path = _workspace_root() / "work" / "out" / "reports" / "omnibioai_ecosystem_report.html"
     state["report_exists"] = report_path.exists()
@@ -799,8 +824,11 @@ def coverage_generate(_admin: dict = Depends(require_permission("platform.manage
 
 
 @app.get("/coverage/status")
-def coverage_status() -> JSONResponse:
-    """Poll coverage job state. Same shape as /report/status."""
+def coverage_status(_admin: dict = Depends(require_permission("platform.manage_infra"))) -> JSONResponse:
+    """Poll coverage job state. Same shape as /report/status.
+
+    Gated: previously had no auth requirement at all -- same fix as
+    /report/status above."""
     state = _coverage_job.as_dict()
     result_path = _workspace_root() / "omnibioai-work" / "out" / "coverage" / f"{_COVERAGE_REPO}.json"
     state["result_exists"] = result_path.exists()
@@ -813,8 +841,11 @@ def coverage_status() -> JSONResponse:
 
 
 @app.get("/report/data")
-def report_data() -> JSONResponse:
-    """Return structured JSON data for the React frontend (projects, languages, coverage)."""
+def report_data(_admin: dict = Depends(require_permission("platform.manage_infra"))) -> JSONResponse:
+    """Return structured JSON data for the React frontend (projects, languages, coverage).
+
+    Gated: previously had no auth requirement at all -- same fix as
+    /report/status above."""
     data_path = _workspace_root() / "work" / "out" / "reports" / "report_data.json"
     if not data_path.exists():
         return JSONResponse({"error": "No report data yet. Generate the report first."}, status_code=404)
@@ -873,7 +904,26 @@ async def on_startup() -> None:
 
 
 @app.get("/", response_class=HTMLResponse)
-def root() -> HTMLResponse:
+def root(_admin: dict = Depends(require_permission("platform.manage_infra"))) -> HTMLResponse:
+    """Serves the generated ecosystem report (or the pre-generation landing
+    page). Gated: previously had no auth requirement at all -- this is the
+    exact page that rendered with no login prompt when control.omnibioai.org
+    was found routing straight to this backend, bypassing nginx-router's
+    auth_request gate entirely. The report itself is built from a full scan
+    of every repo (git status, coverage %, Sentry project data, known
+    issues) -- the same class of "internal topology" data /summary,
+    /docker, /services, /config are already gated for above, just never
+    included in that gate.
+
+    Consequence worth knowing: this page's own client-side login form
+    (shown when no report exists yet) is now unreachable by a plain
+    browser navigation with no bearer token, since a top-level page load
+    can't attach an Authorization header -- only the nginx-fronted iframe
+    path (/_svc/control/, which already forwards a cookie-derived
+    Authorization header before ever reaching this backend) or a caller
+    that sets the header explicitly can still reach it. That matches this
+    fix's intent: the page was never meant to be reachable by a truly
+    anonymous caller in the first place."""
     report_path = _workspace_root() / "work" / "out" / "reports" / "omnibioai_ecosystem_report.html"
 
     if report_path.exists():

@@ -33,13 +33,23 @@ class ScheduleUpdate(BaseModel):
 
 
 @router.get("/cron/jobs")
-def cron_jobs() -> JSONResponse:
-    """Read-only status for the 4 known host-crontab jobs. Open to everyone."""
+def cron_jobs(_admin: dict = Depends(require_permission("platform.manage_infra"))) -> JSONResponse:
+    """Read-only status for the 15 known host-crontab jobs.
+
+    Gated: previously open to everyone -- confirmed live-reachable with no
+    auth via control.omnibioai.org routing directly to this backend,
+    bypassing nginx-router's auth_request gate entirely. No legitimate
+    public use case for exposing the host crontab job list."""
     return JSONResponse({"jobs": get_cron_jobs(_workspace_root(), _spool_path())})
 
 @router.get("/cron/jobs/{job_id}/log")
-def cron_job_log(job_id: str, lines: int = 100) -> JSONResponse:
-    """Read-only tail of a job's log file. Open to everyone, same as GET /cron/jobs."""
+def cron_job_log(
+    job_id: str, lines: int = 100, _admin: dict = Depends(require_permission("platform.manage_infra")),
+) -> JSONResponse:
+    """Read-only tail of a job's log file.
+
+    Gated: previously open to everyone, same as GET /cron/jobs above --
+    an arbitrary log-file tail (up to 1000 lines) with no auth at all."""
     lines = max(1, min(lines, 1000))  # clamp to a sane range
     try:
         result = get_job_log(_workspace_root(), job_id, lines)

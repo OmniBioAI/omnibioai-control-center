@@ -20,15 +20,22 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import jwt
 from fastapi.testclient import TestClient
 
 from control_center.checks.disk import run_disk_checks
 from control_center.checks.http import check_http
 from control_center.checks.tcp import check_tcp
+from control_center.core.jwt_verify import JWT_SECRET
 from control_center.core.settings import Settings
 from control_center.main import app
 
 client = TestClient(app)
+
+
+def _admin_headers() -> dict:
+    token = jwt.encode({"sub": "1", "permissions": ["platform.manage_infra"]}, JWT_SECRET, algorithm="HS256")
+    return {"Authorization": f"Bearer {token}"}
 
 
 # ==============================================================================
@@ -289,19 +296,28 @@ class TestRoutesHealth(unittest.TestCase):
 # ==============================================================================
 
 class TestRoutesReport(unittest.TestCase):
+    # /report (redirect to /) and / itself are gated behind
+    # platform.manage_infra (control.omnibioai.org direct-tunnel audit) --
+    # these tests exercise the redirect + underlying page rendering, not
+    # authorization (see test_main.py's TestPlatformManageInfraAuth for the
+    # 401/403 checks), so requests here carry an always-sufficient token.
+
+    def test_401_when_no_token(self) -> None:
+        response = client.get("/report", follow_redirects=False)
+        self.assertEqual(response.status_code, 401)
 
     def test_report_returns_200(self) -> None:
-        response = client.get("/report")
+        response = client.get("/report", headers=_admin_headers())
         self.assertEqual(response.status_code, 200)
 
     def test_report_returns_html(self) -> None:
-        response = client.get("/report")
+        response = client.get("/report", headers=_admin_headers())
         self.assertIn("text/html", response.headers["content-type"])
 
     def test_report_shows_placeholder_when_no_file(self) -> None:
         os.environ["WORKSPACE_ROOT"] = "/nonexistent/workspace"
         try:
-            response = client.get("/report")
+            response = client.get("/report", headers=_admin_headers())
             self.assertIn("No ecosystem report found", response.text)
         finally:
             del os.environ["WORKSPACE_ROOT"]
@@ -309,7 +325,7 @@ class TestRoutesReport(unittest.TestCase):
     def test_report_placeholder_contains_generate_command(self) -> None:
         os.environ["WORKSPACE_ROOT"] = "/nonexistent/workspace"
         try:
-            response = client.get("/report")
+            response = client.get("/report", headers=_admin_headers())
             self.assertIn("/report/generate", response.text)
         finally:
             del os.environ["WORKSPACE_ROOT"]
@@ -322,7 +338,7 @@ class TestRoutesReport(unittest.TestCase):
             report_file.write_text("<html><body>Test Report</body></html>")
             os.environ["WORKSPACE_ROOT"] = tmp
             try:
-                response = client.get("/report")
+                response = client.get("/report", headers=_admin_headers())
                 self.assertIn("Test Report", response.text)
             finally:
                 del os.environ["WORKSPACE_ROOT"]
@@ -335,7 +351,7 @@ class TestRoutesReport(unittest.TestCase):
             (report_dir / "omnibioai_ecosystem_report.html").write_text(content)
             os.environ["WORKSPACE_ROOT"] = tmp
             try:
-                response = client.get("/report")
+                response = client.get("/report", headers=_admin_headers())
                 self.assertIn("<h1>OmniBioAI Report</h1>", response.text)
             finally:
                 del os.environ["WORKSPACE_ROOT"]

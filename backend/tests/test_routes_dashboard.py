@@ -413,6 +413,63 @@ class TestBusinessSection(unittest.TestCase):
         self.assertIsNone(business["usage_services_count"])
 
 
+class TestPublicFieldsContract(unittest.TestCase):
+    """Regression guard for routes_dashboard.PUBLIC_FIELDS: proves a fully
+    anonymous caller (no Authorization header) never sees a non-null field
+    in ai_platform/knowledge/workflow that isn't explicitly allowlisted --
+    even if a future edit adds a new field to one of those sections'
+    computation and forgets to update PUBLIC_FIELDS to match. Every
+    currently-known field is populated with a real, non-null value via the
+    same mock fixtures the section-specific tests above use, so the only
+    way this test can fail is an *unlisted* field coming back non-null."""
+
+    def _anonymous_response(self) -> dict:
+        routes = {
+            "/v1/models": _resp(200, MODELS),
+            "/v1/categories": _resp(200, CATEGORIES),
+            "/v1/studies": _resp(200, STUDIES),
+        }
+        with patch("control_center.api.routes_dashboard.RAGBIO_API_KEY", "test-key"):
+            with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client(routes)):
+                resp = client.get("/dashboard/summary")  # deliberately no Authorization header
+        self.assertEqual(resp.status_code, 200)
+        return resp.json()
+
+    def test_no_unlisted_field_is_non_null_for_anonymous_caller(self) -> None:
+        from control_center.api import routes_dashboard as rd
+
+        body = self._anonymous_response()
+        for section_name, allowed in rd.PUBLIC_FIELDS.items():
+            section = body[section_name]
+            leaked = sorted(k for k, v in section.items() if v is not None and k not in allowed)
+            self.assertEqual(
+                leaked, [],
+                f"{section_name!r} returned ungated field(s) to an anonymous caller: {leaked} "
+                f"-- add them to PUBLIC_FIELDS deliberately (routes_dashboard.py) if they're "
+                f"meant to be public, or gate their computation on `authorization` if not.",
+            )
+
+    def test_allowlisted_fields_are_still_populated_anonymously(self) -> None:
+        # The inverse check: PUBLIC_FIELDS isn't accidentally stale either
+        # -- every field it claims is public actually comes back non-null
+        # for an anonymous caller under these fixtures (all upstreams
+        # reachable, all with real data), not silently gated by some other
+        # code path.
+        from control_center.api import routes_dashboard as rd
+
+        body = self._anonymous_response()
+        for section_name, allowed in rd.PUBLIC_FIELDS.items():
+            section = body[section_name]
+            for field in allowed:
+                if field == "embedding_models":
+                    continue  # always null -- no upstream concept exists (see _ai_platform_section)
+                self.assertIsNotNone(
+                    section[field],
+                    f"{section_name}.{field} is listed in PUBLIC_FIELDS but came back null for an "
+                    f"anonymous caller under fully-reachable-upstream fixtures",
+                )
+
+
 class TestResponseShape(unittest.TestCase):
     def test_top_level_keys_and_generated_at(self) -> None:
         with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client({})):

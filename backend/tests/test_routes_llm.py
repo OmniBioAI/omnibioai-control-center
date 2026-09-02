@@ -15,12 +15,20 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import jwt
 from fastapi.testclient import TestClient
 
 from control_center.api import routes_llm
+from control_center.core.jwt_verify import JWT_SECRET
 from control_center.main import app
 
-client = TestClient(app)
+# llm_router is gated at router-inclusion time (main.py) behind
+# platform.manage_infra -- these tests exercise the routes' own logic, not
+# authorization (see test_main.py for the 401/403 permission checks), so
+# the client carries a fixed, always-sufficient token by default, same
+# convention as test_routes_docker.py.
+_INFRA_TOKEN = jwt.encode({"sub": "1", "permissions": ["platform.manage_infra"]}, JWT_SECRET, algorithm="HS256")
+client = TestClient(app, headers={"Authorization": f"Bearer {_INFRA_TOKEN}"})
 
 
 def _mock_async_client(get_side_effect=None, get_return_value=None):

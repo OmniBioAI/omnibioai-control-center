@@ -25,11 +25,13 @@ under-restrict. Instead:
     decision is made here.
   - AI Platform (model-registry) / part of Workflow (workflow-bundles):
     both upstream APIs are unauthenticated today (confirmed by reading
-    their source, not assumed) -- called with no header.
+    their source, not assumed) -- called with no header. These sections'
+    fields are intentionally public: see PUBLIC_FIELDS below.
   - Knowledge (RAG): RAGBIO_API_KEY is a service-held secret (like
     ANTHROPIC_API_KEY/OPENAI_API_KEY in routes_llm.py), not the caller's
     own token -- forwarded only if control-center itself has it
-    configured.
+    configured. This section's fields are intentionally public too: see
+    PUBLIC_FIELDS below.
   - Infrastructure / Operations: this is the one section computed
     in-process (containers/gpu/storage/health/known-issues) rather than
     over HTTP, so there is no upstream service to delegate the
@@ -53,6 +55,24 @@ Every section that isn't visible/reachable/configured for a given caller
 is `null` in the response, never fabricated -- the frontend renders
 those as "Preview data"/"--", matching the same honesty convention
 Phase 2's dashboard cards already established.
+
+PUBLIC_FIELDS (control.omnibioai.org direct-tunnel audit): ai_platform,
+knowledge, and workflow.workflow_bundles used to run unauthenticated
+purely as a byproduct of nobody adding a Depends() call to them -- true
+today, but not something a future edit could be trusted to notice and
+preserve deliberately. PUBLIC_FIELDS below makes that explicit: the
+named fields in each section are the ones this endpoint intends to serve
+to a fully anonymous caller (aggregate counts only -- no hostnames, LAN
+IPs, per-user data, or credential values, same bar routes_infra.py's own
+module comment sets for its public routes). _apply_public_contract()
+enforces it structurally -- for a caller with no Authorization header at
+all, any field in one of these sections that ISN'T in its allowlist is
+forced back to null, regardless of what that section's own computation
+produced. So a field added later to ai_platform/knowledge/workflow and
+left out of PUBLIC_FIELDS defaults to gated (null for an anonymous
+caller) instead of leaking by omission the way ai_platform/knowledge did
+before this fix. Regression-tested in test_routes_dashboard.py's
+TestPublicFieldsContract.
 """
 
 import asyncio
@@ -87,6 +107,41 @@ TES_URL = os.environ.get("TES_URL", "http://tes:8081")
 BILLING_URL = os.environ.get("BILLING_URL", "http://billing-service:8005")
 
 _TIMEOUT = 5.0
+
+# Explicit contract: the only fields in ai_platform/knowledge/workflow
+# meant to be non-null for a fully anonymous caller (no Authorization
+# header). See this module's own docstring for the full reasoning. New
+# fields belong here only after a deliberate decision that they're safe
+# for anonymous exposure -- default is gated, not public.
+PUBLIC_FIELDS: dict[str, frozenset[str]] = {
+    "ai_platform": frozenset({"registered_models", "active_models", "embedding_models", "llm_providers"}),
+    "knowledge": frozenset({"rag_collections", "indexed_documents", "indexed_publications", "knowledge_bases"}),
+    "workflow": frozenset({"workflow_bundles"}),
+}
+
+
+def _apply_public_contract(section_name: str, data: dict, caller_supplied_token: bool) -> dict:
+    """Fail-closed enforcement of PUBLIC_FIELDS. For a caller with no
+    Authorization header at all, any key in `data` that isn't in this
+    section's allowlist is forced to None, regardless of what the
+    section's own computation produced -- so a field added to
+    ai_platform/knowledge/workflow later, without also being added to
+    PUBLIC_FIELDS, defaults to gated instead of leaking by omission.
+
+    A caller that supplied *any* token is left alone: each section
+    either forwards that token to an upstream that independently
+    authorizes it (workflow's job counts, via _get_json with the
+    caller's header) or has no gated fields to begin with
+    (ai_platform/knowledge today) -- there's nothing more for this
+    function to restrict once a token is present. `caller_supplied_token`
+    is deliberately presence-only (not signature/expiry-verified), same
+    convention _workflow_section already uses when deciding whether to
+    call TES at all -- verifying it is each upstream's job, not this
+    endpoint's (see module docstring)."""
+    if caller_supplied_token:
+        return data
+    allowed = PUBLIC_FIELDS.get(section_name, frozenset())
+    return {k: (v if k in allowed else None) for k, v in data.items()}
 
 
 def _has_permission(authorization: Optional[str], permission: str) -> bool:
@@ -254,7 +309,7 @@ def _dedupe_models(models: list[dict]) -> tuple[int, int]:
     return total, active
 
 
-async def _ai_platform_section(client: httpx.AsyncClient) -> dict:
+async def _ai_platform_section(client: httpx.AsyncClient, authorization: Optional[str]) -> dict:
     models, llms = await asyncio.gather(
         _get_json(client, f"{MODEL_REGISTRY_URL}/v1/models"),
         get_llms(),  # control-center's own existing /llms logic, reused in-process
@@ -272,7 +327,7 @@ async def _ai_platform_section(client: httpx.AsyncClient) -> dict:
         if body.get("ollama", {}).get("status") == "running":
             llm_providers += 1
 
-    return {
+    data = {
         "registered_models": registered,
         "active_models": active,
         # model-registry has no concept of an "embedding" model type
@@ -281,9 +336,10 @@ async def _ai_platform_section(client: httpx.AsyncClient) -> dict:
         "embedding_models": None,
         "llm_providers": llm_providers,
     }
+    return _apply_public_contract("ai_platform", data, bool(authorization))
 
 
-async def _knowledge_section(client: httpx.AsyncClient) -> dict:
+async def _knowledge_section(client: httpx.AsyncClient, authorization: Optional[str]) -> dict:
     if not RAGBIO_API_KEY:
         return {"rag_collections": None, "indexed_documents": None, "indexed_publications": None, "knowledge_bases": None}
 
@@ -294,7 +350,7 @@ async def _knowledge_section(client: httpx.AsyncClient) -> dict:
 
     collections = len(studies)
     documents = sum(s.get("abstract_count", 0) for s in studies)
-    return {
+    result = {
         "rag_collections": collections,
         "indexed_documents": documents,
         # RAG's only indexed corpus today is PubMed abstracts -- "documents"
@@ -305,6 +361,7 @@ async def _knowledge_section(client: httpx.AsyncClient) -> dict:
         "indexed_publications": documents,
         "knowledge_bases": collections,
     }
+    return _apply_public_contract("knowledge", result, bool(authorization))
 
 
 async def _workflow_section(client: httpx.AsyncClient, authorization: Optional[str]) -> dict:
@@ -319,7 +376,8 @@ async def _workflow_section(client: httpx.AsyncClient, authorization: Optional[s
             queued = sum(1 for r in runs if r.get("state") == "QUEUED")
             failed = sum(1 for r in runs if r.get("state") == "FAILED")
 
-    return {"workflow_bundles": bundles, "running_jobs": running, "queued_jobs": queued, "failed_jobs": failed}
+    data = {"workflow_bundles": bundles, "running_jobs": running, "queued_jobs": queued, "failed_jobs": failed}
+    return _apply_public_contract("workflow", data, bool(authorization))
 
 
 def _infra_and_ops_section() -> tuple[dict, dict]:
@@ -383,8 +441,8 @@ async def dashboard_summary(authorization: Optional[str] = Header(default=None))
     async with httpx.AsyncClient() as client:
         identity, ai_platform, knowledge, workflow, business = await asyncio.gather(
             _identity_section(client, authorization),
-            _ai_platform_section(client),
-            _knowledge_section(client),
+            _ai_platform_section(client, authorization),
+            _knowledge_section(client, authorization),
             _workflow_section(client, authorization),
             _business_section(client, authorization),
         )

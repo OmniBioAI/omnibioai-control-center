@@ -110,18 +110,23 @@ class TestWorkspaceRoot(unittest.TestCase):
 
 class TestDashboard(unittest.TestCase):
     def setUp(self): _reset_job()
-    def test_200(self): self.assertEqual(client.get("/").status_code, 200)
-    def test_html(self): self.assertIn("text/html", client.get("/").headers["content-type"])
-    def test_generate_button(self): self.assertIn("Generate Report", client.get("/").text)
-    def test_status_poll(self): self.assertIn("/report/status", client.get("/").text)
+    def test_200(self): self.assertEqual(client.get("/", headers=_admin_headers()).status_code, 200)
+    def test_html(self): self.assertIn("text/html", client.get("/", headers=_admin_headers()).headers["content-type"])
+    def test_generate_button(self): self.assertIn("Generate Report", client.get("/", headers=_admin_headers()).text)
+    def test_status_poll(self): self.assertIn("/report/status", client.get("/", headers=_admin_headers()).text)
     def test_login_form_present_when_no_report(self):
-        resp = client.get("/")
+        resp = client.get("/", headers=_admin_headers())
         self.assertIn("login-email", resp.text)
         self.assertIn("login-password", resp.text)
     def test_no_dashboard_link_when_no_report(self):
         # The old "View Dashboard" link is gone now that /dashboard just
         # redirects back to / -- nothing should link to it anymore.
-        self.assertNotIn("View Dashboard", client.get("/").text)
+        self.assertNotIn("View Dashboard", client.get("/", headers=_admin_headers()).text)
+    def test_401_when_no_token(self):
+        # / previously had no auth requirement at all -- this is the exact
+        # gap control.omnibioai.org exposed by routing directly to this
+        # backend, bypassing nginx-router's auth_request gate.
+        self.assertEqual(client.get("/").status_code, 401)
 
 
 class TestDashboardRedirect(unittest.TestCase):
@@ -146,16 +151,16 @@ class TestRootWithReport(unittest.TestCase):
         import shutil
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    def test_200(self): self.assertEqual(client.get("/").status_code, 200)
-    def test_html(self): self.assertIn("text/html", client.get("/").headers["content-type"])
-    def test_injects_sticky_bar(self): self.assertIn("omni-header", client.get("/").text)
-    def test_report_content_preserved(self): self.assertIn("<h1>My Report</h1>", client.get("/").text)
-    def test_summary_in_sticky_bar(self): self.assertIn("/summary", client.get("/").text)
-    def test_setInterval_in_sticky_bar(self): self.assertIn("setInterval", client.get("/").text)
+    def test_200(self): self.assertEqual(client.get("/", headers=_admin_headers()).status_code, 200)
+    def test_html(self): self.assertIn("text/html", client.get("/", headers=_admin_headers()).headers["content-type"])
+    def test_injects_sticky_bar(self): self.assertIn("omni-header", client.get("/", headers=_admin_headers()).text)
+    def test_report_content_preserved(self): self.assertIn("<h1>My Report</h1>", client.get("/", headers=_admin_headers()).text)
+    def test_summary_in_sticky_bar(self): self.assertIn("/summary", client.get("/", headers=_admin_headers()).text)
+    def test_setInterval_in_sticky_bar(self): self.assertIn("setInterval", client.get("/", headers=_admin_headers()).text)
 
     def test_no_body_tag_prepends_bar(self):
         self._report_file.write_text("<h1>No Body Tag</h1>")
-        response = client.get("/")
+        response = client.get("/", headers=_admin_headers())
         self.assertIn("<h1>No Body Tag</h1>", response.text)
         self.assertIn("omni-header", response.text)
 
@@ -198,45 +203,46 @@ class TestReportGenerate(unittest.TestCase):
 
 class TestReportStatus(unittest.TestCase):
     def setUp(self): _reset_job()
-    def test_200(self): self.assertEqual(client.get("/report/status").status_code, 200)
-    def test_has_status(self): self.assertIn("status", client.get("/report/status").json())
-    def test_has_report_exists(self): self.assertIn("report_exists", client.get("/report/status").json())
-    def test_has_generated_at(self): self.assertIn("report_generated_at", client.get("/report/status").json())
-    def test_idle_by_default(self): self.assertEqual(client.get("/report/status").json()["status"], "idle")
+    def test_200(self): self.assertEqual(client.get("/report/status", headers=_admin_headers()).status_code, 200)
+    def test_has_status(self): self.assertIn("status", client.get("/report/status", headers=_admin_headers()).json())
+    def test_has_report_exists(self): self.assertIn("report_exists", client.get("/report/status", headers=_admin_headers()).json())
+    def test_has_generated_at(self): self.assertIn("report_generated_at", client.get("/report/status", headers=_admin_headers()).json())
+    def test_idle_by_default(self): self.assertEqual(client.get("/report/status", headers=_admin_headers()).json()["status"], "idle")
+    def test_401_when_no_token(self): self.assertEqual(client.get("/report/status").status_code, 401)
     def test_report_exists_false(self):
         os.environ["WORKSPACE_ROOT"] = "/nonexistent"
-        try: self.assertFalse(client.get("/report/status").json()["report_exists"])
+        try: self.assertFalse(client.get("/report/status", headers=_admin_headers()).json()["report_exists"])
         finally: del os.environ["WORKSPACE_ROOT"]
     def test_report_generated_at_none(self):
         os.environ["WORKSPACE_ROOT"] = "/nonexistent"
-        try: self.assertIsNone(client.get("/report/status").json()["report_generated_at"])
+        try: self.assertIsNone(client.get("/report/status", headers=_admin_headers()).json()["report_generated_at"])
         finally: del os.environ["WORKSPACE_ROOT"]
     def test_report_exists_true(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp)/"work"/"out"/"reports"; p.mkdir(parents=True)
             (p/"omnibioai_ecosystem_report.html").write_text("<html/>")
             os.environ["WORKSPACE_ROOT"] = tmp
-            try: self.assertTrue(client.get("/report/status").json()["report_exists"])
+            try: self.assertTrue(client.get("/report/status", headers=_admin_headers()).json()["report_exists"])
             finally: del os.environ["WORKSPACE_ROOT"]
     def test_generated_at_set(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp)/"work"/"out"/"reports"; p.mkdir(parents=True)
             (p/"omnibioai_ecosystem_report.html").write_text("<html/>")
             os.environ["WORKSPACE_ROOT"] = tmp
-            try: self.assertIsNotNone(client.get("/report/status").json()["report_generated_at"])
+            try: self.assertIsNotNone(client.get("/report/status", headers=_admin_headers()).json()["report_generated_at"])
             finally: del os.environ["WORKSPACE_ROOT"]
     def test_reflects_running(self):
         main_module._job.start()
-        self.assertEqual(client.get("/report/status").json()["status"], "running")
+        self.assertEqual(client.get("/report/status", headers=_admin_headers()).json()["status"], "running")
     def test_reflects_done(self):
         main_module._job.start(); main_module._job.finish("ok")
-        self.assertEqual(client.get("/report/status").json()["status"], "done")
+        self.assertEqual(client.get("/report/status", headers=_admin_headers()).json()["status"], "done")
     def test_reflects_error(self):
         main_module._job.start(); main_module._job.fail("bad")
-        self.assertEqual(client.get("/report/status").json()["status"], "error")
+        self.assertEqual(client.get("/report/status", headers=_admin_headers()).json()["status"], "error")
     def test_message_in_response(self):
         main_module._job.start(); main_module._job.fail("Script not found")
-        self.assertIn("Script not found", client.get("/report/status").json()["message"])
+        self.assertIn("Script not found", client.get("/report/status", headers=_admin_headers()).json()["message"])
 
 
 def _reset_coverage_job():
@@ -288,21 +294,22 @@ class TestCoverageGenerate(unittest.TestCase):
 
 class TestCoverageStatus(unittest.TestCase):
     def setUp(self): _reset_coverage_job()
-    def test_200(self): self.assertEqual(client.get("/coverage/status").status_code, 200)
-    def test_has_status(self): self.assertIn("status", client.get("/coverage/status").json())
-    def test_has_result_exists(self): self.assertIn("result_exists", client.get("/coverage/status").json())
-    def test_has_generated_at(self): self.assertIn("result_generated_at", client.get("/coverage/status").json())
-    def test_idle_by_default(self): self.assertEqual(client.get("/coverage/status").json()["status"], "idle")
-    def test_open_no_auth_required(self):
-        # GET /coverage/status is a read endpoint -- no admin gate.
-        self.assertEqual(client.get("/coverage/status").status_code, 200)
+    def test_200(self): self.assertEqual(client.get("/coverage/status", headers=_admin_headers()).status_code, 200)
+    def test_has_status(self): self.assertIn("status", client.get("/coverage/status", headers=_admin_headers()).json())
+    def test_has_result_exists(self): self.assertIn("result_exists", client.get("/coverage/status", headers=_admin_headers()).json())
+    def test_has_generated_at(self): self.assertIn("result_generated_at", client.get("/coverage/status", headers=_admin_headers()).json())
+    def test_idle_by_default(self): self.assertEqual(client.get("/coverage/status", headers=_admin_headers()).json()["status"], "idle")
+    def test_401_when_no_token(self):
+        # Previously open to everyone (no admin gate) -- closed as part of
+        # the same fix as /report/status, /storage, /cron/jobs, etc.
+        self.assertEqual(client.get("/coverage/status").status_code, 401)
     def test_result_exists_true_and_generated_at_set(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "omnibioai-work" / "out" / "coverage"
             p.mkdir(parents=True)
             (p / f"{main_module._COVERAGE_REPO}.json").write_text("{}")
             with patch("control_center.main._workspace_root", return_value=Path(tmp)):
-                data = client.get("/coverage/status").json()
+                data = client.get("/coverage/status", headers=_admin_headers()).json()
         self.assertTrue(data["result_exists"])
         self.assertIsNotNone(data["result_generated_at"])
 
@@ -440,11 +447,15 @@ class TestRunReportJob(unittest.TestCase):
 
 
 class TestReportData(unittest.TestCase):
+    def test_401_when_no_token(self):
+        resp = client.get("/report/data")
+        self.assertEqual(resp.status_code, 401)
+
     def test_404_when_no_report_data(self):
         with tempfile.TemporaryDirectory() as tmp:
             os.environ["WORKSPACE_ROOT"] = tmp
             try:
-                resp = client.get("/report/data")
+                resp = client.get("/report/data", headers=_admin_headers())
             finally:
                 del os.environ["WORKSPACE_ROOT"]
         self.assertEqual(resp.status_code, 404)
@@ -457,7 +468,7 @@ class TestReportData(unittest.TestCase):
             (reports_dir / "report_data.json").write_text('{"projects": 3, "languages": ["python"]}')
             os.environ["WORKSPACE_ROOT"] = tmp
             try:
-                resp = client.get("/report/data")
+                resp = client.get("/report/data", headers=_admin_headers())
             finally:
                 del os.environ["WORKSPACE_ROOT"]
         self.assertEqual(resp.status_code, 200)
@@ -470,7 +481,7 @@ class TestReportData(unittest.TestCase):
             (reports_dir / "report_data.json").write_text("not-json{")
             os.environ["WORKSPACE_ROOT"] = tmp
             try:
-                resp = client.get("/report/data")
+                resp = client.get("/report/data", headers=_admin_headers())
             finally:
                 del os.environ["WORKSPACE_ROOT"]
         self.assertEqual(resp.status_code, 500)
@@ -548,7 +559,17 @@ class TestPlatformManageInfraAuth(unittest.TestCase):
     test_runner.py, and test_routes_config.py cover each route's own
     logic with an always-sufficient token, so these regression tests
     cover only the authorization layer itself: missing token, wrong
-    permission, and correct permission, once per gated router."""
+    permission, and correct permission, once per gated router.
+
+    Extended (control.omnibioai.org direct-tunnel audit) to cover every
+    route that was found reachable with no auth at all: /, /report,
+    /report/status, /report/data, /coverage/status, /llms,
+    /knowledge-base, /storage, /cron/jobs, /cron/jobs/{id}/log. Each of
+    these previously returned 200 with no Authorization header -- see
+    test_main.py's TestDashboard/TestReportStatus/TestReportData/
+    TestCoverageStatus and test_routes_cron.py's own 401 tests for the
+    per-route regression proof; this class only proves the shared gate
+    itself across all of them at once, same as the four routers above."""
 
     def _cases(self):
         return (
@@ -556,6 +577,16 @@ class TestPlatformManageInfraAuth(unittest.TestCase):
             ("GET", "/services"),
             ("GET", "/summary"),
             ("GET", "/config"),
+            ("GET", "/"),
+            ("GET", "/report"),
+            ("GET", "/report/status"),
+            ("GET", "/report/data"),
+            ("GET", "/coverage/status"),
+            ("GET", "/llms"),
+            ("GET", "/knowledge-base"),
+            ("GET", "/storage"),
+            ("GET", "/cron/jobs"),
+            ("GET", "/cron/jobs/mysql-backup/log"),
         )
 
     def test_401_when_no_token(self):
