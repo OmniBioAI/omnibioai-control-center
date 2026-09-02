@@ -65,12 +65,19 @@ def _content_only_headers() -> dict:
 
 class TestCronJobsRoute(unittest.TestCase):
 
-    def test_open_no_auth_required(self) -> None:
+    def test_401_when_no_token(self) -> None:
         resp = client.get("/cron/jobs")
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 401)
+
+    def test_403_for_cron_permission_only(self) -> None:
+        """Isolation: platform.manage_cron (the write-route permission)
+        must not satisfy this read route's platform.manage_infra check."""
+        token = jwt.encode({"sub": "5", "permissions": ["platform.manage_cron"]}, JWT_SECRET, algorithm="HS256")
+        resp = client.get("/cron/jobs", headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(resp.status_code, 403)
 
     def test_returns_all_jobs(self) -> None:
-        data = client.get("/cron/jobs").json()
+        data = client.get("/cron/jobs", headers=_admin_headers()).json()
         self.assertEqual(len(data["jobs"]), 15)
 
     def test_uses_workspace_root_env_var(self) -> None:
@@ -80,7 +87,7 @@ class TestCronJobsRoute(unittest.TestCase):
             with open(os.path.join(tmp, "logs", "pubmed_sync.log"), "w") as f:
                 f.write("done\n")
             try:
-                data = client.get("/cron/jobs").json()
+                data = client.get("/cron/jobs", headers=_admin_headers()).json()
             finally:
                 del os.environ["WORKSPACE_ROOT"]
         pubmed_job = next(j for j in data["jobs"] if j["id"] == "pubmed-sync")
@@ -89,12 +96,17 @@ class TestCronJobsRoute(unittest.TestCase):
 
 class TestCronJobLogRoute(unittest.TestCase):
 
-    def test_open_no_auth_required(self) -> None:
+    def test_401_when_no_token(self) -> None:
         resp = client.get("/cron/jobs/mysql-backup/log")
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 401)
+
+    def test_403_for_cron_permission_only(self) -> None:
+        token = jwt.encode({"sub": "5", "permissions": ["platform.manage_cron"]}, JWT_SECRET, algorithm="HS256")
+        resp = client.get("/cron/jobs/mysql-backup/log", headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(resp.status_code, 403)
 
     def test_unknown_job_id_returns_404(self) -> None:
-        resp = client.get("/cron/jobs/not-a-real-job/log")
+        resp = client.get("/cron/jobs/not-a-real-job/log", headers=_admin_headers())
         self.assertEqual(resp.status_code, 404)
 
     def test_returns_log_tail_from_real_file(self) -> None:
@@ -104,7 +116,7 @@ class TestCronJobLogRoute(unittest.TestCase):
             log_dir.mkdir(parents=True)
             (log_dir / "omnibioai-backup.log").write_text("a\nb\nc\n")
             try:
-                data = client.get("/cron/jobs/mysql-backup/log?lines=2").json()
+                data = client.get("/cron/jobs/mysql-backup/log?lines=2", headers=_admin_headers()).json()
             finally:
                 del os.environ["WORKSPACE_ROOT"]
         self.assertEqual(data["lines"], ["b", "c"])
@@ -117,7 +129,7 @@ class TestCronJobLogRoute(unittest.TestCase):
             log_dir.mkdir(parents=True)
             (log_dir / "omnibioai-backup.log").write_text("a\nb\nc\n")
             try:
-                data = client.get("/cron/jobs/mysql-backup/log?lines=0").json()
+                data = client.get("/cron/jobs/mysql-backup/log?lines=0", headers=_admin_headers()).json()
             finally:
                 del os.environ["WORKSPACE_ROOT"]
         self.assertEqual(data["lines_returned"], 1)
@@ -131,7 +143,7 @@ class TestCronJobLogRoute(unittest.TestCase):
                 "\n".join(f"line {i}" for i in range(1500)) + "\n"
             )
             try:
-                data = client.get("/cron/jobs/mysql-backup/log?lines=5000").json()
+                data = client.get("/cron/jobs/mysql-backup/log?lines=5000", headers=_admin_headers()).json()
             finally:
                 del os.environ["WORKSPACE_ROOT"]
         self.assertEqual(data["lines_returned"], 1000)
