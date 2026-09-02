@@ -208,7 +208,16 @@ class TestReportStatus(unittest.TestCase):
     def test_has_report_exists(self): self.assertIn("report_exists", client.get("/report/status", headers=_admin_headers()).json())
     def test_has_generated_at(self): self.assertIn("report_generated_at", client.get("/report/status", headers=_admin_headers()).json())
     def test_idle_by_default(self): self.assertEqual(client.get("/report/status", headers=_admin_headers()).json()["status"], "idle")
-    def test_401_when_no_token(self): self.assertEqual(client.get("/report/status").status_code, 401)
+    def test_200_when_no_token(self):
+        # DELIBERATELY PUBLIC (restored): commit 8705cbf gated this route
+        # behind platform.manage_infra, which broke ControlApp's anonymous
+        # Ecosystem Report page (PublicEcosystemPage.tsx polls it). The
+        # 2026-09-02 public/admin-split investigation reverted that gate.
+        # Was `test_401_when_no_token` asserting 401 here.
+        resp = client.get("/report/status")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("status", resp.json())
+        self.assertIn("report_exists", resp.json())
     def test_report_exists_false(self):
         os.environ["WORKSPACE_ROOT"] = "/nonexistent"
         try: self.assertFalse(client.get("/report/status", headers=_admin_headers()).json()["report_exists"])
@@ -561,15 +570,20 @@ class TestPlatformManageInfraAuth(unittest.TestCase):
     cover only the authorization layer itself: missing token, wrong
     permission, and correct permission, once per gated router.
 
-    Extended (control.omnibioai.org direct-tunnel audit) to cover every
-    route that was found reachable with no auth at all: /, /report,
-    /report/status, /report/data, /coverage/status, /llms,
-    /knowledge-base, /storage, /cron/jobs, /cron/jobs/{id}/log. Each of
-    these previously returned 200 with no Authorization header -- see
-    test_main.py's TestDashboard/TestReportStatus/TestReportData/
-    TestCoverageStatus and test_routes_cron.py's own 401 tests for the
-    per-route regression proof; this class only proves the shared gate
-    itself across all of them at once, same as the four routers above."""
+    Extended (control.omnibioai.org direct-tunnel audit, commit 8705cbf)
+    to cover routes that were found reachable with no auth at all: /,
+    /report, /report/data, /coverage/status, /knowledge-base, /storage,
+    /cron/jobs, /cron/jobs/{id}/log.
+
+    NOTE (2026-09-02 public/admin-split investigation): /report/status and
+    /llms were in this list but have been removed -- 8705cbf's audit
+    over-gated them. Both are part of the Public Read-Only Control Center
+    design (91755fb, docs/public-control-center.md): /report/status backs
+    ControlApp's anonymous Ecosystem Report page and /llms its anonymous
+    LLMs page. Their "public, no token needed" behavior is now asserted by
+    TestReportStatus.test_200_when_no_token and TestLlmsPublicAccess
+    respectively. Everything still in _cases() below stays gated -- that
+    is the regression guard this investigation must not weaken."""
 
     def _cases(self):
         return (
@@ -579,10 +593,8 @@ class TestPlatformManageInfraAuth(unittest.TestCase):
             ("GET", "/config"),
             ("GET", "/"),
             ("GET", "/report"),
-            ("GET", "/report/status"),
             ("GET", "/report/data"),
             ("GET", "/coverage/status"),
-            ("GET", "/llms"),
             ("GET", "/knowledge-base"),
             ("GET", "/storage"),
             ("GET", "/cron/jobs"),
@@ -608,6 +620,222 @@ class TestPlatformManageInfraAuth(unittest.TestCase):
             with self.subTest(path=path):
                 resp = client.request(method, path, headers=_admin_headers())
                 self.assertNotIn(resp.status_code, (401, 403))
+
+
+# A fully-populated report_data.json: every array that must NEVER reach
+# /report/public-stats is present and non-empty here, plus realistic
+# aggregate scalars. Shared by the negative-leak tests below.
+_FULL_REPORT_DATA = {
+    "generated_at": "2026-09-02T04:00:00+00:00",
+    "grand": {"files": 14820, "code": 1863200, "comment": 240100, "blank": 190500},
+    "projects": [
+        {"name": "tes", "full": "omnibioai-tes", "cat": "execution", "catLabel": "Execution",
+         "files": 900, "code": 120000, "comment": 15000, "blank": 12000, "pct": 6.44},
+        {"name": "auth", "full": "omnibioai-auth", "cat": "security", "catLabel": "Security",
+         "files": 300, "code": 40000, "comment": 5000, "blank": 4000, "pct": 2.15},
+    ],
+    "languages": [
+        {"name": "Python", "type": "backend", "typeLabel": "Backend",
+         "files": 6000, "code": 900000, "comment": 120000, "blank": 90000, "pct": 48.3},
+        {"name": "TypeScript", "type": "frontend", "typeLabel": "Frontend",
+         "files": 4000, "code": 500000, "comment": 40000, "blank": 50000, "pct": 26.8},
+    ],
+    "coverage": [
+        {"repo": "omnibioai-tes", "status": "ok", "pct": 92.5,
+         "stmts": 4000, "missed": 300, "branches": 800, "failUnder": 90.0},
+        {"repo": "omnibioai-auth", "status": "ok", "pct": 61.0,
+         "stmts": 2000, "missed": 780, "branches": 400, "failUnder": 85.0},
+        {"repo": "omnibioai-rag", "status": "no_total_found", "pct": None,
+         "stmts": None, "missed": None, "branches": None, "failUnder": None},
+    ],
+    "gitStatus": [
+        {"repo": "omnibioai-tes", "branch": "feat/secret-internal-branch", "nonMain": True,
+         "clean": False, "modified": 3, "untracked": 1, "unpushed": 2, "details": "3 modified, 1 untracked, 2 unpushed"},
+    ],
+}
+
+# The exact set of keys /report/public-stats is allowed to return, and
+# every substring that would prove a per-repo array leaked in.
+_PUBLIC_STATS_KEYS = {
+    "generated_at", "total_lines", "total_files",
+    "ecosystem_coverage_percent", "repos_measured",
+}
+# Substrings that would only be present if a per-repo array leaked in.
+# Deliberately avoids bare "coverage"/"repos" -- those collide with the
+# legitimate keys ecosystem_coverage_percent / repos_measured. Uses the
+# JSON-quoted array keys plus distinctive per-repo values instead.
+_LEAK_MARKERS = (
+    '"projects"', '"languages"', '"gitStatus"', '"coverage":',
+    "omnibioai-tes", "omnibioai-auth", "omnibioai-rag",
+    "feat/secret-internal-branch", "unpushed", "failUnder",
+)
+
+
+class TestReportPublicStats(unittest.TestCase):
+    """PART 1 (2026-09-02 investigation): the new deliberately-public
+    GET /report/public-stats. No token, five aggregate keys only, and --
+    critically -- the per-repo arrays from report_data.json can never
+    appear in it under any code path."""
+
+    def _get_with_data(self, data, *, headers=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            reports_dir = Path(tmp) / "work" / "out" / "reports"
+            reports_dir.mkdir(parents=True)
+            import json as _json
+            (reports_dir / "report_data.json").write_text(_json.dumps(data))
+            with patch("control_center.main._workspace_root", return_value=Path(tmp)):
+                return client.get("/report/public-stats", headers=headers or {})
+
+    def test_200_no_token_exact_keys(self):
+        resp = self._get_with_data(_FULL_REPORT_DATA)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(set(resp.json().keys()), _PUBLIC_STATS_KEYS)
+
+    def test_values_from_fixture(self):
+        body = self._get_with_data(_FULL_REPORT_DATA).json()
+        self.assertEqual(body["generated_at"], "2026-09-02T04:00:00+00:00")
+        self.assertEqual(body["total_lines"], 1863200)
+        self.assertEqual(body["total_files"], 14820)
+        # statement-weighted: (4000-300)+(2000-780) = 4920 covered of
+        # 6000 total stmts -> 82.0%. NOT the unweighted mean of
+        # (92.5, 61.0) = 76.75 the HTML report would show.
+        self.assertEqual(body["ecosystem_coverage_percent"], 82.0)
+        # two rows have a non-null pct; the third (pct=None) does not.
+        self.assertEqual(body["repos_measured"], 2)
+
+    def test_never_leaks_per_repo_arrays_even_when_populated(self):
+        """The critical negative test: a fully-populated report_data.json
+        (projects/languages/coverage/gitStatus all present) must still
+        produce a response with none of them, by key or by value."""
+        resp = self._get_with_data(_FULL_REPORT_DATA)
+        body = resp.json()
+        self.assertEqual(set(body.keys()), _PUBLIC_STATS_KEYS)
+        raw_text = resp.text
+        for marker in _LEAK_MARKERS:
+            with self.subTest(marker=marker):
+                self.assertNotIn(marker, raw_text)
+        # and nothing list/dict-shaped snuck through as a value
+        for v in body.values():
+            self.assertNotIsInstance(v, (list, dict))
+
+    def test_token_does_not_change_shape(self):
+        """Presence of a valid admin token must not widen the response --
+        this endpoint has exactly one shape for everyone."""
+        anon = self._get_with_data(_FULL_REPORT_DATA).json()
+        authed = self._get_with_data(_FULL_REPORT_DATA, headers=_admin_headers()).json()
+        self.assertEqual(anon, authed)
+
+    def test_no_report_data_returns_200_null_shape_not_404(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("control_center.main._workspace_root", return_value=Path(tmp)):
+                resp = client.get("/report/public-stats")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {
+            "generated_at": None,
+            "total_lines": None,
+            "total_files": None,
+            "ecosystem_coverage_percent": None,
+            "repos_measured": 0,
+        })
+
+    def test_malformed_report_data_returns_200_null_shape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reports_dir = Path(tmp) / "work" / "out" / "reports"
+            reports_dir.mkdir(parents=True)
+            (reports_dir / "report_data.json").write_text("not-json{")
+            with patch("control_center.main._workspace_root", return_value=Path(tmp)):
+                resp = client.get("/report/public-stats")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["repos_measured"], 0)
+        self.assertIsNone(resp.json()["ecosystem_coverage_percent"])
+
+    def test_no_coverage_rows_with_data_gives_null_percent(self):
+        data = dict(_FULL_REPORT_DATA)
+        data["coverage"] = [
+            {"repo": "x", "status": "no_total_found", "pct": None,
+             "stmts": None, "missed": None, "branches": None, "failUnder": None},
+        ]
+        body = self._get_with_data(data).json()
+        self.assertIsNone(body["ecosystem_coverage_percent"])
+        self.assertEqual(body["repos_measured"], 0)
+
+    def test_non_dict_top_level_json_returns_null_shape(self):
+        # report_data.json is valid JSON but not an object (e.g. a bare
+        # list) -- treated the same as absent/malformed.
+        body = self._get_with_data([1, 2, 3]).json()
+        self.assertEqual(body["repos_measured"], 0)
+        self.assertIsNone(body["total_lines"])
+
+    def test_non_dict_coverage_row_is_skipped(self):
+        data = dict(_FULL_REPORT_DATA)
+        data["coverage"] = [
+            "junk",
+            {"repo": "omnibioai-tes", "pct": 90.0, "stmts": 1000, "missed": 100},
+        ]
+        body = self._get_with_data(data).json()
+        self.assertEqual(body["repos_measured"], 1)
+        self.assertEqual(body["ecosystem_coverage_percent"], 90.0)
+
+    def test_grand_missing_gives_null_totals_but_still_computes_coverage(self):
+        data = {k: v for k, v in _FULL_REPORT_DATA.items() if k != "grand"}
+        body = self._get_with_data(data).json()
+        self.assertIsNone(body["total_lines"])
+        self.assertIsNone(body["total_files"])
+        self.assertEqual(body["ecosystem_coverage_percent"], 82.0)
+
+    def test_registered_directly_on_app_not_report_router(self):
+        """report_router carries a platform.manage_infra include-time gate;
+        this route must not be on it (it 200s with no token, proven
+        above). Guard the structural placement too."""
+        import control_center.api.routes_report as routes_report
+        report_router_paths = {r.path for r in routes_report.router.routes}
+        self.assertNotIn("/report/public-stats", report_router_paths)
+
+
+class TestLlmsPublicAccess(unittest.TestCase):
+    """PART 2 (2026-09-02 investigation): GET /llms restored to public.
+    Commit 8705cbf's blanket llm_router gate collapsed it into the admin
+    tier; it backs ControlApp's anonymous LLMs page (91755fb,
+    docs/public-control-center.md). GET /knowledge-base on the same
+    router stays gated -- see TestKnowledgeBaseStillGated below and
+    TestPlatformManageInfraAuth."""
+
+    def test_200_when_no_token(self):
+        resp = client.get("/llms")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertIn("ollama", body)
+        self.assertIn("api_keys", body)
+        # boolean-only for secrets: no key value ever, just `configured`.
+        for provider in body["api_keys"].values():
+            self.assertIn("configured", provider)
+            self.assertIsInstance(provider["configured"], bool)
+
+    def test_200_with_token_too(self):
+        self.assertEqual(client.get("/llms", headers=_admin_headers()).status_code, 200)
+
+
+class TestOverGateRegressionGuard(unittest.TestCase):
+    """The 2026-09-02 revert must not spill past /report/status + /llms.
+    Every route below stays platform.manage_infra-gated (401 w/o token)
+    exactly as commit 8705cbf left it. Overlaps TestPlatformManageInfraAuth
+    on purpose -- this one is the named, human-readable list from the
+    change's own scope statement."""
+
+    STILL_GATED = (
+        "/",
+        "/report/data",
+        "/coverage/status",
+        "/knowledge-base",
+        "/storage",
+        "/cron/jobs",
+        "/cron/jobs/mysql-backup/log",
+    )
+
+    def test_still_401_without_token(self):
+        for path in self.STILL_GATED:
+            with self.subTest(path=path):
+                self.assertEqual(client.get(path).status_code, 401)
 
 
 if __name__ == "__main__":
