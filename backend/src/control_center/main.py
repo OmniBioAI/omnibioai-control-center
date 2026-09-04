@@ -751,10 +751,12 @@ def report_status() -> JSONResponse:
     added a platform.manage_infra gate here; the 2026-09-02 investigation
     confirmed that was an accidental over-gate (it broke the anonymous
     dashboard it was auditing) and reverted it. /report/generate (POST,
-    above) stays platform.manage_content-gated, and GET / plus
-    GET /report/data stay platform.manage_infra-gated -- only this poll
-    route and GET /llms were restored. The response carries job state
-    plus report_exists/report_generated_at; `message` can hold report-job
+    above) stays platform.manage_content-gated, and GET / stays
+    platform.manage_infra-gated. GET /report/data was restored to public
+    too, the night after this one (2026-09-03 decision, see that route's
+    own docstring) -- this route, GET /llms, and now GET /report/data are
+    the three public exceptions. The response carries job state plus
+    report_exists/report_generated_at; `message` can hold report-job
     stderr on failure -- a known minor follow-up, not re-scoped here."""
     state = _job.as_dict()
     report_path = _workspace_root() / "work" / "out" / "reports" / "omnibioai_ecosystem_report.html"
@@ -864,11 +866,32 @@ def coverage_status(_admin: dict = Depends(require_permission("platform.manage_i
 
 
 @app.get("/report/data")
-def report_data(_admin: dict = Depends(require_permission("platform.manage_infra"))) -> JSONResponse:
+def report_data() -> JSONResponse:
     """Return structured JSON data for the React frontend (projects, languages, coverage).
 
-    Gated: previously had no auth requirement at all -- same fix as
-    /report/status above."""
+    DELIBERATELY UNAUTHENTICATED (2026-09-03 decision, reversing part of
+    commit 8705cbf). That audit gated this route behind
+    platform.manage_infra; the 2026-09-02 investigation the next day
+    restored /report/status and /llms to public but *declined* to revert
+    this one, because its projects[]/languages[]/coverage[]/gitStatus[]
+    arrays name every repo and expose live dev state (gitStatus[] in
+    particular: branch names, modified/untracked/unpushed commit counts)
+    -- see the /report/public-stats section comment below, which was
+    built as the narrow public alternative at the time.
+
+    Tonight's decision is to accept that tradeoff instead: restoring this
+    route restores ControlApp's full Projects/Languages/Coverage/
+    Ecosystem-Status dashboard on control.omnibioai.org (PublicEcosystemPage.
+    tsx / EcosystemReportTabs.tsx all read from this one endpoint -- see
+    that page's own docstring), which had been silently broken (every tab
+    showed "No report data yet") since this route got gated. gitStatus[]
+    becoming publicly visible is accepted, not an oversight -- confirmed
+    explicitly for this change, unlike 8705cbf's original gate.
+    /report/public-stats stays as-is (still the minimal, per-repo-free
+    aggregate the dashboard's own summary tiles could use), just no
+    longer the only public source for this data. GET / and
+    /coverage/status remain platform.manage_infra-gated; nothing else
+    about 8705cbf's audit changes here."""
     data_path = _workspace_root() / "work" / "out" / "reports" / "report_data.json"
     if not data_path.exists():
         return JSONResponse({"error": "No report data yet. Generate the report first."}, status_code=404)
@@ -883,20 +906,24 @@ def report_data(_admin: dict = Depends(require_permission("platform.manage_infra
 # GET /report/public-stats — deliberately unauthenticated ecosystem totals
 # ==============================================================================
 #
-# Unlike GET / and GET /report/data (both platform.manage_infra-gated),
-# this route is reachable with no token at all. It exposes ONLY a handful
-# of ecosystem-wide aggregate numbers and never the per-repo breakdowns
-# that make /report/data sensitive.
+# Like GET /report/data (also public as of 2026-09-03, see that route's
+# docstring) and unlike GET / (still platform.manage_infra-gated), this
+# route is reachable with no token at all. It exposes ONLY a handful of
+# ecosystem-wide aggregate numbers and never the per-repo breakdowns that
+# GET /report/data now also exposes.
 #
 # Design intent: docs/public-control-center.md (the Public Read-Only
 # Control Center architecture, 91755fb / 3cbc785) established a
 # public/admin split. Commit 8705cbf's route audit gated GET /report/data
-# wholesale; the 2026-09-02 investigation deliberately declined to revert
-# that (its projects[]/languages[]/coverage[]/gitStatus[] arrays leak the
-# private repo roster and live dev state), and this narrow endpoint is the
-# agreed replacement for the one genuinely-public slice of that data --
-# "how many lines of code, how well tested", with nothing that names a
-# repo or reveals structure.
+# wholesale; the 2026-09-02 investigation declined to revert that (its
+# projects[]/languages[]/coverage[]/gitStatus[] arrays leak the private
+# repo roster and live dev state) and built this narrow endpoint instead
+# as the one genuinely-public slice of that data -- "how many lines of
+# code, how well tested", with nothing that names a repo or reveals
+# structure. The 2026-09-03 decision to restore GET /report/data itself
+# superseded that call (the tradeoff was accepted instead), but this
+# route stays: it's still the smaller, repo-name-free surface for anyone
+# who only wants the aggregate totals.
 #
 # CONTRACT (fail-closed, mirrors routes_dashboard.py's PUBLIC_FIELDS /
 # _apply_public_contract): the response is built by EXPLICIT ALLOWLIST.
@@ -1018,10 +1045,11 @@ def report_public_stats() -> JSONResponse:
     include_router() gates behind platform.manage_infra). Returns exactly
     the five keys in _PUBLIC_STATS_FIELDS -- {generated_at, total_lines,
     total_files, ecosystem_coverage_percent, repos_measured} -- and never
-    the per-repo projects[]/languages[]/coverage[]/gitStatus[] arrays that
-    keep GET /report/data admin-only. See the section comment above for
-    the full rationale (docs/public-control-center.md, the 2026-09-02
-    public/admin-split investigation).
+    the per-repo projects[]/languages[]/coverage[]/gitStatus[] arrays,
+    even though GET /report/data now also exposes those (2026-09-03
+    decision). See the section comment above for the full rationale
+    (docs/public-control-center.md, the 2026-09-02 public/admin-split
+    investigation and its 2026-09-03 partial reversal).
 
     Fails to null, not 404: with no report generated yet, returns HTTP 200
     and _PUBLIC_STATS_NULL, matching GET /dashboard/summary's posture for

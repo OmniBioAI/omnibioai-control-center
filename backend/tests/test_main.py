@@ -456,15 +456,47 @@ class TestRunReportJob(unittest.TestCase):
 
 
 class TestReportData(unittest.TestCase):
-    def test_401_when_no_token(self):
-        resp = client.get("/report/data")
-        self.assertEqual(resp.status_code, 401)
+    """DELIBERATELY PUBLIC (2026-09-03 decision, reversing part of commit
+    8705cbf): restores ControlApp's full Projects/Languages/Coverage/
+    Ecosystem-Status dashboard, accepting gitStatus[] (branch names,
+    modified/untracked/unpushed commit counts) becoming publicly visible
+    as a conscious tradeoff -- see report_data()'s own docstring in
+    main.py. Was `test_401_when_no_token` asserting 401 here, same
+    pattern as TestReportStatus.test_200_when_no_token /
+    TestLlmsPublicAccess. Every case below now runs with no auth header
+    at all, proving the route doesn't require one at any point in its
+    logic (missing file, present file, malformed file)."""
+
+    def test_200_when_no_token(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reports_dir = Path(tmp) / "work" / "out" / "reports"
+            reports_dir.mkdir(parents=True)
+            (reports_dir / "report_data.json").write_text('{"projects": 3, "languages": ["python"]}')
+            os.environ["WORKSPACE_ROOT"] = tmp
+            try:
+                resp = client.get("/report/data")
+            finally:
+                del os.environ["WORKSPACE_ROOT"]
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"projects": 3, "languages": ["python"]})
+
+    def test_200_with_token_too(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reports_dir = Path(tmp) / "work" / "out" / "reports"
+            reports_dir.mkdir(parents=True)
+            (reports_dir / "report_data.json").write_text('{"projects": 3}')
+            os.environ["WORKSPACE_ROOT"] = tmp
+            try:
+                resp = client.get("/report/data", headers=_admin_headers())
+            finally:
+                del os.environ["WORKSPACE_ROOT"]
+        self.assertEqual(resp.status_code, 200)
 
     def test_404_when_no_report_data(self):
         with tempfile.TemporaryDirectory() as tmp:
             os.environ["WORKSPACE_ROOT"] = tmp
             try:
-                resp = client.get("/report/data", headers=_admin_headers())
+                resp = client.get("/report/data")
             finally:
                 del os.environ["WORKSPACE_ROOT"]
         self.assertEqual(resp.status_code, 404)
@@ -477,7 +509,7 @@ class TestReportData(unittest.TestCase):
             (reports_dir / "report_data.json").write_text('{"projects": 3, "languages": ["python"]}')
             os.environ["WORKSPACE_ROOT"] = tmp
             try:
-                resp = client.get("/report/data", headers=_admin_headers())
+                resp = client.get("/report/data")
             finally:
                 del os.environ["WORKSPACE_ROOT"]
         self.assertEqual(resp.status_code, 200)
@@ -490,7 +522,7 @@ class TestReportData(unittest.TestCase):
             (reports_dir / "report_data.json").write_text("not-json{")
             os.environ["WORKSPACE_ROOT"] = tmp
             try:
-                resp = client.get("/report/data", headers=_admin_headers())
+                resp = client.get("/report/data")
             finally:
                 del os.environ["WORKSPACE_ROOT"]
         self.assertEqual(resp.status_code, 500)
@@ -582,8 +614,14 @@ class TestPlatformManageInfraAuth(unittest.TestCase):
     ControlApp's anonymous Ecosystem Report page and /llms its anonymous
     LLMs page. Their "public, no token needed" behavior is now asserted by
     TestReportStatus.test_200_when_no_token and TestLlmsPublicAccess
-    respectively. Everything still in _cases() below stays gated -- that
-    is the regression guard this investigation must not weaken."""
+    respectively.
+
+    NOTE (2026-09-03 decision): /report/data has also been removed from
+    this list, for the same reason -- see report_data()'s own docstring
+    in main.py and TestReportData above. Unlike the 09-02 cases, this one
+    is a conscious, accepted tradeoff (gitStatus[] becoming public), not a
+    correction of an over-gate. Everything still in _cases() below stays
+    gated -- that is the regression guard this decision must not weaken."""
 
     def _cases(self):
         return (
@@ -593,7 +631,6 @@ class TestPlatformManageInfraAuth(unittest.TestCase):
             ("GET", "/config"),
             ("GET", "/"),
             ("GET", "/report"),
-            ("GET", "/report/data"),
             ("GET", "/coverage/status"),
             ("GET", "/knowledge-base"),
             ("GET", "/storage"),
@@ -816,15 +853,15 @@ class TestLlmsPublicAccess(unittest.TestCase):
 
 
 class TestOverGateRegressionGuard(unittest.TestCase):
-    """The 2026-09-02 revert must not spill past /report/status + /llms.
-    Every route below stays platform.manage_infra-gated (401 w/o token)
-    exactly as commit 8705cbf left it. Overlaps TestPlatformManageInfraAuth
-    on purpose -- this one is the named, human-readable list from the
-    change's own scope statement."""
+    """The 2026-09-02 revert must not spill past /report/status + /llms,
+    and the 2026-09-03 decision must not spill past /report/data on top
+    of those. Every route below stays platform.manage_infra-gated (401
+    w/o token) exactly as commit 8705cbf left it. Overlaps
+    TestPlatformManageInfraAuth on purpose -- this one is the named,
+    human-readable list from the change's own scope statement."""
 
     STILL_GATED = (
         "/",
-        "/report/data",
         "/coverage/status",
         "/knowledge-base",
         "/storage",
