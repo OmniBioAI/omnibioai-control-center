@@ -491,6 +491,21 @@ window.addEventListener('hashchange', function(){{ sbnavApplyHash(); }});
             "missed":    int(missed)   if (missed    is not None and missed   == missed)   else None,
             "branches":  int(branches) if (branches  is not None and branches == branches) else None,
             "failUnder": float(fail_u) if (fail_u    is not None and fail_u   == fail_u)   else None,
+            "testFramework": row.get("test_framework"),
+            "testFiles": int(row["test_files"]) if row.get("test_files") == row.get("test_files") and row.get("test_files") is not None else None,
+            "testFileTypes": row.get("test_file_types") or {},
+            "testsCollected": int(row["tests_collected"]) if row.get("tests_collected") == row.get("tests_collected") and row.get("tests_collected") is not None else None,
+            "testsExecuted": int(row["tests_executed"]) if row.get("tests_executed") == row.get("tests_executed") and row.get("tests_executed") is not None else None,
+            "testsPassed": int(row["tests_passed"]) if row.get("tests_passed") == row.get("tests_passed") and row.get("tests_passed") is not None else None,
+            "testsFailed": int(row["tests_failed"]) if row.get("tests_failed") == row.get("tests_failed") and row.get("tests_failed") is not None else None,
+            "testsSkipped": int(row["tests_skipped"]) if row.get("tests_skipped") == row.get("tests_skipped") and row.get("tests_skipped") is not None else None,
+            "testErrors": int(row["test_errors"]) if row.get("test_errors") == row.get("test_errors") and row.get("test_errors") is not None else None,
+            "collectionErrors": int(row["collection_errors"]) if row.get("collection_errors") == row.get("collection_errors") and row.get("collection_errors") is not None else None,
+            "testCaseTypes": row.get("test_case_types") or {},
+            "testDetailBasis": row.get("test_detail_basis"),
+            "installStatus": row.get("install_status"),
+            "installReturncode": int(row["install_returncode"]) if row.get("install_returncode") == row.get("install_returncode") and row.get("install_returncode") is not None else None,
+            "installStderrTail": row.get("install_stderr_tail"),
         })
 
     # collect_git_status() was already run once above for gitstatus_html;
@@ -572,7 +587,12 @@ def generate_report(ecosystem_root: Path,
         coverage_df = pd.DataFrame(columns=[
             "repo","path","status","returncode","statements","missed",
             "branches","partial_branches","coverage_pct","coverage_band",
-            "fail_under","total_line","stderr_tail"])
+            "fail_under","test_framework","test_files","test_file_types",
+            "tests_collected","tests_executed","tests_passed","tests_failed",
+            "tests_skipped","tests_xfailed","tests_xpassed","test_errors",
+            "collection_errors","test_case_types","test_detail_basis",
+            "install_status","install_returncode","install_stderr_tail",
+            "total_line","stderr_tail"])
     else:
         precomputed_dir = work_dir / "out" / "coverage"
         if precomputed_dir.is_dir():

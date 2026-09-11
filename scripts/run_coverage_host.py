@@ -9,6 +9,10 @@ repo's dependencies are already installed.  Saves a per-repo result JSON to:
 
   ${WORK_DIR}/out/coverage/<repo_name>.json
 
+Each record includes code coverage and test inventory fields: framework, test
+files, collected/executed/passed/failed/skipped counts, test-file types, and
+collection errors. Test types are path-based and labeled in the report.
+
 The control-center container reads those files (via the /workspace volume mount)
 instead of running pytest itself, which would fail due to missing package installs.
 
@@ -34,6 +38,8 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -52,11 +58,14 @@ REPOS = [
     "omnibioai-toolserver",
     "omnibioai-tool-runtime",
     "omnibioai-control-center",
+    "omnibioai-dev-docker",
     "omnibioai-sdk",
     "omnibioai-design-tokens",
     "omnibioai-workflow-bundles",
     "omnibioai-model-registry",
     "omnibioai-tool-images",
+    "omnibioai-studio",
+    "omnibioai-ecosystem-regression",
     "omnibioai-dev-hub",
     "omnibioai-videos",
     "omnibioai-launcher",
@@ -71,6 +80,10 @@ REPOS = [
     "omnibioai-security-audit",
     "omnibioai-security-sdk",
     "omnibioai-iam-client",
+    "omnibioai-ui",
+    "omnibioai-utils",
+    "omnibioai-landing",
+    "omnibioai-db-init",
 ]
 
 # Repos that need more than the default 300s timeout
@@ -103,16 +116,173 @@ def _has_pytest_project(repo: Path) -> bool:
 
 
 def _has_npm_coverage_project(repo: Path) -> bool:
-    """Return whether the repo exposes the standard npm coverage command."""
+    """Return whether the repo exposes a supported npm coverage command."""
+    return _npm_coverage_script(repo) is not None
+
+
+def _npm_coverage_script(repo: Path) -> Optional[str]:
+    """Return the repository's coverage script, if it has one."""
     package_file = repo / "package.json"
     if not package_file.exists():
-        return False
+        return None
     try:
         package = json.loads(package_file.read_text(encoding="utf-8"))
-        script = package.get("scripts", {}).get("test:coverage")
-        return isinstance(script, str) and bool(script.strip())
+        scripts = package.get("scripts", {})
+        for name in ("test:coverage", "coverage", "coverage:ui"):
+            script = scripts.get(name)
+            if isinstance(script, str) and script.strip():
+                return name
+        return None
     except (OSError, json.JSONDecodeError, AttributeError):
-        return False
+        return None
+
+
+def _empty_test_details(framework: Optional[str] = None) -> Dict[str, Any]:
+    return {
+        "test_framework": framework,
+        "test_files": 0,
+        "test_file_types": {},
+        "tests_collected": None,
+        "tests_executed": None,
+        "tests_passed": None,
+        "tests_failed": None,
+        "tests_skipped": None,
+        "tests_xfailed": None,
+        "tests_xpassed": None,
+        "test_errors": None,
+        "collection_errors": None,
+        "test_case_types": {},
+        "test_detail_basis": None,
+    }
+
+
+def _test_type_for_path(path: str) -> str:
+    """Classify a test path conservatively for transparent reporting."""
+    value = path.replace("\\", "/").lower()
+    name = Path(value).name
+    if "/e2e/" in value or "e2e" in name:
+        return "e2e"
+    if "/integration/" in value or "integration" in name:
+        return "integration"
+    if "/smoke/" in value or "smoke" in name:
+        return "smoke"
+    if "/security/" in value or "security" in name:
+        return "security"
+    if "/unit/" in value or "unit" in name:
+        return "unit"
+    if "/plugins/" in value or value.startswith("plugins/"):
+        return "plugin"
+    if "/ui/" in value or ".test." in value or ".spec." in value:
+        return "ui"
+    return "other"
+
+
+def _discover_test_files(repo: Path) -> Dict[str, Any]:
+    details = _empty_test_details()
+    type_counts: Dict[str, int] = {}
+    files = []
+    excluded = {".git", "node_modules", ".venv", "venv", "coverage", "dist", "release", "__pycache__"}
+    js_test_suffixes = (
+        ".test.js", ".test.jsx", ".test.ts", ".test.tsx", ".test.mjs", ".test.mts", ".test.cjs", ".test.cts",
+        ".spec.js", ".spec.jsx", ".spec.ts", ".spec.tsx", ".spec.mjs", ".spec.mts", ".spec.cjs", ".spec.cts",
+    )
+    test_extensions = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".mts", ".cjs", ".cts"}
+    try:
+        for path in repo.rglob("*"):
+            if not path.is_file() or excluded.intersection(path.parts):
+                continue
+            name = path.name.lower()
+            is_test = (
+                (name.startswith("test_") and path.suffix == ".py")
+                or name.endswith("_test.py")
+                or name.endswith(js_test_suffixes)
+                or ("__tests__" in path.parts and path.suffix.lower() in test_extensions)
+            )
+            if is_test:
+                files.append(path)
+                kind = _test_type_for_path(str(path.relative_to(repo)))
+                type_counts[kind] = type_counts.get(kind, 0) + 1
+    except OSError:
+        pass
+    details["test_files"] = len(files)
+    details["test_file_types"] = dict(sorted(type_counts.items()))
+    return details
+
+
+def _summary_count(lines: List[str], label: str) -> int:
+    pattern = re.compile(rf"(?<![A-Za-z])(\d+)\s+{re.escape(label)}\b", re.IGNORECASE)
+    return sum(int(match.group(1)) for line in lines for match in pattern.finditer(line))
+
+
+def _parse_junit_details(junit_path: Path, stdout: str, repo: Path) -> Dict[str, Any]:
+    details = _discover_test_files(repo)
+    details["test_framework"] = "pytest"
+    details["test_detail_basis"] = "JUnit test cases; test-file types are path-based"
+    collected = re.search(r"(\d+)\s+(?:tests?|items)\s+collected", stdout, re.IGNORECASE)
+    collection_errors = re.search(r"(\d+)\s+errors?\s+during\s+collection", stdout, re.IGNORECASE)
+    details["tests_collected"] = int(collected.group(1)) if collected else None
+    details["collection_errors"] = int(collection_errors.group(1)) if collection_errors else 0
+    case_types: Dict[str, int] = {}
+    try:
+        root = ET.parse(junit_path).getroot()
+        cases = list(root.iter("testcase"))
+        counts = {"passed": 0, "failed": 0, "skipped": 0, "xfail": 0, "xpass": 0, "errors": 0}
+        for case in cases:
+            path = case.attrib.get("file") or case.attrib.get("classname", "")
+            kind = _test_type_for_path(path)
+            case_types[kind] = case_types.get(kind, 0) + 1
+            if case.find("skipped") is not None:
+                counts["skipped"] += 1
+            elif case.find("failure") is not None:
+                counts["failed"] += 1
+            elif case.find("error") is not None:
+                counts["errors"] += 1
+            else:
+                counts["passed"] += 1
+        details["tests_executed"] = len(cases)
+        details["tests_passed"] = counts["passed"]
+        details["tests_failed"] = counts["failed"]
+        details["tests_skipped"] = counts["skipped"]
+        details["tests_xfailed"] = counts["xfail"]
+        details["tests_xpassed"] = counts["xpass"]
+        details["test_errors"] = counts["errors"]
+    except (OSError, ET.ParseError):
+        lines = stdout.splitlines()
+        details["tests_passed"] = _summary_count(lines, "passed")
+        details["tests_failed"] = _summary_count(lines, "failed")
+        details["tests_skipped"] = _summary_count(lines, "skipped")
+        details["tests_executed"] = sum(
+            details[key] or 0 for key in ("tests_passed", "tests_failed", "tests_skipped")
+        )
+        details["test_errors"] = 0
+    if details["tests_collected"] is None:
+        details["tests_collected"] = details["tests_executed"]
+    details["test_case_types"] = dict(sorted(case_types.items()))
+    return details
+
+
+def _parse_npm_test_details(stdout: str, repo: Path, framework: str) -> Dict[str, Any]:
+    details = _discover_test_files(repo)
+    details["test_framework"] = framework
+    details["test_detail_basis"] = "runner summary; test-file types are path-based"
+    clean_stdout = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", stdout)
+    lines = clean_stdout.splitlines()
+    summary_lines = [
+        line for line in lines
+        if re.search(r"^\s*Tests\b|^\s*#\s*(?:tests|pass|fail|skip|todo)\b", line, re.IGNORECASE)
+    ]
+    details["tests_passed"] = _summary_count(summary_lines, "passed")
+    details["tests_failed"] = _summary_count(summary_lines, "failed")
+    details["tests_skipped"] = _summary_count(summary_lines, "skipped")
+    details["tests_xfailed"] = _summary_count(summary_lines, "xfail")
+    details["tests_xpassed"] = _summary_count(summary_lines, "xpass")
+    details["test_errors"] = _summary_count(summary_lines, "errors")
+    details["tests_executed"] = sum(
+        details[key] or 0 for key in ("tests_passed", "tests_failed", "tests_skipped", "tests_xfailed", "tests_xpassed")
+    )
+    details["tests_collected"] = details["tests_executed"]
+    details["collection_errors"] = 0
+    return details
 
 
 def _pytest_cwd(repo: Path) -> Path:
@@ -208,10 +378,30 @@ def _parse_coverage_json(cwd: Path) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _parse_text_coverage(output: str) -> Optional[Dict[str, Any]]:
+    """Parse the aggregate statement percentage emitted by c8/nyc."""
+    for line in output.splitlines():
+        if not re.match(r"^\s*All files\b", line, re.IGNORECASE):
+            continue
+        values = re.findall(r"\d+(?:\.\d+)?%?", line)
+        if values:
+            return {
+                "statements": None,
+                "missed": None,
+                "branches": None,
+                "partial_branches": None,
+                "coverage_pct": float(values[0].rstrip("%")),
+            }
+    return None
+
+
 def _parse_vitest_coverage_json(cwd: Path) -> Optional[Dict[str, Any]]:
     """Parse Vitest's coverage-summary or coverage-final JSON output."""
-    summary_file = cwd / "coverage" / "coverage-summary.json"
-    if summary_file.exists():
+    summary_files = [cwd / "coverage" / "coverage-summary.json"]
+    summary_files.extend(cwd.glob("**/coverage/coverage-summary.json"))
+    for summary_file in dict.fromkeys(summary_files):
+        if not summary_file.exists():
+            continue
         try:
             total = json.loads(summary_file.read_text(encoding="utf-8")).get("total", {})
             statements = total.get("statements", {})
@@ -227,8 +417,10 @@ def _parse_vitest_coverage_json(cwd: Path) -> Optional[Dict[str, Any]]:
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
             pass
 
-    final_file = cwd / "coverage" / "coverage-final.json"
-    if not final_file.exists():
+    final_files = [cwd / "coverage" / "coverage-final.json"]
+    final_files.extend(cwd.glob("**/coverage/coverage-final.json"))
+    final_file = next((path for path in dict.fromkeys(final_files) if path.exists()), None)
+    if final_file is None:
         return None
     try:
         data = json.loads(final_file.read_text(encoding="utf-8"))
@@ -265,7 +457,7 @@ def _resolve_repo(root: Path, name: str) -> Path:
 
 
 def run_npm_repo(repo: Path, timeout_override: int | None = None) -> Dict[str, Any]:
-    """Run a repository's test:coverage script and normalize its result."""
+    """Run a repository's configured npm coverage script and normalize its result."""
     result: Dict[str, Any] = {
         "repo": repo.name, "path": str(repo),
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -274,11 +466,16 @@ def run_npm_repo(repo: Path, timeout_override: int | None = None) -> Dict[str, A
         "total_line": None, "stdout_tail": None, "stderr_tail": None,
         "status": "ok",
     }
+    script_name = _npm_coverage_script(repo)
+    result.update(_empty_test_details("npm"))
+    if script_name is None:
+        result["status"] = "no_coverage_script"
+        return result
     timeout = timeout_override or REPO_TIMEOUTS.get(repo.name, DEFAULT_TIMEOUT)
-    print(f"    npm run test:coverage (timeout={timeout}s) …", end=" ", flush=True)
+    print(f"    npm run {script_name} (timeout={timeout}s) …", end=" ", flush=True)
     try:
         proc = subprocess.run(
-            ["npm", "run", "test:coverage"], cwd=str(repo), env=_subprocess_env(repo),
+            ["npm", "run", script_name], cwd=str(repo), env=_subprocess_env(repo),
             capture_output=True, text=True, timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
@@ -290,10 +487,13 @@ def run_npm_repo(repo: Path, timeout_override: int | None = None) -> Dict[str, A
     result["returncode"] = proc.returncode
     result["stdout_tail"] = "\n".join(proc.stdout.strip().splitlines()[-50:]) or None
     result["stderr_tail"] = "\n".join(proc.stderr.strip().splitlines()[-10:]) or None
-    cov_data = _parse_vitest_coverage_json(repo)
+    framework = "vitest" if "vitest" in (proc.stdout + proc.stderr).lower() else "node"
+    result.update(_parse_npm_test_details(proc.stdout + "\n" + proc.stderr, repo, framework))
+    json_cov = _parse_vitest_coverage_json(repo)
+    cov_data = json_cov or _parse_text_coverage(proc.stdout)
     if cov_data:
         result.update(cov_data)
-        result["total_line"] = "vitest-json"
+        result["total_line"] = "coverage-json" if json_cov else "coverage-text"
         result["status"] = "ok" if proc.returncode == 0 else "test_failure"
     else:
         result["status"] = "no_total_found" if proc.returncode == 0 else "test_failure"
@@ -319,6 +519,9 @@ def run_repo(repo: Path, timeout_override: int | None = None) -> Dict[str, Any]:
         "stdout_tail":      None,
         "stderr_tail":      None,
         "status":           "ok",
+        "install_status":   "not_attempted",
+        "install_returncode": None,
+        "install_stderr_tail": None,
     }
 
     if not repo.exists():
@@ -344,12 +547,22 @@ def run_repo(repo: Path, timeout_override: int | None = None) -> Dict[str, Any]:
             [sys.executable, "-m", "pip", "install", "-e", ".", "--quiet", "--no-deps"],
             cwd=str(cwd), capture_output=True, timeout=120,
         )
+        result["install_returncode"] = pip.returncode
+        result["install_status"] = "ok" if pip.returncode == 0 else "failed"
+        pip_stderr = pip.stderr.decode(errors="replace") if isinstance(pip.stderr, bytes) else (pip.stderr or "")
+        result["install_stderr_tail"] = "\n".join(pip_stderr.strip().splitlines()[-10:]) or None
         print("ok" if pip.returncode == 0 else f"WARN rc={pip.returncode}")
 
+    junit_handle = tempfile.NamedTemporaryFile(
+        prefix=f"{repo.name}-", suffix=".junit.xml", delete=False
+    )
+    junit_path = Path(junit_handle.name)
+    junit_handle.close()
     cmd = [
         sys.executable, "-m", "pytest",
         *cov_args,
         "--cov-report=term-missing", "--cov-report=json",
+        "--junitxml", str(junit_path),
         "--tb=no", "-q",
         "-p", "no:cacheprovider",
         "--continue-on-collection-errors",
@@ -357,13 +570,23 @@ def run_repo(repo: Path, timeout_override: int | None = None) -> Dict[str, Any]:
     ]
     timeout = timeout_override or REPO_TIMEOUTS.get(repo.name, DEFAULT_TIMEOUT)
     print(f"    pytest {' '.join(cov_args)} (timeout={timeout}s) …", end=" ", flush=True)
-    proc = subprocess.run(
-        cmd, cwd=str(cwd), env=env,
-        capture_output=True, text=True, timeout=timeout,
-    )
+    try:
+        proc = subprocess.run(
+            cmd, cwd=str(cwd), env=env,
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        result.update(_parse_junit_details(junit_path, str(exc), repo))
+        result["status"] = "timeout"
+        result["stderr_tail"] = str(exc)
+        junit_path.unlink(missing_ok=True)
+        print("timeout")
+        return result
     print(f"rc={proc.returncode}")
 
     result["returncode"] = proc.returncode
+    result.update(_parse_junit_details(junit_path, proc.stdout, repo))
+    junit_path.unlink(missing_ok=True)
 
     # Capture tails for status classification in generate_report.py
     stdout_lines = proc.stdout.strip().splitlines()

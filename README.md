@@ -507,8 +507,10 @@ The report is a single interactive HTML file with a left sidebar-nav layout (not
 | Architecture | — | SVG lane diagram of all services |
 | Projects | Code Summary | Code line distribution across repositories |
 | | Languages | Language breakdown across the ecosystem |
-| | Code Coverage | Per-repo pytest coverage with progress bars |
+| | Code Coverage | Per-repo code coverage plus collected/executed/passed/failed/skipped test counts, runner framework, test-file types, and collection errors |
 | Ecosystem Status | — | Per-repo git working-tree status (branch, clean/dirty, modified/untracked/unpushed) across every repo under the ecosystem root — same scan as `bash omnibioai-utils/ecosystem_status.sh`. Also surfaced as its own tab on the Admin Console's Ecosystem Report page (`EcosystemPage.tsx`), both reading the same `gitStatus` array from `/report/data` |
+The Code Coverage view keeps code coverage and test execution evidence separate. Host collection writes one JSON record per target repository under work/out/coverage/; the report reads those records when available. Test types are classified from test paths (unit, integration, e2e, smoke, security, plugin, ui, or other), and the report identifies the classification basis so path-based categories are not confused with pytest markers.
+
 | Health Status | Overview | KPI summary + status donut + per-service latency bars |
 | | Services | Live per-service health cards |
 | | Disk & Mounts | Disk usage checks + symlink/mount integrity |

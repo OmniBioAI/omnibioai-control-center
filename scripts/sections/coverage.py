@@ -161,6 +161,14 @@ def collect_coverage(target_paths: List[Path],
             "branches": None, "partial_branches": None,
             "coverage_pct": None, "coverage_band": "No data",
             "fail_under": _extract_fail_under(repo),
+            "test_framework": None, "test_files": None, "test_file_types": {},
+            "tests_collected": None, "tests_executed": None,
+            "tests_passed": None, "tests_failed": None, "tests_skipped": None,
+            "tests_xfailed": None, "tests_xpassed": None, "test_errors": None,
+            "collection_errors": None, "test_case_types": {},
+            "test_detail_basis": None,
+            "install_status": "not_attempted", "install_returncode": None,
+            "install_stderr_tail": None,
             "total_line": None, "stderr_tail": None,
         }
         if not repo.exists():
@@ -170,7 +178,13 @@ def collect_coverage(target_paths: List[Path],
             if precomp is not None:
                 for k in ("returncode", "statements", "missed", "branches",
                           "partial_branches", "coverage_pct", "total_line",
-                          "stderr_tail"):
+                          "stderr_tail", "test_framework", "test_files",
+                          "test_file_types", "tests_collected", "tests_executed",
+                          "tests_passed", "tests_failed", "tests_skipped",
+                          "tests_xfailed", "tests_xpassed", "test_errors",
+                          "collection_errors", "test_case_types",
+                          "test_detail_basis", "install_status", "install_returncode",
+                          "install_stderr_tail"):
                     if k in precomp: row[k] = precomp[k]
                 if row["coverage_pct"] is not None:
                     row["coverage_band"] = _classify_coverage_band(row["coverage_pct"])
@@ -217,6 +231,7 @@ def collect_coverage(target_paths: List[Path],
                     row["fail_under"], proc.stdout, proc.stderr)
             else:
                 row["status"] = "no_total_found"
+                row["test_detail_basis"] = "live fallback did not collect test metadata"
         except Exception as e:
             row["status"] = f"error: {e}"
         rows.append(row)
@@ -243,6 +258,23 @@ def coverage_section_html(df: pd.DataFrame, timestamp: str) -> str:
     below_85  = int((valid["coverage_pct"] < 85).sum()) if covered else 0
     no_data   = len(df) - covered
 
+    def _sum_test_field(field: str) -> int:
+        total = 0
+        for value in df.get(field, []):
+            if value is not None and value == value:
+                total += int(value)
+        return total
+
+    total_collected = _sum_test_field("tests_collected")
+    total_executed = _sum_test_field("tests_executed")
+    total_passed = _sum_test_field("tests_passed")
+    total_failed = _sum_test_field("tests_failed")
+    total_skipped = _sum_test_field("tests_skipped")
+    total_collection_errors = _sum_test_field("collection_errors")
+
+    def _safe_int(value):
+        return int(value) if value is not None and value == value else None
+
     rows_js = []
     for _, row in df.iterrows():
         pct = row.get("coverage_pct")
@@ -254,6 +286,18 @@ def coverage_section_html(df: pd.DataFrame, timestamp: str) -> str:
             "missed":    int(row["missed"])     if row.get("missed")     == row.get("missed")     and row.get("missed")     is not None else None,
             "branches":  int(row["branches"])   if row.get("branches")   == row.get("branches")   and row.get("branches")   is not None else None,
             "failUnder": float(row["fail_under"]) if row.get("fail_under") == row.get("fail_under") and row.get("fail_under") is not None else None,
+            "framework": row.get("test_framework"),
+            "testFiles": _safe_int(row.get("test_files")),
+            "collected": _safe_int(row.get("tests_collected")),
+            "executed": _safe_int(row.get("tests_executed")),
+            "passed": _safe_int(row.get("tests_passed")),
+            "failed": _safe_int(row.get("tests_failed")),
+            "skipped": _safe_int(row.get("tests_skipped")),
+            "errors": _safe_int(row.get("test_errors")),
+            "collectionErrors": _safe_int(row.get("collection_errors")),
+            "fileTypes": row.get("test_file_types") or {},
+            "basis": row.get("test_detail_basis"),
+            "installStatus": row.get("install_status"),
             "color":     _cov_color(pct if pct == pct else None),
             "bg":        _cov_bg(pct if pct == pct else None),
         }))
@@ -261,13 +305,26 @@ def coverage_section_html(df: pd.DataFrame, timestamp: str) -> str:
 
     return f"""
 <div class="tab-section">
-<div style="font-size:12px;color:var(--color-text-muted);margin-bottom:12px">best-effort pytest collection · {timestamp}</div>
+<div style="font-size:12px;color:var(--color-text-muted);margin-bottom:12px">best-effort repository coverage and test inventory · {timestamp}</div>
 <div class="kpi-row">
   <div class="kpi"><div class="kpi-label">repos scanned</div><div class="kpi-val">{len(df)}</div><div class="kpi-sub">full ecosystem</div></div>
   <div class="kpi"><div class="kpi-label">with data</div><div class="kpi-val">{covered}</div><div class="kpi-sub">coverage collected</div></div>
   <div class="kpi"><div class="kpi-label">average</div><div class="kpi-val" style="color:#3B6D11">{avg_cov:.1f}%</div><div class="kpi-sub">across {covered} repos</div></div>
   <div class="kpi"><div class="kpi-label">excellent ≥95%</div><div class="kpi-val" style="color:#3B6D11">{excellent}</div><div class="kpi-sub">repos</div></div>
   <div class="kpi"><div class="kpi-label">needs attention</div><div class="kpi-val" style="color:#A32D2D">{below_85}</div><div class="kpi-sub">below 85%</div></div>
+</div>
+
+<div class="section" style="margin-bottom:12px">
+  <div class="sec-title">test inventory and execution</div>
+  <div class="sec-sub">runner counts are separate from code coverage; types are classified from test paths</div>
+  <div class="kpi-row">
+    <div class="kpi"><div class="kpi-label">collected</div><div class="kpi-val">{total_collected:,}</div><div class="kpi-sub">test cases</div></div>
+    <div class="kpi"><div class="kpi-label">executed</div><div class="kpi-val">{total_executed:,}</div><div class="kpi-sub">reported by runners</div></div>
+    <div class="kpi"><div class="kpi-label">passed</div><div class="kpi-val" style="color:#3B6D11">{total_passed:,}</div><div class="kpi-sub">test cases</div></div>
+    <div class="kpi"><div class="kpi-label">failed</div><div class="kpi-val" style="color:#A32D2D">{total_failed:,}</div><div class="kpi-sub">test cases</div></div>
+    <div class="kpi"><div class="kpi-label">skipped</div><div class="kpi-val">{total_skipped:,}</div><div class="kpi-sub">test cases</div></div>
+    <div class="kpi"><div class="kpi-label">collection errors</div><div class="kpi-val" style="color:#854F0B">{total_collection_errors:,}</div><div class="kpi-sub">runner-reported</div></div>
+  </div>
 </div>
 
 <div style="display:grid;grid-template-columns:1fr 200px;gap:12px;margin-bottom:12px">
@@ -312,6 +369,12 @@ def coverage_section_html(df: pd.DataFrame, timestamp: str) -> str:
       <thead><tr>
         <th onclick="covSort('repo')">repository</th>
         <th onclick="covSort('status')">status</th>
+        <th class="r" onclick="covSort('collected')">collected</th>
+        <th class="r" onclick="covSort('passed')">passed</th>
+        <th class="r" onclick="covSort('failed')">failed</th>
+        <th class="r" onclick="covSort('skipped')">skipped</th>
+        <th class="r">errors</th>
+        <th>test types</th>
         <th onclick="covSort('pct')">coverage</th>
         <th class="r" onclick="covSort('stmts')">statements</th>
         <th class="r" onclick="covSort('missed')">missed</th>
@@ -387,10 +450,19 @@ function covApply(){{
     var stBg=r.status==='ok'?'#EAF3DE':r.status.includes('skip')||r.status.includes('missing')?'#F1EFE8':'#FAEEDA';
     var stCol=r.status==='ok'?'#3B6D11':r.status.includes('skip')||r.status.includes('missing')?'#444441':'#854F0B';
     var stLbl=r.status==='ok'?'ok':r.status.includes('skip')?'skipped':r.status.includes('miss')?'missing':r.status.startsWith('error')?'error':'partial';
+    var types=(r.framework?r.framework+' · ':'')+Object.keys(r.fileTypes||{{}}).map(function(k){{return k+': '+r.fileTypes[k];}}).join(', ');
+    if(r.installStatus==='failed')types+=(types?' · ':'')+'install failed';
     var tr=document.createElement('tr');
     var short=r.repo.replace('omnibioai-','').replace('omnibioai_','').replace('omnibioai','omnibioai');
+    tr.title=(r.basis||'')+(r.installStatus==='failed'?' · editable install failed; tests ran in the existing environment':'');
     tr.innerHTML='<td style="font-weight:600;font-size:12px">'+short+'</td>'+
       '<td><span class="badge" style="background:'+stBg+';color:'+stCol+'">'+stLbl+'</span></td>'+
+      '<td class="r">'+(r.collected!==null?r.collected.toLocaleString():'—')+'</td>'+
+      '<td class="r">'+(r.passed!==null?r.passed.toLocaleString():'—')+'</td>'+
+      '<td class="r">'+(r.failed!==null?r.failed.toLocaleString():'—')+'</td>'+
+      '<td class="r">'+(r.skipped!==null?r.skipped.toLocaleString():'—')+'</td>'+
+      '<td class="r">'+(r.errors!==null?r.errors.toLocaleString():'—')+'</td>'+
+      '<td style="font-size:11px;white-space:nowrap">'+(types||'—')+'</td>'+
       '<td style="min-width:120px">'+pctHtml+'</td>'+
       '<td class="r">'+(r.stmts!==null?r.stmts.toLocaleString():'—')+'</td>'+
       '<td class="r">'+(r.missed!==null?r.missed.toLocaleString():'—')+'</td>'+
