@@ -24,7 +24,7 @@ const REPORT_DATA: ReportData = {
   gitStatus: [
     { repo: 'omnibioai-auth', branch: 'main', clean: true, nonMain: false, details: '' },
   ] as any,
-  grand: { code: 5000, comment: 100, blank: 200 } as any,
+  grand: { files: 10, code: 5000, comment: 100, blank: 200 } as any,
   generated_at: '2026-08-14T00:00:00Z',
 }
 

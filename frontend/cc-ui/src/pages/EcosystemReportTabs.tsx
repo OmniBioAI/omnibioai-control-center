@@ -64,7 +64,6 @@ export const LANG: Record<string, { color: string; bg: string; icon: string; lab
 
 export function fmt(n: number) { return n.toLocaleString() }
 export function k(n: number) { return n >= 1000 ? (n / 1000).toFixed(0) + 'k' : String(n) }
-function round1(n: number) { return Math.round(n * 10) / 10 }
 
 // ── Shared UI pieces ───────────────────────────────────────────────────────────
 export function KpiCard({ label, value, sub, color }: { label: string; value: string | number; sub?: string; color?: string }) {
@@ -209,21 +208,25 @@ export const thStyle = (active: boolean, right = false): React.CSSProperties => 
 
 // ── Tab: Projects ───────────────────────────────────────────────────────────
 export function ProjectsTab({ data }: { data: ReportData }) {
-  const { grand } = data
-  const totalAll = grand.code + grand.comment + grand.blank || 1
+  const { grand, languages } = data
+  const totalCode = grand.code || 1
+  const totalAll = grand.code + grand.comment + grand.blank
+  // Same narrow definition the internal report uses: Markdown only, not
+  // every "docs"-type language -- keeps this number identical to the
+  // one on the static ecosystem report.
+  const docLines = languages.find(l => l.name === 'Markdown')?.code ?? 0
 
-  // Rank/size everything on this tab by total lines (code + comment +
-  // blank) rather than code-only -- overrides the backend's code-based
-  // `pct` with a total-based one so the KPI, donut, bars, and table
-  // share column all agree on the same denominator.
+  // Rank/size everything on this tab by code lines (excl. comments/blank)
+  // -- the standard, style-independent LOC metric -- while still
+  // carrying a `total` (code+comment+blank) field per row for the
+  // secondary "total" column in the breakdown table below.
   const projects = useMemo(() =>
     data.projects
       .map(r => ({ ...r, total: r.code + r.comment + r.blank }))
-      .map(r => ({ ...r, pct: round1(100 * r.total / totalAll) }))
-      .sort((a, b) => b.total - a.total),
-    [data.projects, totalAll]
+      .sort((a, b) => b.code - a.code),
+    [data.projects]
   )
-  const tbl = useTable(projects as unknown as Record<string, unknown>[], 'total')
+  const tbl = useTable(projects as unknown as Record<string, unknown>[], 'code')
 
   const filtered = useMemo(() =>
     applyTable(projects as unknown as Record<string, unknown>[], tbl, ['name', 'catLabel'], 'cat'),
@@ -233,10 +236,10 @@ export function ProjectsTab({ data }: { data: ReportData }) {
   const paged = filtered.slice((tbl.page - 1) * tbl.perPage, tbl.page * tbl.perPage)
 
   const catTotals: Record<string, number> = {}
-  projects.forEach(r => { catTotals[r.cat] = (catTotals[r.cat] || 0) + r.total })
+  projects.forEach(r => { catTotals[r.cat] = (catTotals[r.cat] || 0) + r.code })
   const catOrder = Object.keys(CAT).sort((a, b) => (catTotals[b] || 0) - (catTotals[a] || 0))
   const donutData = catOrder.map(k => ({ name: CAT[k].label, value: catTotals[k] || 0, color: CAT[k].color }))
-  const maxTotal = projects[0]?.total || 1
+  const maxCode = projects[0]?.code || 1
 
   const SortTh = ({ col, label, right = false }: { col: string; label: string; right?: boolean }) => (
     <th onClick={() => { tbl.toggleSort(col); }} style={thStyle(tbl.sortKey === col, right)}>
@@ -246,37 +249,39 @@ export function ProjectsTab({ data }: { data: ReportData }) {
 
   return (
     <div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 16 }}>
-        <KpiCard label="repositories" value={projects.length} sub="tracked by cloc" />
-        <KpiCard label="total lines" value={fmt(totalAll)} sub="code + comments + blank" />
-        <KpiCard label="largest repo" value={projects[0]?.name ?? '—'} sub={projects[0] ? `${fmt(projects[0].total)} lines` : ''} color={C.teal} />
-        <KpiCard label="categories" value={5} sub="core · sec · exec · infra · sdk" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 16 }}>
+        <KpiCard label="files" value={fmt(grand.files)} />
+        <KpiCard label="documentation" value={fmt(docLines)} />
+        <KpiCard label="code lines" value={fmt(grand.code)} color={C.teal} />
+        <KpiCard label="comment lines" value={fmt(grand.comment)} />
+        <KpiCard label="blank lines" value={fmt(grand.blank)} />
+        <KpiCard label="total lines" value={fmt(totalAll)} />
       </div>
 
-      <SectionCard title="share by project" sub="total lines · categorized by function">
+      <SectionCard title="share by project" sub="code lines · categorized by function">
         <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 20, alignItems: 'center' }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <DonutChart data={donutData} cx={80} cy={80} r={72} label={k(totalAll)} sublabel="total lines" />
+            <DonutChart data={donutData} cx={80} cy={80} r={72} label={k(grand.code)} sublabel="total LOC" />
             <div style={{ marginTop: 4, width: '100%' }}>
               {catOrder.map(cat => (
                 <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0', fontSize: 11 }}>
                   <span style={{ width: 8, height: 8, borderRadius: 2, background: CAT[cat].color, flexShrink: 0 }} />
                   <span style={{ color: C.muted, flex: 1 }}>{CAT[cat].label}</span>
-                  <span style={{ fontWeight: 600, color: C.text }}>{((catTotals[cat] || 0) / totalAll * 100).toFixed(1)}%</span>
+                  <span style={{ fontWeight: 600, color: C.text }}>{((catTotals[cat] || 0) / totalCode * 100).toFixed(1)}%</span>
                 </div>
               ))}
             </div>
           </div>
           <div>
             {projects.slice(0, 16).map(r => {
-              const pct = Math.round(r.total / maxTotal * 100)
+              const pct = Math.round(r.code / maxCode * 100)
               const meta = CAT[r.cat] || CAT.infra
               return (
                 <div key={r.name} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
                   <span style={{ fontSize: 11, color: C.muted, width: 110, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.full}>{r.name}</span>
                   <div style={{ flex: 1, height: 14, background: `${C.border}`, borderRadius: 3, overflow: 'hidden', position: 'relative' }}>
                     <div style={{ width: `${pct}%`, height: '100%', background: `${meta.color}33`, borderRadius: 3 }} />
-                    <span style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', fontSize: 9, fontWeight: 600, color: meta.color }}>{k(r.total)}</span>
+                    <span style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', fontSize: 9, fontWeight: 600, color: meta.color }}>{k(r.code)}</span>
                   </div>
                   <Badge label={meta.label.split(' ')[0]} color={meta.color} bg={meta.bg} />
                 </div>
