@@ -292,6 +292,11 @@ def _pytest_cwd(repo: Path) -> Path:
 
 
 def _cov_source_args(cwd: Path) -> List[str]:
+    # tool-images tests exercise the registry API; its previous scripts-only
+    # target produced "No data to report" even with all tests passing.
+    if cwd.name == "omnibioai-tool-images" and (cwd / "api").is_dir():
+        return ["--cov=api"]
+
     text = _read_text(cwd / "pyproject.toml")
     if text:
         m = re.search(r'\[tool\.coverage\.run\](.*?)(?=\n\[|\Z)', text, re.DOTALL)
@@ -465,6 +470,9 @@ def run_npm_repo(repo: Path, timeout_override: int | None = None) -> Dict[str, A
         "branches": None, "partial_branches": None, "coverage_pct": None,
         "total_line": None, "stdout_tail": None, "stderr_tail": None,
         "status": "ok",
+        "install_status": "not_attempted",
+        "install_returncode": None,
+        "install_stderr_tail": None,
     }
     script_name = _npm_coverage_script(repo)
     result.update(_empty_test_details("npm"))
@@ -472,6 +480,23 @@ def run_npm_repo(repo: Path, timeout_override: int | None = None) -> Dict[str, A
         result["status"] = "no_coverage_script"
         return result
     timeout = timeout_override or REPO_TIMEOUTS.get(repo.name, DEFAULT_TIMEOUT)
+    package_lock = repo / "package-lock.json"
+    if package_lock.exists() and not (repo / "node_modules").is_dir():
+        print("    npm ci --ignore-scripts …", end=" ", flush=True)
+        try:
+            install = subprocess.run(
+                ["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"],
+                cwd=str(repo), env=_subprocess_env(repo),
+                capture_output=True, text=True, timeout=min(timeout, 900),
+            )
+            result["install_returncode"] = install.returncode
+            result["install_status"] = "ok" if install.returncode == 0 else "failed"
+            result["install_stderr_tail"] = "\n".join(install.stderr.strip().splitlines()[-10:]) or None
+            print("ok" if install.returncode == 0 else f"WARN rc={install.returncode}")
+        except subprocess.TimeoutExpired as exc:
+            result["install_status"] = "timeout"
+            result["install_stderr_tail"] = str(exc)
+            print("timeout")
     print(f"    npm run {script_name} (timeout={timeout}s) …", end=" ", flush=True)
     try:
         proc = subprocess.run(
@@ -606,7 +631,17 @@ def run_repo(repo: Path, timeout_override: int | None = None) -> Dict[str, Any]:
         result["total_line"] = "json"
         result.update(cov_data)
     else:
-        result["status"] = "no_total_found"
+        # Some test-only repositories (for example dev-docker) have a
+        # passing pytest suite but no importable application package for
+        # coverage to measure. Preserve that distinction in the ecosystem
+        # report instead of marking a green test run as a failure.
+        if (proc.returncode == 0
+                and (result.get("tests_failed") or 0) == 0
+                and (result.get("test_errors") or 0) == 0):
+            result["status"] = "ok_no_coverage"
+            result["coverage_basis"] = "tests_passed_no_measurable_source"
+        else:
+            result["status"] = "no_total_found"
 
     if proc.returncode != 0 and result["status"] == "ok":
         result["status"] = "test_failure"
@@ -774,7 +809,7 @@ def main() -> int:
         print(f"    → {status}{suffix}  →  {out_f.name}")
         print()
 
-        if status == "ok":
+        if status == "ok" or status.startswith("ok_"):
             ok += 1
         elif status.startswith("skipped") or status == "missing_path":
             skip += 1

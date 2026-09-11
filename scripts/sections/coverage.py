@@ -95,7 +95,8 @@ def _stderr_tail(stderr: str, n: int = 10) -> Optional[str]:
     return "\n".join(stderr.splitlines()[-n:]) if stderr else None
 
 def _classify_status(rc, total_line, coverage_pct, fail_under, stdout, stderr) -> str:
-    if total_line is None: return "no_total_found"
+    if total_line is None:
+        return "ok_no_coverage" if rc == 0 else "no_total_found"
     if rc == 0: return "ok"
     combined = f"{stdout}\n{stderr}".lower()
     cov_fail  = ("required test coverage" in combined or "fail-under" in combined
@@ -297,6 +298,7 @@ def coverage_section_html(df: pd.DataFrame, timestamp: str) -> str:
             "collectionErrors": _safe_int(row.get("collection_errors")),
             "fileTypes": row.get("test_file_types") or {},
             "basis": row.get("test_detail_basis"),
+            "coverageBasis": row.get("coverage_basis"),
             "installStatus": row.get("install_status"),
             "color":     _cov_color(pct if pct == pct else None),
             "bg":        _cov_bg(pct if pct == pct else None),
@@ -447,14 +449,15 @@ function covApply(){{
         '<div style="height:4px;background:#2a2d3e;border-radius:2px;margin-top:3px;overflow:hidden">'+
         '<div style="height:100%;width:'+r.pct.toFixed(1)+'%;background:'+r.color+';border-radius:2px"></div></div>'
       :'<span style="color:#6b7280;font-size:12px">—</span>';
-    var stBg=r.status==='ok'?'#EAF3DE':r.status.includes('skip')||r.status.includes('missing')?'#F1EFE8':'#FAEEDA';
-    var stCol=r.status==='ok'?'#3B6D11':r.status.includes('skip')||r.status.includes('missing')?'#444441':'#854F0B';
-    var stLbl=r.status==='ok'?'ok':r.status.includes('skip')?'skipped':r.status.includes('miss')?'missing':r.status.startsWith('error')?'error':'partial';
+    var stBg=r.status.startsWith('ok')?'#EAF3DE':r.status.includes('skip')||r.status.includes('missing')?'#F1EFE8':'#FAEEDA';
+    var stCol=r.status.startsWith('ok')?'#3B6D11':r.status.includes('skip')||r.status.includes('missing')?'#444441':'#854F0B';
+    var stLbl=r.status.startsWith('ok')?'ok':r.status.includes('skip')?'skipped':r.status.includes('miss')?'missing':r.status.startsWith('error')?'error':'partial';
     var types=(r.framework?r.framework+' · ':'')+Object.keys(r.fileTypes||{{}}).map(function(k){{return k+': '+r.fileTypes[k];}}).join(', ');
     if(r.installStatus==='failed')types+=(types?' · ':'')+'install failed';
+    if(r.coverageBasis)types+=(types?' · ':'')+'no coverage data';
     var tr=document.createElement('tr');
     var short=r.repo.replace('omnibioai-','').replace('omnibioai_','').replace('omnibioai','omnibioai');
-    tr.title=(r.basis||'')+(r.installStatus==='failed'?' · editable install failed; tests ran in the existing environment':'');
+    tr.title=(r.basis||r.coverageBasis||'')+(r.installStatus==='failed'?' · editable install failed; tests ran in the existing environment':'');
     tr.innerHTML='<td style="font-weight:600;font-size:12px">'+short+'</td>'+
       '<td><span class="badge" style="background:'+stBg+';color:'+stCol+'">'+stLbl+'</span></td>'+
       '<td class="r">'+(r.collected!==null?r.collected.toLocaleString():'—')+'</td>'+
