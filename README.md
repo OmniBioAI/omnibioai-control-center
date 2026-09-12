@@ -1,10 +1,30 @@
 # OmniBioAI Control Center
 
-> README last reviewed: **2026-08-31**
+> README last reviewed: **2026-09-12**
 
 **Operational health dashboard, ecosystem report server, and observability hub for the OmniBioAI stack.**
 
 The Control Center is a FastAPI service that aggregates health status across all OmniBioAI components, serves an interactive ecosystem report, exposes Prometheus metrics, and auto-generates reports on a configurable schedule.
+
+---
+
+## Contents
+
+- [What It Does](#what-it-does)
+- [Authentication](#authentication)
+- [Repository Structure](#repository-structure)
+- [API Endpoints](#api-endpoints)
+- [Configuration](#configuration)
+- [Running](#running)
+- [Ecosystem Report](#ecosystem-report)
+- [Admin Console](#admin-console)
+- [Regression Health](#regression-health)
+- [Deployment Health](#deployment-health)
+- [Running Tests](#running-tests)
+- [Design Principles](#design-principles)
+- [Planned Enhancements (Post-Beta)](#planned-enhancements-post-beta)
+- [Current Status — repository snapshot (2026-08-31)](#current-status--repository-snapshot-2026-08-31)
+- [License](#license)
 
 ---
 
@@ -206,7 +226,7 @@ omnibioai-control-center/
 │   │   │   └── discord.py          # Discord webhook alerts (known issues, GPU temp)
 │   │   └── utils/
 │   │       └── summary_client.py   # Fetches /summary for report generation
-│   └── tests/                      # 1,554 collected tests at last review — see "Running Tests" below
+│   └── tests/                      # 1,718 collected tests at last review — see "Running Tests" below
 │
 ├── frontend/cc-ui/src/
 │   ├── apps/
