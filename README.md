@@ -36,9 +36,10 @@ require the backend services and an authorized session.
 
 ![Current Control Center login screen](docs/images/control-center-latest/control-login.png)
 
-## Architecture
+![Control Center ecosystem report view](images/control_center.png)
 
-![Architecture](images/OmniBioAI_ecosystem_architecture_diagram.png)
+<!-- Admin Console screenshot pending — admin.omnibioai.org capture not yet available -->
+
 ---
 
 ## Authentication
