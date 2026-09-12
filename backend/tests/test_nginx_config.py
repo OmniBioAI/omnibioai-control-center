@@ -155,6 +155,19 @@ class TestNginxApiProxyConfig(unittest.TestCase):
             "the SPA route must not be claimed by an API proxy location",
         )
 
+    def test_hipaa_compliance_api_namespace_does_not_claim_spa_route(self) -> None:
+        self.assertRegex(
+            self.api_proxy_conf,
+            r"location\s+\^~\s+/hipaa-compliance/\s*\{[\s\S]*?"
+            r"proxy_pass\s+http://\$control_center_upstream;",
+        )
+        self.assertRegex(
+            self.api_proxy_conf,
+            r"location\s+=\s+/hipaa-compliance\s*\{\s*"
+            r"try_files\s+/index.html\s+=404;\s*\}",
+            "the exact HIPAA Compliance SPA route must serve the frontend index",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
