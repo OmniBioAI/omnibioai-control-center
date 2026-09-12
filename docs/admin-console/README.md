@@ -18,7 +18,7 @@ history; they are supporting references, not a replacement for this guide.
 | Backend | FastAPI in `backend/src/control_center` |
 | Admin build | `VITE_APP_MODE=admin`, output `dist-admin/` |
 | Control build | `VITE_APP_MODE=control`, output `dist-control/` |
-| Admin hostname | `admin.omnibioai.org` (deployment cutover still requires external DNS, tunnel, and Access configuration) |
+| Admin hostname | `admin.omnibioai.org` (deployed Admin Console entry point) |
 | Operations hostname | `control.omnibioai.org` |
 | Local frontend | Vite development server, normally `http://localhost:5173` |
 | Local backend | Control Center API, normally `http://localhost:7070` |
@@ -32,9 +32,10 @@ The Admin Console combines the following capabilities:
 
 - organization and membership administration;
 - users, teams, roles, permissions, API keys, and service accounts;
+- Security Overview and Security Posture;
 - SSO, SAML, organization MFA policy, sessions, and security activity;
-- audit logs, interaction history, HIPAA compliance reporting, and platform
-  compliance history;
+- audit logs, Audit Explorer, interaction history, HIPAA-aligned compliance
+  reporting, and platform compliance history;
 - infrastructure health, Docker, ecosystem status, configuration, LLMs,
   cloud, actions, scheduled jobs, and known issues;
 - billing, invoices, subscriptions, usage limits, and usage analytics;
@@ -258,7 +259,7 @@ not authorize that specific operation.
 Authorization is enforced in layers:
 
 - Control Center protects its own operations routes with dependencies such as
-  `require_admin` and `require_permission`;
+  permission-based dependencies;
 - proxy routes forward the caller's `Authorization` header to the owning
   service;
 - Auth, billing, TES, workflow-bundles, and other owning services make the
@@ -378,36 +379,16 @@ static files directly. The nginx image contains both bundles:
 
 The current repository status is:
 
-- the dual-build image and host-based nginx serving are implemented and
-  locally verifiable on port `5174`;
-- the external `admin.omnibioai.org` DNS record and tunnel ingress must be
-  applied on the tunnel host;
-- Cloudflare Access policy coverage for the new Admin hostname must be
-  verified separately;
-- the Admin hostname must not be considered production-reachable until those
-  external prerequisites are complete.
+- the dual-build image and host-based nginx serving are implemented;
+- the deployed `admin.omnibioai.org` hostname serves the Admin Console;
+- live evidence covers selected authenticated routes, not every Admin Console surface.
 
 See [`admin-console-build.md`](../admin-console-build.md) for the detailed
 deployment decision and rollout diagram.
 
 ## Configuration and service dependencies
 
-The backend uses service URL environment variables. Defaults are intended for
-the repository's container network and can be overridden in deployment:
-
-| Variable | Default | Used for |
-|---|---|---|
-| `IAM_URL` | `http://auth-service:8001` | Auth, organizations, users, roles, teams, SSO, SAML, MFA, sessions, audit |
-| `BILLING_URL` | `http://billing-service:8005` | Billing and usage |
-| `TES_URL` | `http://tes:8081` | Tool execution |
-| `MODEL_REGISTRY_URL` | `http://model-registry:8095` | AI models |
-| `WORKFLOW_BUNDLES_URL` | `http://workflow-bundles:8098` | Workflows |
-| `RAG_URL` | `http://rag:8096` | RAG and PubMed |
-| `RAGBIO_API_KEY` | deployment-specific | Service credential for RAG requests |
-| `JWT_SECRET` / auth secret | deployment-specific | Local verification and analytics event integrity |
-
-Secrets belong in the deployment secret manager or environment, never in the
-frontend bundle, source tree, screenshots, or README examples.
+Service URL settings select the owning Auth, Billing, TES, Model Registry, Workflow Bundles, and RAG services. Runtime credentials and JWT verification material are deployment secrets and are not documented here. Secrets belong in the deployment secret manager or environment, never in the frontend bundle, source tree, screenshots, or README examples.
 
 ## Testing and verification
 

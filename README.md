@@ -11,13 +11,13 @@ The Control Center is a FastAPI service that aggregates health status across all
 ## What It Does
 
 - **Health monitoring** — TCP, HTTP, and disk checks across all ecosystem services
-- **Enterprise Admin Console** — the operational and administrative interface, served as a separate frontend build at `admin.omnibioai.org`: Organizations, Users, Teams, Roles & Permissions, Security (Security Overview, Security Posture, MFA Policy, IAM/SSO Management, SAML, Audit Logs, Audit Explorer, Compliance Report, Sessions, Interactions, API Keys/Service Accounts), HIPAA Compliance, Billing, Usage Analytics, Workflows, Tool Execution, AI Models, Agentic AI, RAG/PubMed, Integrations, Settings, plus an Operations → Infrastructure group (Health, Regression Health, Deployment Health, Integration Health, Docker, Ecosystem Report, Config, LLMs, Cloud, Actions, Scheduled Jobs, Known Issues) — see [Admin Console](#admin-console) below
+- **Enterprise Admin Console** — the operational and administrative interface at `admin.omnibioai.org`, covering organizations, users, teams, roles and permissions; SSO/SAML, MFA policy, sessions, API keys, OAuth clients and service accounts; compliance evidence, security posture, audit investigation, billing and entitlements; plus the operations surfaces listed in [Admin Console](#admin-console) below — see [Admin Console](#admin-console) below
 - **Regression Health** — reads a reviewed, promoted end-to-end certification artifact (never inferred from a pytest run) and exposes it read-only — see [Regression Health](#regression-health)
 - **Deployment Health (V1, certified)** — read-only, dependency-aware deployment and runtime health for the ecosystem, combining Compose metadata, Docker state, and application probes — see [Deployment Health](#deployment-health)
 - **Ecosystem report** — interactive HTML report (architecture · projects · languages · coverage · health) served at `/`; `/dashboard` redirects here (its live per-service cards and generate button were folded into the report's header status chip and Admin tab)
 - **JSON API** — machine-readable health summary at `/summary` for CI/CD and external monitoring
 - **Scheduled report generation** — auto-regenerates the ecosystem report every N hours (configurable via REPORT_SCHEDULE_HOURS)
-- **Admin controls** — an Admin tab in the report for triggering report/coverage regeneration, pausing/rescheduling the 7 host cron jobs, and tracking known issues; every write action is JWT-role-gated (`admin` role required), enforced both by nginx and independently by the app itself
+- **Admin controls** — an Admin tab in the report for triggering report/coverage regeneration, pausing/rescheduling the 7 host cron jobs, and tracking known issues; each sensitive action is authenticated and permission-checked by the backend and owning service
 - **Prometheus metrics** — `/metrics` endpoint scraped by Prometheus for Grafana dashboards
 - **Docker inventory** — platform containers, tool SIF images, and plugin Docker images via `/docker/*` endpoints
 - **Structured JSON logging** — all key events logged as JSON to stdout for log aggregation
@@ -52,9 +52,7 @@ verifies a password or issues a token itself. It plays two distinct roles:
    `control.omnibioai.org`'s ingress reaches this service directly,
    bypassing the nginx router that fronts every other domain's `/auth/*`
    path.
-2. **Local verifier for its own admin-gated endpoints** — `require_admin`
-   (`core/auth.py`) independently checks every write endpoint's bearer
-   token, rather than trusting the proxy hop above.
+2. **Local verifier for its own permission-gated endpoints** — backend dependencies independently check each protected request, rather than trusting the proxy hop above.
 
 ### Login
 
@@ -97,26 +95,7 @@ network call itself succeeded.
 
 ### Admin authorization
 
-`require_admin` (`core/auth.py`) gates every write endpoint (see the
-"Admin-gated" markers in [API Endpoints](#api-endpoints)):
-
-```
-verify token
-      │
-      ▼
-check roles
-      │
-      ▼
-allow / deny
-```
-
-It parses the `Authorization` header, delegates signature/expiry/type/
-claim/revocation verification to `core/jwt_verify.py`, and then makes its
-own decision: 401 if the token itself is invalid, 403 if it's valid but
-lacks the `admin` role. This runs independently of nginx's own
-`auth_request` check in front of `/_svc/control` — so a misconfigured
-nginx rule alone can never expose a write endpoint, since this service
-checks the specific role itself either way.
+Control Center protects its own operational endpoints with permission-based backend dependencies, including `platform.manage_infra` where required. Proxy routes forward the caller's authorization to the owning service, which repeats the authoritative organization and permission checks. UI visibility is only a convenience and is never the security boundary.
 
 ### JWT verification
 
@@ -220,7 +199,7 @@ omnibioai-control-center/
 │   │   ├── core/
 │   │   │   ├── runner.py           # Dispatches checks per service type
 │   │   │   ├── settings.py         # Loads control_center.yaml
-│   │   │   ├── auth.py             # require_admin — JWT role gate for write endpoints
+│   │   │   ├── auth.py             # JWT and permission gates for protected endpoints
 │   │   │   └── jwt_verify.py       # Local JWT verification (HS256 + RS256/JWKS)
 │   │   ├── notifications/
 │   │   │   └── discord.py          # Discord webhook alerts (known issues, GPU temp)
@@ -298,11 +277,11 @@ omnibioai-control-center/
 | `/image-freshness`     | GET    | Deployed image digests vs. latest on GHCR |
 | `/integrity`           | GET    | Configured symlink/mount integrity checks |
 
-"Admin-gated" endpoints require a valid JWT carrying the `admin` role, checked twice independently: once by nginx's `auth_request` (any valid JWT) and once inside the app itself via `require_admin` (the specific role) — so an nginx misconfiguration alone can't expose a write endpoint. All other endpoints above are fully open, no auth required.
+"Admin-gated" endpoints require a valid JWT and the permissions required by the endpoint, with authorization repeated by the owning backend — so an nginx misconfiguration alone can't expose a write endpoint. All other endpoints above are fully open, no auth required.
 
 `/regression-health` and `/deployment-health` above are the **backend** routes. Each also has a human-facing Admin Console SPA page at the same path (`/regression-health`, `/deployment-health`) that a browser navigates to directly — nginx keeps these distinct by rewriting a separate `/regression-health/data` / `/deployment-health/data` request path to the backend route (`docker/nginx/api-proxy.conf`), rather than letting the SPA route and the API route collide (the exact mistake, internally tracked as REG-010, that this split was introduced to fix). The frontend always calls the `/data` path; only a browser's own document navigation should ever hit the bare path.
 
-This table covers the original ops-console surface. A separate, larger set of `/orgs/*`, `/platform/*`, `/billing/*`, `/tes/*`, `/model-registry/*`, `/workflow-bundles/*`, `/rag/*`, and `/auth/config` proxy routes backs the Admin Console — see [Admin Console → Enterprise proxy routes](#enterprise-proxy-routes) below rather than duplicating all ~35 of them here; each is gated by whatever permission its owning service already requires (`omnibioai-auth`'s `manage_all_orgs`/org-membership checks, `omnibioai-billing`'s org-scoped IAM, etc.) — Control Center's own `require_admin`/nginx layer above doesn't apply to them.
+This table covers the original ops-console surface. A separate, larger set of `/orgs/*`, `/platform/*`, `/billing/*`, `/tes/*`, `/model-registry/*`, `/workflow-bundles/*`, `/rag/*`, and `/auth/config` proxy routes backs the Admin Console — see [Admin Console → Enterprise proxy routes](#enterprise-proxy-routes) below rather than duplicating all ~35 of them here; each is gated by whatever permission its owning service already requires (`omnibioai-auth`'s `manage_all_orgs`/org-membership checks, `omnibioai-billing`'s org-scoped IAM, etc.) — Control Center's local permission layer above does not replace those owning-service checks.
 
 ### `/health`
 
@@ -452,7 +431,7 @@ that deployment layout is present.
 Access the direct development service at `http://127.0.0.1:7070`. In the full
 ecosystem deployment, nginx exposes the service at `/_svc/control`; read-only
 endpoints are public there, while other endpoints require JWT authentication
-and write endpoints additionally require the `admin` role.
+and protected endpoints additionally require their owning-service permissions.
 
 ### Standalone (development)
 
@@ -485,9 +464,7 @@ The redirect URI must exactly match Auth's `LIMS_SSO_REDIRECT_URI` value.
 | `CONTROL_CENTER_PORT`   | `7070`                        | Service port |
 | `REPORT_SCHEDULE_HOURS` | `6`                           | Auto-regenerate report every N hours |
 | `WORK_DIR`              | `/workspace/omnibioai-work`   | Work/output directory; use a path valid for the selected local or container deployment |
-| `JWT_SECRET`            | `change-me`                   | Shared HS256 secret for validating admin JWTs locally (`require_admin`) — same value as `AUTH_SECRET_KEY` used by omnibioai-auth/workbench/api-gateway/model-registry |
-| `JWKS_URL`               | `https://auth.omnibioai.org/.well-known/jwks.json` | RS256 verification (not yet enabled in production) — see [Authentication](#authentication) |
-| `JWKS_TIMEOUT_SECONDS` / `JWKS_CACHE_TTL_SECONDS` | `5` / `300`  | JWKS fetch timeout and key-set cache lifetime |
+| Runtime credentials | deployment-only | JWT verification and service access; keep in the deployment secret manager |
 | `CRONTAB_SPOOL_PATH`    | `/var/spool/cron/crontabs/manish` | Host crontab spool file, bind-mounted in so `/cron/jobs/{id}/pause\|resume\|schedule` can read/write it directly |
 | `DISCORD_ALERT_WEBHOOK_URL` | *(empty)*                 | Discord webhook for new high-severity known-issue alerts — empty disables alerting gracefully, same pattern as `SENTRY_DSN` |
 | `REGRESSION_HEALTH_ARTIFACT_PATH` | `$WORKSPACE_ROOT/omnibioai-ecosystem-regression/status/regression-health.json` | Read-only promoted certification artifact — see [Regression Health](#regression-health) |
@@ -641,7 +618,7 @@ Same repository, same FastAPI backend, same auth system, same permission
 checks either way — the domain only decides which pre-built frontend
 bundle nginx serves. **The build split is a deployment/UX optimization,
 never an authorization boundary**: every `require_permission`/
-`require_admin` check and every org-membership check in `omnibioai-auth`
+permission checks and every org-membership check in `omnibioai-auth`
 is unchanged regardless of which domain a request came from, and nothing
 about the serving hostname is itself authenticated. Full design record:
 `docs/admin-console-build.md`.
@@ -678,7 +655,7 @@ it, never hidden), but no current entry uses it.
 | Administration | Organizations, Users, Teams, Roles & Permissions | |
 | Operations → Infrastructure | Health, Regression Health, Deployment Health, Integration Health, Docker, Ecosystem Report, Config, LLMs, Cloud, Actions, Scheduled Jobs, Known Issues | One expandable parent; Regression Health, Deployment Health, and Integration Health require `platform.manage_infra`; the remaining pages require general admin access |
 | Operations | Workflows, Tool Execution, AI Models, Agentic AI | Proxy `omnibioai-workflow-bundles`, `omnibioai-tes`, `omnibioai-model-registry`, and `omnibioai-workbench`'s agent-orchestrator service directly — authorization is entirely each upstream service's own, per-request |
-| Security | Security Overview, Security Posture, MFA Policy, IAM/SSO Management, SAML Settings, Audit Logs, Audit Explorer, Compliance Report, Sessions, Interactions, API Keys/Service Accounts | Audit Logs is Auth's identity-audit ledger; Audit Explorer is the read-only Security Audit event query surface. Compliance Report is the org-scoped HIPAA usage/access-log export, distinct from the platform-engineering HIPAA Compliance section below |
+| Security | Security Overview, Security Posture, MFA Policy, IAM/SSO Management, SAML Settings, Audit Logs, Audit Explorer, Compliance Report, Sessions, Interactions, API Keys/Service Accounts | Audit Logs is Auth's identity-audit ledger; Audit Explorer is the read-only Security Audit event query surface. Compliance Report is an organization-scoped operational report, distinct from the HIPAA-aligned Compliance section below |
 | Compliance | HIPAA Compliance | The platform's own HIPAA remediation history (which PRs closed which control gaps) — not org data |
 | Business | Billing, Usage Analytics | Billing proxies `omnibioai-billing`'s read APIs; Usage Analytics is scoped server-side to the caller (`platform_admin`/`org_admin`/`team_admin`) |
 | Knowledge | RAG, PubMed | Both point at one page — RAG's only indexed corpus today is PubMed abstracts |
@@ -1069,7 +1046,7 @@ pytest tests/ -v
 | `test_check_license_status.py` | `/license` — license-seat/expiry status derivation |
 | `test_check_usage_status.py` | `/usage` — user activity, session counts, plugin-run success-rate stats |
 | `test_routes_infra.py` | Wiring for all `/gpu`, `/celery`, `/database`, `/image-freshness`, `/license`, `/usage`, `/gateway-traffic`, `/audit-trail`, `/activity`, `/integrity` routes |
-| `test_core_auth.py` | `require_admin` — JWT decode, expiry, missing/invalid token, role check |
+| `test_core_auth.py` | permission dependency — JWT decode, expiry, missing/invalid token, permission check |
 | `test_check_cron_jobs.py` | Cron-job status derivation and the pause/resume/reschedule crontab-mutation logic |
 | `test_routes_cron.py` | `/cron/jobs` and its admin-gated mutation routes |
 | `test_check_known_issues.py` | Known-issue load/create/update/delete logic, including UUID backfill |
@@ -1111,7 +1088,7 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 - **stdlib HTTP in report** — `urllib` used for health fetching in report generator, no extra deps
 - **Design-token driven** — CSS uses `@omnibioai/design-tokens` vocabulary; zero hardcoded hex values in the report or dashboard
 - **Structured logging** — all key events (startup, report triggered/finished/failed, scheduler) emitted as JSON to stdout
-- **Defense-in-depth on writes** — every admin-gated endpoint checks the JWT's role independently inside the app (`require_admin`), rather than trusting nginx's `auth_request` alone
+- **Defense-in-depth on writes** — every protected endpoint checks JWT and permissions independently inside the app, rather than trusting nginx's `auth_request` alone
 - **Honest scope over convenience** — `/coverage/generate` only runs on control-center itself rather than faking full-ecosystem coverage from inside a container that can't actually run the other repos' test suites (see `/coverage/generate` in API Endpoints)
 - **No raw Docker socket** — every Docker-touching endpoint, including Deployment Health, goes through the Docker Socket Proxy's own restricted allowlist; this service never bind-mounts `/var/run/docker.sock` directly
 - **Read-only where read-only is claimed** — Regression Health and Deployment Health each expose only `GET`; neither has a write path in this service (Regression Health's artifact is produced entirely outside it), and Deployment Health V1 has no restart/stop/deploy/scale/config-edit/health-override action of any kind
