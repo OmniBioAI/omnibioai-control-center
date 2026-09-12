@@ -34,7 +34,7 @@ Docker, ecosystem status, configuration, LLMs, and cloud infrastructure. The
 current public health view is shown below; authenticated operational views
 require the backend services and an authorized session.
 
-![Current Control Center login screen](docs/images/control-center-latest/control-login.png)
+![Current Control Center login screen](images/control_center_architecture.png)
 
 ![Control Center ecosystem report view](images/control_center.png)
 
