@@ -866,6 +866,57 @@ describe('AdminApp auth gate', () => {
 
   // ── PR11.4b: Audit Logs nav item + routing ──────────────────────────────
 
+  it('deep-links directly to Audit Logs and preserves the path through initialization', async () => {
+    window.history.pushState(null, '', '/audit-logs')
+    vi.mocked(auth.getToken).mockReturnValue('token-audit-initial')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+
+    expect(await screen.findByTestId('AuditLogsPage')).toBeInTheDocument()
+    await waitFor(() => expect(window.location.pathname).toBe('/audit-logs'))
+    expect(screen.queryByTestId('DashboardPage')).not.toBeInTheDocument()
+  })
+
+  it('restores Audit Logs when the browser emits an /audit-logs popstate', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-audit-popstate')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+
+    act(() => {
+      window.history.pushState(null, '', '/audit-logs')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+
+    expect(await screen.findByTestId('AuditLogsPage')).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/audit-logs')
+  })
+
+  it('does not render Audit Logs from a direct route without platform-admin access', async () => {
+    window.history.pushState(null, '', '/audit-logs')
+    vi.mocked(auth.getToken).mockReturnValue('token-audit-unauthorized')
+    vi.mocked(auth.ensureSession).mockResolvedValue(orgOnlyUser)
+    vi.mocked(auth.getSessionUser).mockReturnValue(orgOnlyUser)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(false)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(false)
+
+    render(<AdminApp />)
+
+    await waitFor(() => expect(auth.ensureSession).toHaveBeenCalled())
+    expect(screen.queryByTestId('AuditLogsPage')).not.toBeInTheDocument()
+  })
+
   it('shows the Audit Logs nav item for a platform admin, even with no global admin role', async () => {
     vi.mocked(auth.getToken).mockReturnValue('token-audit1')
     vi.mocked(auth.ensureSession).mockResolvedValue(orgOnlyUser)
@@ -908,6 +959,7 @@ describe('AdminApp auth gate', () => {
     clickNav('Audit Logs')
 
     expect(await screen.findByTestId('AuditLogsPage')).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/audit-logs')
     expect(screen.queryByText('Coming soon')).not.toBeInTheDocument()
   })
 
@@ -1086,7 +1138,59 @@ describe('AdminApp auth gate', () => {
     clickNav('HIPAA Compliance')
 
     expect(await screen.findByTestId('HipaaCompliancePage')).toBeInTheDocument()
+    await waitFor(() => expect(window.location.pathname).toBe('/hipaa-compliance'))
     expect(screen.queryByText('Coming soon')).not.toBeInTheDocument()
+  })
+
+  it("deep-links directly to HIPAA Compliance and preserves the path", async () => {
+    window.history.pushState(null, "", "/hipaa-compliance")
+    vi.mocked(auth.getToken).mockReturnValue("token-hipaa-deep-link")
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+
+    expect(await screen.findByTestId("HipaaCompliancePage")).toBeInTheDocument()
+    await waitFor(() => expect(window.location.pathname).toBe("/hipaa-compliance"))
+    expect(screen.queryByTestId("DashboardPage")).not.toBeInTheDocument()
+  })
+
+  it("restores HIPAA Compliance on browser popstate", async () => {
+    vi.mocked(auth.getToken).mockReturnValue("token-hipaa-popstate")
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId("DashboardPage")).toBeInTheDocument())
+
+    act(() => {
+      window.history.pushState(null, "", "/hipaa-compliance")
+      window.dispatchEvent(new PopStateEvent("popstate"))
+    })
+
+    expect(await screen.findByTestId("HipaaCompliancePage")).toBeInTheDocument()
+    expect(window.location.pathname).toBe("/hipaa-compliance")
+  })
+
+  it("does not render HIPAA Compliance from a direct path without platform-admin access", async () => {
+    window.history.pushState(null, "", "/hipaa-compliance")
+    vi.mocked(auth.getToken).mockReturnValue("token-hipaa-denied")
+    vi.mocked(auth.ensureSession).mockResolvedValue(orgOnlyUser)
+    vi.mocked(auth.getSessionUser).mockReturnValue(orgOnlyUser)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(false)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(false)
+
+    render(<AdminApp />)
+
+    await waitFor(() => expect(auth.ensureSession).toHaveBeenCalled())
+    expect(screen.queryByTestId("HipaaCompliancePage")).not.toBeInTheDocument()
   })
 
   it('hides the HIPAA Compliance nav item for a user who is not a platform admin', async () => {

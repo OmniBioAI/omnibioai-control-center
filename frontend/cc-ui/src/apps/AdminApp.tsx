@@ -175,10 +175,12 @@ function AdminDashboard() {
 
   const [active, setActive] = useState<PageKey>(() => {
     if (window.location.pathname === '/audit-explorer') return 'audit-explorer'
+    if (window.location.pathname === '/audit-logs') return 'audit-logs'
     if (window.location.pathname === '/regression-health') return 'regression-health'
     if (window.location.pathname === '/deployment-health') return 'deployment-health'
     if (window.location.pathname === '/integration-health') return 'integration-health'
     if (window.location.pathname === '/security-posture') return 'security-posture'
+    if (window.location.pathname === '/hipaa-compliance') return 'hipaa-compliance'
     if (window.location.pathname === '/workflows') return 'workflows'
     if (window.location.pathname.startsWith('/organizations')) return 'organizations'
     if (window.location.pathname.startsWith('/users')) return 'users'
@@ -270,7 +272,9 @@ function AdminDashboard() {
       : active === 'deployment-health' ? '/deployment-health'
       : active === 'integration-health' ? '/integration-health'
       : active === 'security-posture' ? '/security-posture'
+      : active === 'hipaa-compliance' ? '/hipaa-compliance'
       : active === 'audit-explorer' ? '/audit-explorer'
+      : active === 'audit-logs' ? '/audit-logs'
       : active === 'workflows' ? '/workflows'
       : '/'
     if (window.location.pathname !== path) {
@@ -282,6 +286,8 @@ function AdminDashboard() {
     const onPopState = () => {
       if (window.location.pathname === '/audit-explorer') {
         setActive('audit-explorer')
+      } else if (window.location.pathname === '/audit-logs') {
+        setActive('audit-logs')
       } else if (window.location.pathname === '/regression-health') {
         setActive('regression-health')
       } else if (window.location.pathname === '/deployment-health') {
@@ -290,6 +296,8 @@ function AdminDashboard() {
         setActive('integration-health')
       } else if (window.location.pathname === '/security-posture') {
         setActive('security-posture')
+      } else if (window.location.pathname === '/hipaa-compliance') {
+        setActive('hipaa-compliance')
       } else if (window.location.pathname === '/workflows') {
         setActive('workflows')
       } else if (window.location.pathname.startsWith('/organizations')) {
