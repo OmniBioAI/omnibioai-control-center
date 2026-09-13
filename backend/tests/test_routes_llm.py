@@ -22,14 +22,17 @@ from control_center.api import routes_llm
 from control_center.core.jwt_verify import JWT_SECRET
 from control_center.main import app
 
-# Route exposure (2026-09-02 public/admin-split investigation): llm_router
-# has NO blanket gate -- GET /llms is deliberately public, GET
-# /knowledge-base carries its own per-route platform.manage_infra Depends.
-# These tests exercise the routes' own logic, not authorization (see
-# test_main.py's TestLlmsPublicAccess / TestPlatformManageInfraAuth for
-# the access checks), so the client carries a fixed always-sufficient
-# token by default -- harmless for /llms, required for /knowledge-base,
-# same convention as test_routes_docker.py.
+# Route exposure: llm_router has NO blanket gate -- GET /llms is
+# deliberately public. GET /knowledge-base (2026-09-12 decision) always
+# returns its aggregate fields, but only includes pubmed_root/index_root
+# when the caller's token carries platform.manage_infra (checked via
+# _has_permission, not a hard Depends -- see test_main.py's
+# TestKnowledgeBasePublicFields for the access-split checks). These
+# tests exercise the routes' own logic, not authorization, so the
+# client carries a fixed always-sufficient token by default -- harmless
+# for /llms, and means pubmed_root/index_root are populated below
+# wherever the underlying dirs exist, same convention as
+# test_routes_docker.py.
 _INFRA_TOKEN = jwt.encode({"sub": "1", "permissions": ["platform.manage_infra"]}, JWT_SECRET, algorithm="HS256")
 client = TestClient(app, headers={"Authorization": f"Bearer {_INFRA_TOKEN}"})
 
