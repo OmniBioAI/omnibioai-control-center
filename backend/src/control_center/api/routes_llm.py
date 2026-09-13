@@ -2,13 +2,30 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
+from typing import Optional
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Header
 from fastapi.responses import JSONResponse
 
-from control_center.core.auth import require_permission
+from control_center.core.jwt_verify import TokenInvalid, verify_token
 
 router = APIRouter()
+
+
+def _has_permission(authorization: Optional[str], permission: str) -> bool:
+    """Non-raising counterpart to core.auth.require_permission -- same
+    pattern as routes_dashboard.py's own _has_permission (duplicated
+    rather than imported, since that one is private to its own module).
+    Used only to decide which fields of a response are safe to include,
+    never to reject the request outright."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return False
+    token = authorization.split(" ", 1)[1].strip()
+    try:
+        payload = verify_token(token)
+    except TokenInvalid:
+        return False
+    return permission in (payload.get("permissions") or [])
 
 OLLAMA_URL = os.environ.get("OLLAMA_BASE_URL", "http://ollama:11434")
 
@@ -148,14 +165,24 @@ def _index_size_bytes(index_root: Path) -> int:
 
 @router.get("/knowledge-base")
 async def get_knowledge_base(
-    _admin: dict = Depends(require_permission("platform.manage_infra")),
+    authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
-    # Gated per-route (not via llm_router's include, which is ungated so
-    # GET /llms above can stay public). Returns absolute internal
-    # filesystem paths (pubmed_root/index_root) -- same platform.manage_infra
-    # bar as /summary/docker/config/storage. Commit 8705cbf first added
-    # this gate at the router level; the 2026-09-02 investigation moved it
-    # here so it no longer also covers /llms.
+    # PUBLIC_FIELDS-style split (same pattern as routes_dashboard.py's
+    # /dashboard/summary "knowledge" section): this used to be gated
+    # per-route behind platform.manage_infra for its *entire* response,
+    # because pubmed_root/index_root are absolute internal filesystem
+    # paths -- same bar as /summary/docker/config/storage. But that
+    # blanket gate also hid the aggregate fields (abstract/domain counts,
+    # index size, rag_status) that carry no such sensitivity, which is
+    # what broke generate_report.py's unauthenticated fetch (it only ever
+    # read the aggregate fields -- see scripts/sections/knowledge_base.py
+    # -- and has no way to authenticate itself). Aggregate stats are now
+    # always returned; only pubmed_root/index_root stay behind
+    # platform.manage_infra, checked below via _has_permission rather
+    # than a hard Depends() so the rest of the response survives an
+    # absent/insufficient token instead of 401ing outright.
+    has_infra_permission = _has_permission(authorization, "platform.manage_infra")
+
     workspace = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
 
     pubmed_root = None
@@ -227,6 +254,6 @@ async def get_knowledge_base(
             "size_gb": round(index_size_bytes / 1e9, 2),
             "domain_list": sorted(indexed_domains)[:20],
         },
-        "pubmed_root": str(pubmed_root) if pubmed_root else None,
-        "index_root": str(index_root) if index_root else None,
+        "pubmed_root": str(pubmed_root) if (pubmed_root and has_infra_permission) else None,
+        "index_root": str(index_root) if (index_root and has_infra_permission) else None,
     })

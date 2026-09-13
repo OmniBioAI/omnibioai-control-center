@@ -620,8 +620,17 @@ class TestPlatformManageInfraAuth(unittest.TestCase):
     this list, for the same reason -- see report_data()'s own docstring
     in main.py and TestReportData above. Unlike the 09-02 cases, this one
     is a conscious, accepted tradeoff (gitStatus[] becoming public), not a
-    correction of an over-gate. Everything still in _cases() below stays
-    gated -- that is the regression guard this decision must not weaken."""
+    correction of an over-gate.
+
+    NOTE (2026-09-12 decision): /knowledge-base has also been removed from
+    this list. Unlike /report/status and /llms, it isn't fully public --
+    only its aggregate fields are (abstract/domain counts, index size,
+    rag_status); pubmed_root/index_root stay gated behind
+    platform.manage_infra via routes_llm.py's own _has_permission check,
+    same PUBLIC_FIELDS-style split routes_dashboard.py's /dashboard/summary
+    already uses. See TestKnowledgeBasePublicFields below. Everything
+    still in _cases() below stays gated -- that is the regression guard
+    this decision must not weaken."""
 
     def _cases(self):
         return (
@@ -632,7 +641,6 @@ class TestPlatformManageInfraAuth(unittest.TestCase):
             ("GET", "/"),
             ("GET", "/report"),
             ("GET", "/coverage/status"),
-            ("GET", "/knowledge-base"),
             ("GET", "/storage"),
             ("GET", "/cron/jobs"),
             ("GET", "/cron/jobs/mysql-backup/log"),
@@ -834,8 +842,9 @@ class TestLlmsPublicAccess(unittest.TestCase):
     Commit 8705cbf's blanket llm_router gate collapsed it into the admin
     tier; it backs ControlApp's anonymous LLMs page (91755fb,
     docs/public-control-center.md). GET /knowledge-base on the same
-    router stays gated -- see TestKnowledgeBaseStillGated below and
-    TestPlatformManageInfraAuth."""
+    router is a narrower case -- its aggregate fields are public too
+    (see TestKnowledgeBasePublicFields below) but pubmed_root/index_root
+    stay gated, unlike /llms which has nothing gated left in it."""
 
     def test_200_when_no_token(self):
         resp = client.get("/llms")
@@ -852,18 +861,60 @@ class TestLlmsPublicAccess(unittest.TestCase):
         self.assertEqual(client.get("/llms", headers=_admin_headers()).status_code, 200)
 
 
+class TestKnowledgeBasePublicFields(unittest.TestCase):
+    """2026-09-12 decision: GET /knowledge-base's aggregate fields
+    (abstract/domain counts, index size, rag_status) are public --
+    generate_report.py's knowledge_base_section_html calls this route
+    unauthenticated and only ever reads those fields (never
+    pubmed_root/index_root), so the route's former blanket
+    platform.manage_infra gate meant this section of the ecosystem
+    report always failed, not just under load -- see
+    routes_llm.py's get_knowledge_base docstring for the full reasoning.
+    pubmed_root/index_root are absolute internal filesystem paths and
+    stay gated, same PUBLIC_FIELDS-style split as
+    routes_dashboard.py's /dashboard/summary."""
+
+    def test_200_when_no_token_with_aggregate_fields(self):
+        resp = client.get("/knowledge-base")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertIn("rag_status", body)
+        self.assertIn("total", body["abstracts"])
+        self.assertIn("domains_with_abstracts", body["abstracts"])
+        self.assertIn("domains_indexed", body["faiss_index"])
+        self.assertIn("size_gb", body["faiss_index"])
+        self.assertIn("domain_list", body["faiss_index"])
+
+    def test_paths_null_when_no_token(self):
+        body = client.get("/knowledge-base").json()
+        self.assertIsNone(body["pubmed_root"])
+        self.assertIsNone(body["index_root"])
+
+    def test_paths_null_with_insufficient_permission(self):
+        body = client.get("/knowledge-base", headers=_cron_only_headers()).json()
+        self.assertIsNone(body["pubmed_root"])
+        self.assertIsNone(body["index_root"])
+
+    def test_200_with_token_too(self):
+        self.assertEqual(client.get("/knowledge-base", headers=_admin_headers()).status_code, 200)
+
+
 class TestOverGateRegressionGuard(unittest.TestCase):
     """The 2026-09-02 revert must not spill past /report/status + /llms,
     and the 2026-09-03 decision must not spill past /report/data on top
     of those. Every route below stays platform.manage_infra-gated (401
     w/o token) exactly as commit 8705cbf left it. Overlaps
     TestPlatformManageInfraAuth on purpose -- this one is the named,
-    human-readable list from the change's own scope statement."""
+    human-readable list from the change's own scope statement.
+
+    /knowledge-base is deliberately not in this list any more (2026-09-12
+    decision, see TestKnowledgeBasePublicFields) -- it now returns 200
+    without a token, just with pubmed_root/index_root nulled out, so it
+    no longer belongs in a "still 401s" regression guard."""
 
     STILL_GATED = (
         "/",
         "/coverage/status",
-        "/knowledge-base",
         "/storage",
         "/cron/jobs",
         "/cron/jobs/mysql-backup/log",
