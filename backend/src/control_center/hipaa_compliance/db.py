@@ -96,11 +96,13 @@ def _ensure_initialized() -> None:
     global _initialized
     if not _initialized:
         init_db()
+        from control_center.hipaa_compliance.catalog_seed import seed_initial_catalog
         from control_center.hipaa_compliance.seed import seed_initial_data
 
         db = SessionLocal()
         try:
             seed_initial_data(db)
+            seed_initial_catalog(db)
         finally:
             db.close()
         _initialized = True

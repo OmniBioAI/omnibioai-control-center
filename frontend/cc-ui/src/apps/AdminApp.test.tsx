@@ -114,7 +114,7 @@ vi.mock('../pages/InteractionsPage', () => ({ default: () => <div data-testid="I
 vi.mock('../pages/billing/BillingPage', () => ({
   default: ({ orgId }: { orgId: number }) => <div data-testid="BillingPage" data-org-id={orgId} />,
 }))
-// Admin Console HIPAA Compliance Report (V1).
+// Admin Console HIPAA Readiness Report (V1).
 vi.mock('../pages/compliance/HipaaCompliancePage', () => ({ default: () => <div data-testid="HipaaCompliancePage" /> }))
 
 const admin: SessionUser = {
@@ -1122,9 +1122,9 @@ describe('AdminApp auth gate', () => {
     expect(await screen.findByTestId('TeamsPage')).toHaveAttribute('data-initial-org-id', '42')
   })
 
-  // ── Admin Console HIPAA Compliance Report (V1) ─────────────────────────
+  // ── Admin Console HIPAA Readiness Report (V1) ─────────────────────────
 
-  it('reaches HIPAA Compliance via the sidebar for a platform admin', async () => {
+  it('reaches HIPAA Readiness via the sidebar for a platform admin', async () => {
     vi.mocked(auth.getToken).mockReturnValue('token-hipaa1')
     vi.mocked(auth.ensureSession).mockResolvedValue(admin)
     vi.mocked(auth.getSessionUser).mockReturnValue(admin)
@@ -1135,14 +1135,14 @@ describe('AdminApp auth gate', () => {
     render(<AdminApp />)
     await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
 
-    clickNav('HIPAA Compliance')
+    clickNav('HIPAA Readiness')
 
     expect(await screen.findByTestId('HipaaCompliancePage')).toBeInTheDocument()
     await waitFor(() => expect(window.location.pathname).toBe('/hipaa-compliance'))
     expect(screen.queryByText('Coming soon')).not.toBeInTheDocument()
   })
 
-  it("deep-links directly to HIPAA Compliance and preserves the path", async () => {
+  it("deep-links directly to HIPAA Readiness and preserves the path", async () => {
     window.history.pushState(null, "", "/hipaa-compliance")
     vi.mocked(auth.getToken).mockReturnValue("token-hipaa-deep-link")
     vi.mocked(auth.ensureSession).mockResolvedValue(admin)
@@ -1158,7 +1158,7 @@ describe('AdminApp auth gate', () => {
     expect(screen.queryByTestId("DashboardPage")).not.toBeInTheDocument()
   })
 
-  it("restores HIPAA Compliance on browser popstate", async () => {
+  it("restores HIPAA Readiness on browser popstate", async () => {
     vi.mocked(auth.getToken).mockReturnValue("token-hipaa-popstate")
     vi.mocked(auth.ensureSession).mockResolvedValue(admin)
     vi.mocked(auth.getSessionUser).mockReturnValue(admin)
@@ -1178,7 +1178,7 @@ describe('AdminApp auth gate', () => {
     expect(window.location.pathname).toBe("/hipaa-compliance")
   })
 
-  it("does not render HIPAA Compliance from a direct path without platform-admin access", async () => {
+  it("does not render HIPAA Readiness from a direct path without platform-admin access", async () => {
     window.history.pushState(null, "", "/hipaa-compliance")
     vi.mocked(auth.getToken).mockReturnValue("token-hipaa-denied")
     vi.mocked(auth.ensureSession).mockResolvedValue(orgOnlyUser)
@@ -1193,7 +1193,7 @@ describe('AdminApp auth gate', () => {
     expect(screen.queryByTestId("HipaaCompliancePage")).not.toBeInTheDocument()
   })
 
-  it('hides the HIPAA Compliance nav item for a user who is not a platform admin', async () => {
+  it('hides the HIPAA Readiness nav item for a user who is not a platform admin', async () => {
     vi.mocked(auth.getToken).mockReturnValue('token-hipaa2')
     vi.mocked(auth.ensureSession).mockResolvedValue(orgOnlyUser)
     vi.mocked(auth.getSessionUser).mockReturnValue(orgOnlyUser)
@@ -1204,6 +1204,6 @@ describe('AdminApp auth gate', () => {
     render(<AdminApp />)
     await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
 
-    expect(screen.queryByText('HIPAA Compliance')).not.toBeInTheDocument()
+    expect(screen.queryByText('HIPAA Readiness')).not.toBeInTheDocument()
   })
 })

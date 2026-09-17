@@ -100,8 +100,8 @@ export default function ComplianceReport() {
   return (
     <div>
       <SectionHeader
-        title="HIPAA Compliance Report"
-        description="Basic compliance report: user access, RAG query log, and security events for an organization's date range. Full HIPAA certification is planned for v0.9.0."
+        title="HIPAA Readiness Report"
+        description="Organization-scoped control evidence report: user access, RAG query log, and security events for a selected date range. Additional controls and evidence are tracked as readiness work continues."
       />
 
       <Card style={{ marginBottom: 16 }}>
@@ -157,11 +157,11 @@ export default function ComplianceReport() {
         <EmptyState
           icon={AlertTriangle}
           title="Permission denied"
-          description="The HIPAA compliance report requires a platform admin role. This is enforced by the backend, not this page."
+          description="The HIPAA readiness report requires a platform admin role. This is enforced by the backend, not this page."
         />
       )}
 
-      {loading && <LoadingState label="Generating compliance report…" />}
+      {loading && <LoadingState label="Generating readiness report…" />}
       {!loading && error && <ErrorState message={error} onRetry={handleGenerate} />}
 
       {!loading && !error && !denied && report && <ReportPreview report={report} />}

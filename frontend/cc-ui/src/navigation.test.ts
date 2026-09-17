@@ -93,7 +93,7 @@ describe('navigation: Interactions placement', () => {
   })
 })
 
-// HIPAA Basic Compliance Report v0.8.0. Same reasoning as the
+// HIPAA Readiness Report v0.8.0. Same reasoning as the
 // Sessions/Interactions blocks above.
 
 describe('navigation: Compliance Report placement', () => {
@@ -209,14 +209,14 @@ describe('navigation: Integrations placement', () => {
   })
 })
 
-// Admin Console HIPAA Compliance Report (V1): "Admin Console > Compliance
-// > HIPAA Compliance" -- a dedicated Compliance section, deliberately
+// Admin Console HIPAA Readiness Report (V1): "Admin Console > Compliance
+// > HIPAA Readiness" -- a dedicated Compliance section, deliberately
 // distinct from the pre-existing 'compliance-report' item under
-// Security (a different feature: HIPAA Basic Compliance Report v0.8.0,
+// Security (a different feature: HIPAA Readiness Report v0.8.0,
 // an org-scoped usage/access-log export -- see this item's own comment
 // in navigation.ts).
 
-describe('navigation: HIPAA Compliance placement', () => {
+describe('navigation: HIPAA Readiness placement', () => {
   it('has exactly one "hipaa-compliance" entry across the entire tree', () => {
     const found: { sectionKey: string; parentKey?: string }[] = []
     for (const section of NAVIGATION) {
@@ -237,7 +237,7 @@ describe('navigation: HIPAA Compliance placement', () => {
 
     const item = complianceSection!.items.find(i => i.key === 'hipaa-compliance')
     expect(item).toBeDefined()
-    expect(item!.label).toBe('HIPAA Compliance')
+    expect(item!.label).toBe('HIPAA Readiness')
     expect(item!.functional).toBe(true)
     expect(item!.children).toBeUndefined()
 

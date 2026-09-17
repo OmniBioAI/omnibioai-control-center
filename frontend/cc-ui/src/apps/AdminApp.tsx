@@ -163,11 +163,11 @@ function AdminDashboard() {
   // Security Dashboard reads) are all manage_all_orgs-gated.
   const canSeeSecurityOverview = hasPlatformAdminAccess()
   const canSeeSecurityPosture = hasPlatformAdminAccess()
-  // HIPAA Basic Compliance Report v0.8.0: same reasoning as
+  // HIPAA Readiness Report v0.8.0: same reasoning as
   // canSeeAuditLogs -- GET /compliance/hipaa-report is manage_all_orgs-
   // gated, not org-scoped (org_admin access deferred to v0.9.0).
   const canSeeComplianceReport = hasPlatformAdminAccess()
-  // Admin Console HIPAA Compliance Report (V1): same reasoning as
+  // Admin Console HIPAA Readiness Report (V1): same reasoning as
   // canSeeComplianceReport immediately above -- every route under
   // GET /hipaa-compliance/changes is manage_all_orgs-gated, reads
   // included (see routes_hipaa_compliance.py's own module docstring).
@@ -568,7 +568,7 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
       if (!ctx.canSeeAuditExplorer) return null
       return <AuditExplorerPage />
 
-    // HIPAA Basic Compliance Report v0.8.0: flat platform-wide page, no
+    // HIPAA Readiness Report v0.8.0: flat platform-wide page, no
     // org-picker/deep-link -- same shape as 'audit-logs' immediately
     // above (the page itself offers an in-page organization select,
     // since org_id is a required report parameter, not an optional
@@ -577,7 +577,7 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
       if (!ctx.canSeeComplianceReport) return null
       return <ComplianceReport />
 
-    // Admin Console HIPAA Compliance Report (V1): flat platform-wide
+    // Admin Console HIPAA Readiness Report (V1): flat platform-wide
     // page, no org-picker/deep-link -- same shape as 'compliance-report'
     // immediately above, for the identical reason (every route this
     // page reads is manage_all_orgs-gated, not org-scoped).

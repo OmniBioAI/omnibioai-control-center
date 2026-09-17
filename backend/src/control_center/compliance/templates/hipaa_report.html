@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>HIPAA Compliance Report</title>
+<title>HIPAA Readiness Report</title>
 <style>
   @page {
     size: Letter;
@@ -130,15 +130,15 @@
       </svg>
       <span class="cover-brand-text">Omni<span>BioAI</span></span>
     </div>
-    <div class="cover-title">HIPAA Basic Compliance Report</div>
+    <div class="cover-title">HIPAA Readiness Report</div>
     <div class="cover-meta"><strong>Organization:</strong> {{ organization_name }} (org #{{ organization_id }})</div>
     <div class="cover-meta"><strong>Period:</strong> {{ from_date }} &ndash; {{ to_date }}</div>
     <div class="cover-meta"><strong>Generated:</strong> {{ generated_at }} by {{ generated_by }}</div>
     <div class="disclaimer">
-      Basic compliance report (OmniBioAI Studio v0.8.0). Covers login/session
+      HIPAA readiness report (OmniBioAI Studio v0.8.0). Covers login/session
       activity, RAG query access, and security events from existing audit
-      sources. Not a substitute for a full HIPAA compliance audit -- full
-      certification review is planned for v0.9.0.
+      sources. Scope is limited to available report sources and does not
+      represent a legal compliance determination.
     </div>
   </div>
 

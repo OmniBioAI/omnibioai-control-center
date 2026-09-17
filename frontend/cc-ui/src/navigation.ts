@@ -262,7 +262,7 @@ export const NAVIGATION: NavSection[] = [
       // the report's four sections). Placed next to Audit Logs/
       // Interactions -- its closest technical precedent (platform-admin-
       // only, date-ranged, reads the same underlying audit ledger).
-      { key: 'compliance-report', label: 'Compliance Report', functional: true, visible: hasPlatformAdminAccess },
+      { key: 'compliance-report', label: 'HIPAA Readiness Report', functional: true, visible: hasPlatformAdminAccess },
       // PR-C (Control Center Sessions Integration): promoted from Coming
       // Soon to a real page (SessionsPage). Unlike 'audit-logs' above
       // (platform-admin-only backend data), this is self-service --
@@ -324,7 +324,7 @@ export const NAVIGATION: NavSection[] = [
       // GET /hipaa-compliance/changes is manage_all_orgs-gated
       // (routes_hipaa_compliance.py's own _require_platform_admin),
       // reads included, not just writes.
-      { key: 'hipaa-compliance', label: 'HIPAA Compliance', functional: true, visible: hasPlatformAdminAccess },
+      { key: 'hipaa-compliance', label: 'HIPAA Readiness', functional: true, visible: hasPlatformAdminAccess },
     ],
   },
   {

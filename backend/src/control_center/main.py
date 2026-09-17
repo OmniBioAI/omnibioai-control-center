@@ -55,6 +55,7 @@ from control_center.api.routes_platform_interactions_proxy import router as plat
 from control_center.analytics.router import router as analytics_router
 from control_center.compliance.router import router as compliance_router
 from control_center.api.routes_hipaa_compliance import router as hipaa_compliance_router
+from control_center.api.routes_hipaa_readiness import router as hipaa_readiness_router
 from control_center.api.routes_cloud import router as cloud_router
 from control_center.api.routes_integrations import router as integrations_router
 from control_center.api.routes_integration_health import router as integration_health_router
@@ -258,6 +259,7 @@ app.include_router(compliance_router)
 # dashboard_router/analytics_router, not one of the routes_*_proxy.py
 # routers above.
 app.include_router(hipaa_compliance_router)
+app.include_router(hipaa_readiness_router)
 
 
 # ==============================================================================

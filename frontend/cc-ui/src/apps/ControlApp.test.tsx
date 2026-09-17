@@ -119,7 +119,7 @@ describe('ControlApp page set: only the endpoints confirmed safe for anonymous a
       'OrganizationsPage', 'OrganizationDetailPage', 'UsersPage', 'UserDetailPage',
       'components/organizations', 'components/roles', 'components/teams',
       "'../pages/EcosystemPage'", '"../pages/EcosystemPage"',
-      // Admin Console HIPAA Compliance Report (V1): ControlApp must
+      // Admin Console HIPAA Readiness Report (V1): ControlApp must
       // never import navigation.ts (its own separate Header/Tab
       // component, not the sectioned admin nav) or the compliance page
       // itself -- same "genuinely absent from the module graph, not
