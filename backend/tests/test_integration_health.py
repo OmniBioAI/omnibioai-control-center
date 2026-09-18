@@ -1,3 +1,13 @@
+"""tests/test_integration_health.py -- control_center.integration_health's
+domain model: IntegrationRecord.readiness() derivation from provider
+status/enabled/configuration/auth state, safe public serialization
+(never leaking raw provider payloads, credential values, secrets, or
+filesystem paths), freshness classification, and IntegrationInventory's
+aggregate summary counts.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
+"""
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -23,6 +33,8 @@ NOW = datetime(2026, 8, 30, 12, tzinfo=UTC)
 
 
 def record(**overrides):
+    """A baseline IntegrationRecord (a ready pubchem integration), with
+    any field overridden by keyword."""
     values = {
         "integration_id": "pubchem", "display_name": "PubChem", "provider": IntegrationProvider(
             "NCBI", "REST", "PUG-REST", ProviderStatus.AVAILABLE, NOW,
@@ -52,16 +64,24 @@ def record(**overrides):
       "provider": IntegrationProvider("NCBI", "REST", status=ProviderStatus.AVAILABLE)}, ReadinessStatus.READY),
 ])
 def test_readiness_rules(kwargs, expected):
+    """readiness() derives the correct ReadinessStatus for each
+    combination of provider status, enabled/implementation/configuration
+    state, and auth requirement."""
     assert record(**kwargs).readiness() is expected
 
 
 def test_auth_metadata_never_contains_credential_value():
+    """Public serialization reports only requirement/credential_configured
+    for an AUTH_REQUIRED integration -- never the credential itself."""
     item = record(auth_requirement=AuthRequirement.AUTH_REQUIRED, credential_configured=True)
     payload = item.to_public_dict(now=NOW)
     assert payload["authentication"] == {"requirement": "AUTH_REQUIRED", "credential_configured": True}
 
 
 def test_freshness_and_unknown_timestamp():
+    """freshness classifies as CURRENT for a recent last_checked, STALE
+    once it's older than the threshold, and UNKNOWN when there's no
+    last_checked timestamp at all."""
     assert record().to_public_dict(now=NOW)["freshness"] == Freshness.CURRENT.value
     old = record(provider=IntegrationProvider("NCBI", "REST", last_checked=NOW - timedelta(hours=2)))
     assert old.to_public_dict(now=NOW)["freshness"] == Freshness.STALE.value
@@ -69,6 +89,9 @@ def test_freshness_and_unknown_timestamp():
 
 
 def test_summary_is_deterministic_and_counts_all_states():
+    """IntegrationInventory.summary() tallies each readiness bucket
+    (ready/degraded/not_ready/disabled/unknown) exactly, across a mixed
+    set of records."""
     records = (record(), record(provider=IntegrationProvider("X", "REST", status=ProviderStatus.DEGRADED)),
                record(enabled_status=EnabledStatus.DISABLED), record(provider=IntegrationProvider("X", "REST")),
                record(implementation_status=ImplementationStatus.NOT_IMPLEMENTED))
@@ -78,6 +101,9 @@ def test_summary_is_deterministic_and_counts_all_states():
 
 
 def test_evidence_types_and_safe_serialization():
+    """Evidence detail text and warnings are serialized but with any
+    embedded secret/token value or filesystem path scrubbed from the
+    public dict; the evidence source enum still comes through."""
     item = record(evidence=(IntegrationEvidence(EvidenceType.LIVE_PROBE, "PASS",
                                                  "token=abc /srv/control-center", NOW),),
                    warnings=("Authorization: Bearer eyJabcdefghijk",))
@@ -87,11 +113,15 @@ def test_evidence_types_and_safe_serialization():
 
 
 def test_invalid_failure_combination_rejected():
+    """Constructing an IntegrationProvider as AVAILABLE with a
+    failure_reason set raises ValueError -- the two are mutually exclusive."""
     with pytest.raises(ValueError):
         IntegrationProvider("X", "REST", status=ProviderStatus.AVAILABLE, failure_reason=FailureReason.NETWORK)
 
 
 def test_public_shape_has_no_raw_provider_payload_or_paths():
+    """The inventory's public dict has exactly the documented top-level
+    keys, and the serialized provider info contains no raw URL."""
     payload = IntegrationInventory((record(),), {"plugin_registry": DataSourceStatus.AVAILABLE}).to_public_dict(generated_at=NOW)
     assert set(payload) == {"schema_version", "generated_at", "summary", "integrations", "data_sources", "warnings"}
     assert "http" not in str(payload["integrations"][0]["provider"])

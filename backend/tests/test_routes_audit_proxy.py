@@ -9,6 +9,9 @@ Mirrors test_routes_service_accounts_proxy.py's exact conventions -- this
 route is a thin relay, no authorization decision is made here (that's
 entirely omnibioai-auth's job, via require_permission(manage_all_orgs),
 pre-existing and unmodified).
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -25,6 +28,8 @@ client = TestClient(app)
 
 
 def _mock_response(status_code: int, json_body=None, raise_json_error: bool = False, content: bytes = b"x") -> MagicMock:
+    """A MagicMock httpx.Response stand-in; raise_json_error makes
+    .json() raise ValueError instead of returning json_body."""
     resp = MagicMock()
     resp.status_code = status_code
     resp.content = content
@@ -36,6 +41,8 @@ def _mock_response(status_code: int, json_body=None, raise_json_error: bool = Fa
 
 
 def _mock_async_client(response: MagicMock = None, side_effect=None):
+    """An async-context-manager mock of httpx.AsyncClient whose
+    .request() returns `response`, or raises `side_effect` if given."""
     mock_client = MagicMock()
     mock_request = AsyncMock()
     if side_effect is not None:
@@ -65,7 +72,13 @@ _EVENT_LIST = {
 
 
 class TestListAuditEventsProxy(unittest.TestCase):
+    """GET /platform/audit-events's thin-relay behavior: success
+    passthrough (never leaking a secret field), auth/query forwarding,
+    fail-safe error mapping, and its GET-only (immutable) route."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged,
+        and no secret/hash field ever appears in the response text."""
         upstream = _mock_response(200, _EVENT_LIST)
         with patch("control_center.api.routes_audit_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/platform/audit-events", headers={"Authorization": "Bearer tok"})
@@ -77,6 +90,8 @@ class TestListAuditEventsProxy(unittest.TestCase):
             self.assertNotIn(forbidden, body_text)
 
     def test_forwards_authorization_header(self) -> None:
+        """The caller's Authorization header is forwarded to the
+        upstream auth-service call unchanged."""
         upstream = _mock_response(200, _EVENT_LIST)
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_audit_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -85,6 +100,8 @@ class TestListAuditEventsProxy(unittest.TestCase):
         self.assertEqual(call_kwargs["headers"]["Authorization"], "Bearer my-token-123")
 
     def test_forwards_query_params(self) -> None:
+        """organization_id/event_type/page query params are all forwarded
+        to the upstream request unchanged."""
         upstream = _mock_response(200, _EVENT_LIST)
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_audit_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -99,6 +116,8 @@ class TestListAuditEventsProxy(unittest.TestCase):
         self.assertEqual(forwarded_params["page"], "2")
 
     def test_forwards_403_for_non_platform_admin(self) -> None:
+        """A caller with only per-org permissions (not platform-wide
+        manage_all_orgs) gets the upstream's 403 relayed, by design."""
         # manage_all_orgs is platform-admin-only -- a caller with only
         # manage_api_keys/manage_oauth_clients for one org gets 403 here,
         # by design. See discovery doc §5.
@@ -108,6 +127,8 @@ class TestListAuditEventsProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 403)
 
     def test_auth_service_unreachable_returns_503(self) -> None:
+        """A connection failure to the auth-service returns 503 with an
+        "auth-service unreachable" message."""
         with patch(
             "control_center.api.routes_audit_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
@@ -117,6 +138,8 @@ class TestListAuditEventsProxy(unittest.TestCase):
         self.assertIn("auth-service unreachable", resp.json()["error"])
 
     def test_non_json_upstream_response_handled(self) -> None:
+        """A non-JSON upstream response body maps to a 500 error naming
+        "non-JSON" rather than propagating the parse exception."""
         upstream = _mock_response(500, raise_json_error=True)
         with patch("control_center.api.routes_audit_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/platform/audit-events", headers={"Authorization": "Bearer tok"})
@@ -124,6 +147,11 @@ class TestListAuditEventsProxy(unittest.TestCase):
         self.assertIn("non-JSON", resp.json()["error"])
 
     def test_empty_upstream_body_preserved(self) -> None:
+        """An empty (b"") upstream body with no content to parse passes
+        through as an empty body -- covers the shared _proxy() empty-
+        body branch every proxy file in this directory carries, for
+        parity with the rest of the suite, even though this route's real
+        upstream today always returns a body."""
         # Not a real omnibioai-auth response shape for this route today
         # (GET /platform/audit-events always returns a body) -- covers
         # the shared _proxy() empty-body branch every proxy file in this
@@ -139,6 +167,8 @@ class TestListAuditEventsProxy(unittest.TestCase):
         self.assertEqual(resp.content, b"")
 
     def test_no_delete_route_exists(self) -> None:
+        """DELETE on /platform/audit-events returns 405 -- no such route
+        is registered at all (immutability), not just a failed attempt."""
         # Immutability: this proxy defines GET only -- confirm there is
         # no DELETE (or PATCH/PUT) route registered for this path at all,
         # not just that one happens to fail.

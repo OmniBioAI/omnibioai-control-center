@@ -23,6 +23,9 @@ These are static config assertions, not a running-nginx integration test
 (no nginx binary/container dependency in this test suite) -- they exist so
 a future edit can't silently reintroduce a bare, cache-forever
 `proxy_pass http://control-center:7070;` without a test failing.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -35,12 +38,20 @@ NGINX_DIR = Path(__file__).resolve().parents[2] / "docker" / "nginx"
 
 
 class TestNginxApiProxyConfig(unittest.TestCase):
+    """Static assertions on docker/nginx/api-proxy.conf and control-
+    center.conf guarding against the bare-hostname proxy_pass staleness
+    regression, and against SPA/API route collisions."""
+
     def setUp(self) -> None:
         self.api_proxy_conf = self._strip_comment_lines(NGINX_DIR / "api-proxy.conf")
         self.control_center_conf = self._strip_comment_lines(NGINX_DIR / "control-center.conf")
 
     @staticmethod
     def _strip_comment_lines(path: Path) -> str:
+        """Read a config file with full-line `#` comments removed --
+        this module's own header comment quotes the literal bad pattern
+        as documentation, which would otherwise false-positive the
+        checks below."""
         # Drop full-line `#` comments before matching -- this module's own
         # header comment quotes the literal bad pattern
         # ("proxy_pass http://control-center:7070;") as documentation of
@@ -51,6 +62,8 @@ class TestNginxApiProxyConfig(unittest.TestCase):
         )
 
     def test_no_bare_control_center_hostname_in_proxy_pass(self) -> None:
+        """No location in api-proxy.conf uses the bare, cache-forever
+        hostname form of proxy_pass -- the exact staleness regression."""
         # The exact regression: a static hostname in proxy_pass is resolved
         # once at worker-start and never refreshed. Every proxy_pass in this
         # file must go through the $control_center_upstream variable instead.
@@ -67,6 +80,8 @@ class TestNginxApiProxyConfig(unittest.TestCase):
         )
 
     def test_every_proxy_pass_uses_the_resolved_upstream_variable(self) -> None:
+        """Every proxy_pass target in api-proxy.conf is exactly
+        "http://$control_center_upstream" -- no exceptions."""
         proxy_pass_targets = re.findall(r"proxy_pass\s+(\S+);", self.api_proxy_conf)
         self.assertTrue(proxy_pass_targets, "expected at least one proxy_pass in api-proxy.conf")
         for target in proxy_pass_targets:
@@ -77,6 +92,10 @@ class TestNginxApiProxyConfig(unittest.TestCase):
             )
 
     def test_both_server_blocks_declare_resolver_and_upstream_variable(self) -> None:
+        """Both server blocks (control + admin) declare the Docker
+        embedded-DNS `resolver` directive and the
+        $control_center_upstream assignment -- without both, the
+        variable is just another static hostname."""
         # api-proxy.conf's $control_center_upstream is only ever request-time
         # re-resolved if the server block that includes it also declares a
         # `resolver` -- without one, nginx treats the variable's value as just
@@ -97,6 +116,9 @@ class TestNginxApiProxyConfig(unittest.TestCase):
             )
 
     def test_regression_health_api_is_separate_from_spa_route(self) -> None:
+        """The /regression-health/data API location rewrites and
+        proxies correctly, and the /regression-health SPA route is not
+        claimed by an API proxy location."""
         self.assertRegex(
             self.api_proxy_conf,
             r"location\s+=\s+/regression-health/data\s*\{[\s\S]*?"
@@ -110,6 +132,9 @@ class TestNginxApiProxyConfig(unittest.TestCase):
         )
 
     def test_deployment_health_api_is_separate_from_spa_route(self) -> None:
+        """DH-3: same REG-010 route-collision check, for Deployment
+        Health's own SPA (/deployment-health) vs. API
+        (/deployment-health/data) split."""
         # DH-3: same REG-010 route-collision check, for Deployment Health's
         # own SPA (/deployment-health) vs. API (/deployment-health/data)
         # split.
@@ -126,6 +151,9 @@ class TestNginxApiProxyConfig(unittest.TestCase):
         )
 
     def test_integration_health_api_is_separate_from_spa_route(self) -> None:
+        """IH-4: the exact location must close before the next location
+        starts; otherwise nginx parses Security Posture as a nested
+        location and refuses to start."""
         # IH-4: the exact location must close before the next location starts;
         # otherwise nginx parses Security Posture as a nested location and
         # refuses to start.
@@ -143,6 +171,8 @@ class TestNginxApiProxyConfig(unittest.TestCase):
         )
 
     def test_security_posture_api_is_separate_from_spa_route(self) -> None:
+        """The /security-posture/data API location rewrites and proxies
+        correctly, and the SPA route is not claimed by an API proxy location."""
         self.assertRegex(
             self.api_proxy_conf,
             r"location\s+=\s+/security-posture/data\s*\{[\s\S]*?"
@@ -156,6 +186,9 @@ class TestNginxApiProxyConfig(unittest.TestCase):
         )
 
     def test_hipaa_compliance_api_namespace_does_not_claim_spa_route(self) -> None:
+        """The /hipaa-compliance/ API namespace (prefix location) proxies
+        correctly, while the exact /hipaa-compliance SPA route still
+        serves the frontend index rather than being swallowed by the prefix."""
         self.assertRegex(
             self.api_proxy_conf,
             r"location\s+\^~\s+/hipaa-compliance/\s*\{[\s\S]*?"

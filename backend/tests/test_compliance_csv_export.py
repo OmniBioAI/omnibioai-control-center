@@ -1,4 +1,14 @@
-"""Unit tests for control_center.compliance.csv_export."""
+"""Unit tests for control_center.compliance.csv_export: render_report_csv()
+produces a valid, section-marked CSV covering the same four sections as
+the PDF/HTML reports, with renamed summary labels and a sources-
+unavailable warning when applicable; _sanitize_cell() is the CSV/formula-
+injection defense, prefixing any value that starts with =, +, -, or @
+with a leading apostrophe so spreadsheet apps render it as literal text
+rather than executing it as a formula.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
+"""
 import csv
 import io
 
@@ -26,6 +36,8 @@ _CONTEXT = {
 
 
 def test_includes_org_and_period_header():
+    """The CSV output includes the organization name and the reporting
+    period's dates."""
     text = render_report_csv(_CONTEXT)
     assert "KUMC Research" in text
     assert "2026-08-01" in text
@@ -33,6 +45,7 @@ def test_includes_org_and_period_header():
 
 
 def test_includes_all_four_section_markers():
+    """The CSV output includes all four "## Section N: ..." markers, in order."""
     text = render_report_csv(_CONTEXT)
     assert "## Section 1: Executive Summary" in text
     assert "## Section 2: User Access Log" in text
@@ -41,6 +54,8 @@ def test_includes_all_four_section_markers():
 
 
 def test_is_parseable_as_csv():
+    """The output round-trips through csv.reader into the expected rows
+    for user access, RAG query, and security event entries."""
     text = render_report_csv(_CONTEXT)
     rows = list(csv.reader(io.StringIO(text)))
     assert any(row == ["alice@kumc.edu", "5", "2026-08-20T10:00:00", "0"] for row in rows)
@@ -49,12 +64,16 @@ def test_is_parseable_as_csv():
 
 
 def test_handles_empty_sections():
+    """With every list section empty, rendering still succeeds and still
+    includes the section markers."""
     context = {**_CONTEXT, "user_access": [], "rag_queries": [], "security_events": []}
     text = render_report_csv(context)
     assert "## Section 4: Security Events" in text  # doesn't blow up on empty lists
 
 
 def test_missing_trace_id_renders_as_empty_string():
+    """A RAG query row with trace_id=None renders as an empty CSV field,
+    not the literal string "None"."""
     context = {**_CONTEXT, "rag_queries": [{"timestamp": "2026-08-10T09:00:00", "user_label": "alice@kumc.edu", "trace_id": None}]}
     text = render_report_csv(context)
     rows = list(csv.reader(io.StringIO(text)))
@@ -62,6 +81,8 @@ def test_missing_trace_id_renders_as_empty_string():
 
 
 def test_summary_uses_renamed_metrics_not_security_incidents():
+    """The summary uses the renamed labels ("Failed Login Attempts",
+    "Security Events Requiring Review") rather than "Security Incidents"."""
     text = render_report_csv(_CONTEXT)
     assert "Failed Login Attempts" in text
     assert "Security Events Requiring Review" in text
@@ -69,6 +90,8 @@ def test_summary_uses_renamed_metrics_not_security_incidents():
 
 
 def test_sources_unavailable_warning_appears_when_present():
+    """A non-empty sources_unavailable list renders a WARNING line
+    naming which data source was unavailable."""
     context = {**_CONTEXT, "sources_unavailable": ["RAG query events (omnibioai-billing)"]}
     text = render_report_csv(context)
     assert "WARNING" in text
@@ -76,6 +99,7 @@ def test_sources_unavailable_warning_appears_when_present():
 
 
 def test_sources_unavailable_warning_absent_when_empty():
+    """With an empty sources_unavailable list, no WARNING line is rendered."""
     text = render_report_csv(_CONTEXT)
     assert "WARNING" not in text
 
@@ -83,32 +107,41 @@ def test_sources_unavailable_warning_absent_when_empty():
 # ── Pre-merge security review regression: CSV / formula injection ──────
 
 def test_sanitize_cell_prefixes_equals_sign():
+    """A value starting with "=" is prefixed with a leading apostrophe."""
     assert _sanitize_cell("=HYPERLINK(\"http://evil\")") == "'=HYPERLINK(\"http://evil\")"
 
 
 def test_sanitize_cell_prefixes_plus_sign():
+    """A value starting with "+" is prefixed with a leading apostrophe."""
     assert _sanitize_cell("+1+1") == "'+1+1"
 
 
 def test_sanitize_cell_prefixes_minus_sign():
+    """A value starting with "-" is prefixed with a leading apostrophe."""
     assert _sanitize_cell("-1+1") == "'-1+1"
 
 
 def test_sanitize_cell_prefixes_at_sign():
+    """A value starting with "@" is prefixed with a leading apostrophe."""
     assert _sanitize_cell("@SUM(1,2)") == "'@SUM(1,2)"
 
 
 def test_sanitize_cell_leaves_safe_strings_unchanged():
+    """A string not starting with =/+/-/@ passes through unmodified,
+    even one containing "@" mid-string (an email address)."""
     assert _sanitize_cell("alice@kumc.edu") == "alice@kumc.edu"
     assert _sanitize_cell("KUMC Research") == "KUMC Research"
 
 
 def test_sanitize_cell_leaves_non_strings_unchanged():
+    """A non-string value (int, None) passes through unmodified -- the
+    formula-prefix check only applies to strings."""
     assert _sanitize_cell(5) == 5
     assert _sanitize_cell(None) is None
 
 
 def test_sanitize_cell_handles_empty_string():
+    """An empty string passes through unmodified, not IndexError."""
     assert _sanitize_cell("") == ""
 
 
@@ -130,6 +163,8 @@ def test_malicious_organization_name_is_neutralized_in_csv_output():
 
 
 def test_malicious_user_label_is_neutralized_in_csv_output():
+    """A user_label containing a formula-injection payload is prefixed
+    with a leading apostrophe in the rendered CSV row."""
     malicious_context = {
         **_CONTEXT,
         "user_access": [{"user_label": "=cmd|'/c calc'!A0", "login_count": 1, "last_login": None, "failed_attempts": 0}],
@@ -141,6 +176,8 @@ def test_malicious_user_label_is_neutralized_in_csv_output():
 
 
 def test_malicious_actor_label_in_security_events_is_neutralized():
+    """An actor_label containing a formula-injection payload is prefixed
+    with a leading apostrophe in the rendered security-events row."""
     malicious_context = {
         **_CONTEXT,
         "security_events": [{"timestamp": "2026-08-13T10:00:00", "label": "Role Assigned", "actor_label": "+1+cmd", "outcome": "success"}],

@@ -3,6 +3,15 @@ tests/test_routes_reference.py
 
 Unit tests for:
   - control_center.api.routes_reference  (GET /reference)
+
+Covers _dir_exists_nonempty()'s "has real content, not just an empty
+directory tree" check, and GET /reference's discovery of organism/
+assembly index and variant-DB presence, cross-location database checks,
+and per-organism annotation status, across the two supported reference-
+root locations (data/reference and omnibioai-data/reference).
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -22,23 +31,30 @@ client = TestClient(app)
 
 
 class TestDirExistsNonempty(unittest.TestCase):
+    """_dir_exists_nonempty()'s "has real, non-empty content" check for
+    both a file path and a directory tree."""
 
     def test_missing_path_is_false(self) -> None:
+        """A path that doesn't exist returns False."""
         self.assertFalse(_dir_exists_nonempty(Path("/nonexistent/path/xyz")))
 
     def test_file_with_content_is_true(self) -> None:
+        """A file with non-empty content returns True."""
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "data.txt"
             f.write_text("hello")
             self.assertTrue(_dir_exists_nonempty(f))
 
     def test_empty_file_is_false(self) -> None:
+        """A zero-byte file returns False."""
         with tempfile.TemporaryDirectory() as tmp:
             f = Path(tmp) / "empty.txt"
             f.write_text("")
             self.assertFalse(_dir_exists_nonempty(f))
 
     def test_dir_with_nonempty_file_is_true(self) -> None:
+        """A directory containing at least one non-empty file (nested or
+        not) returns True."""
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp) / "sub"
             d.mkdir()
@@ -46,23 +62,32 @@ class TestDirExistsNonempty(unittest.TestCase):
             self.assertTrue(_dir_exists_nonempty(Path(tmp)))
 
     def test_dir_with_only_empty_files_is_false(self) -> None:
+        """A directory whose only file is zero-byte returns False."""
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "empty.txt").write_text("")
             self.assertFalse(_dir_exists_nonempty(Path(tmp)))
 
     def test_empty_dir_is_false(self) -> None:
+        """A directory with no files at all returns False."""
         with tempfile.TemporaryDirectory() as tmp:
             self.assertFalse(_dir_exists_nonempty(Path(tmp)))
 
     def test_rglob_exception_is_false(self) -> None:
+        """An exception raised while scanning the directory returns
+        False rather than propagating."""
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(Path, "rglob", side_effect=OSError("boom")):
                 self.assertFalse(_dir_exists_nonempty(Path(tmp)))
 
 
 class TestGetReference(unittest.TestCase):
+    """GET /reference's discovery of organism/assembly indexes and
+    variant DBs, cross-location database checks, and per-organism
+    annotation status."""
 
     def test_no_ref_root_returns_unavailable(self) -> None:
+        """With no reference root directory present at all, available
+        is False and organisms/databases/annotation are all empty."""
         with tempfile.TemporaryDirectory() as tmp:
             os.environ["WORKSPACE_ROOT"] = tmp
             try:
@@ -76,6 +101,8 @@ class TestGetReference(unittest.TestCase):
         self.assertEqual(data["annotation"], {})
 
     def test_ref_root_via_data_reference(self) -> None:
+        """An existing data/reference directory (even empty of
+        organisms) is discovered as available with the correct ref_root path."""
         with tempfile.TemporaryDirectory() as tmp:
             ref_root = Path(tmp) / "data" / "reference"
             ref_root.mkdir(parents=True)
@@ -90,6 +117,10 @@ class TestGetReference(unittest.TestCase):
         self.assertEqual(data["organisms"], [])
 
     def test_organism_assembly_with_indexes_and_variants(self) -> None:
+        """A reference root under the alternate omnibioai-data/reference
+        location reports the organism/assembly and correctly distinguishes
+        which index type (bwa present, star absent) and which variant DB
+        (clinvar present, dbsnp absent) actually has content."""
         with tempfile.TemporaryDirectory() as tmp:
             ref_root = Path(tmp) / "omnibioai-data" / "reference"
             org_path = ref_root / "organisms" / "human" / "GRCh38"
@@ -121,6 +152,8 @@ class TestGetReference(unittest.TestCase):
         self.assertFalse(entry["variants"]["dbsnp"])
 
     def test_databases_checked_across_locations(self) -> None:
+        """A populated gnomad database directory is reported present,
+        while an unpopulated clinvar database is reported absent."""
         with tempfile.TemporaryDirectory() as tmp:
             ref_root = Path(tmp) / "data" / "reference"
             db_path = ref_root / "databases" / "gnomad"
@@ -138,6 +171,9 @@ class TestGetReference(unittest.TestCase):
         self.assertFalse(data["databases"]["clinvar"])
 
     def test_annotation_status_for_human_and_mouse(self) -> None:
+        """A populated human/gencode annotation directory is reported
+        present, while human/ensembl and mouse/gencode (both absent)
+        are reported false."""
         with tempfile.TemporaryDirectory() as tmp:
             ref_root = Path(tmp) / "data" / "reference"
             ann_path = ref_root / "annotation" / "human" / "gencode"

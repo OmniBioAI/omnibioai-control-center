@@ -5,6 +5,9 @@ Unit tests for control_center.analytics.permissions.require_analytics_scope.
 Covers the task brief's own RBAC test matrix (Section 12): platform_admin
 allowed, org_admin own-org allowed / other-org denied, team_admin
 permitted-team allowed / unauthorized-team denied, regular user denied.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 from __future__ import annotations
 
@@ -21,46 +24,64 @@ SECRET = "test-secret"
 
 
 def _token(**claims) -> str:
+    """A JWT signed with the test SECRET, carrying the given claims."""
     return jwt.encode(claims, SECRET, algorithm="HS256")
 
 
 class RequireAnalyticsScopeTestCase(unittest.TestCase):
+    """Base fixture: patches JWT_SECRET to the test SECRET for the
+    duration of each test, and provides a _call() helper."""
+
     def setUp(self) -> None:
         patcher = patch.object(jwt_verify_module, "JWT_SECRET", SECRET)
         patcher.start()
         self.addCleanup(patcher.stop)
 
     def _call(self, token: str, org_id=None, team_id=None):
+        """Call require_analytics_scope() with a Bearer-wrapped token."""
         return permissions.require_analytics_scope(
             authorization=f"Bearer {token}", org_id=org_id, team_id=team_id,
         )
 
 
 class AuthenticationTestCase(RequireAnalyticsScopeTestCase):
+    """require_analytics_scope()'s rejection of a missing, malformed, or
+    invalid Authorization header, before any RBAC check runs."""
+
     def test_missing_header_raises_401(self) -> None:
+        """No Authorization header at all raises 401."""
         with self.assertRaises(HTTPException) as ctx:
             permissions.require_analytics_scope(authorization=None)
         self.assertEqual(ctx.exception.status_code, 401)
 
     def test_non_bearer_header_raises_401(self) -> None:
+        """A non-Bearer auth scheme (e.g. Basic) raises 401."""
         with self.assertRaises(HTTPException) as ctx:
             permissions.require_analytics_scope(authorization="Basic abc123")
         self.assertEqual(ctx.exception.status_code, 401)
 
     def test_invalid_token_raises_401(self) -> None:
+        """A Bearer token that fails JWT verification raises 401."""
         with self.assertRaises(HTTPException) as ctx:
             permissions.require_analytics_scope(authorization="Bearer not-a-real-token")
         self.assertEqual(ctx.exception.status_code, 401)
 
 
 class PlatformAdminTestCase(RequireAnalyticsScopeTestCase):
+    """A platform_admin (MANAGE_ALL_ORGS permission) can view any org's
+    analytics, or the platform-wide view when no org_id is given."""
+
     def test_platform_admin_allowed_with_no_org_id_resolves_platform_wide(self) -> None:
+        """No org_id param -> is_platform_admin=True, org_id=None
+        (platform-wide scope)."""
         token = _token(sub="1", permissions=[permissions.MANAGE_ALL_ORGS])
         scope = self._call(token)
         self.assertTrue(scope.is_platform_admin)
         self.assertIsNone(scope.org_id)
 
     def test_platform_admin_can_request_any_org_id(self) -> None:
+        """A platform_admin can request any org_id/team_id -- both are
+        honored as given, no ownership check applies."""
         token = _token(sub="1", permissions=[permissions.MANAGE_ALL_ORGS])
         scope = self._call(token, org_id=99, team_id=7)
         self.assertEqual(scope.org_id, 99)
@@ -68,24 +89,32 @@ class PlatformAdminTestCase(RequireAnalyticsScopeTestCase):
 
 
 class OrgAdminTestCase(RequireAnalyticsScopeTestCase):
+    """An org_admin (via the org_role claim, no MANAGE_ALL_ORGS
+    permission) can view their own org's analytics but not another org's."""
+
     def test_org_admin_own_org_allowed(self) -> None:
+        """Requesting their own org_id succeeds, not as a platform_admin."""
         token = _token(sub="1", permissions=[], org_id=5, org_role=["org_admin"])
         scope = self._call(token, org_id=5)
         self.assertFalse(scope.is_platform_admin)
         self.assertEqual(scope.org_id, 5)
 
     def test_org_admin_no_org_id_param_resolves_to_own_org(self) -> None:
+        """Omitting org_id resolves the scope to the token's own org_id claim."""
         token = _token(sub="1", permissions=[], org_id=5, org_role=["org_admin"])
         scope = self._call(token)
         self.assertEqual(scope.org_id, 5)
 
     def test_org_admin_other_org_denied(self) -> None:
+        """Requesting a different org_id than the token's own raises 403."""
         token = _token(sub="1", permissions=[], org_id=5, org_role=["org_admin"])
         with self.assertRaises(HTTPException) as ctx:
             self._call(token, org_id=6)
         self.assertEqual(ctx.exception.status_code, 403)
 
     def test_org_admin_without_org_id_claim_falls_through_to_denied(self) -> None:
+        """org_role="org_admin" with no org_id claim at all is denied
+        (403), not treated as platform-wide access."""
         token = _token(sub="1", permissions=[], org_id=None, org_role=["org_admin"])
         with self.assertRaises(HTTPException) as ctx:
             self._call(token)
@@ -93,31 +122,41 @@ class OrgAdminTestCase(RequireAnalyticsScopeTestCase):
 
 
 class TeamAdminTestCase(RequireAnalyticsScopeTestCase):
+    """A team_admin (via the team_role claim) can view their own team's
+    analytics, within their own org, but nothing outside that scope."""
+
     def test_team_admin_permitted_team_allowed(self) -> None:
+        """Requesting their own org_id and team_id together succeeds."""
         token = _token(sub="1", permissions=[], org_id=5, org_role=[], team_id=10, team_role="admin")
         scope = self._call(token, org_id=5, team_id=10)
         self.assertEqual(scope.org_id, 5)
         self.assertEqual(scope.team_id, 10)
 
     def test_team_admin_no_params_resolves_to_own_org_and_team(self) -> None:
+        """Omitting both org_id/team_id resolves the scope to the
+        token's own org_id/team_id claims."""
         token = _token(sub="1", permissions=[], org_id=5, org_role=[], team_id=10, team_role="admin")
         scope = self._call(token)
         self.assertEqual(scope.org_id, 5)
         self.assertEqual(scope.team_id, 10)
 
     def test_team_admin_unauthorized_team_denied(self) -> None:
+        """Requesting a different team_id within the same org is denied (403)."""
         token = _token(sub="1", permissions=[], org_id=5, org_role=[], team_id=10, team_role="admin")
         with self.assertRaises(HTTPException) as ctx:
             self._call(token, org_id=5, team_id=11)
         self.assertEqual(ctx.exception.status_code, 403)
 
     def test_team_admin_unauthorized_org_denied(self) -> None:
+        """Requesting a different org_id entirely is denied (403)."""
         token = _token(sub="1", permissions=[], org_id=5, org_role=[], team_id=10, team_role="admin")
         with self.assertRaises(HTTPException) as ctx:
             self._call(token, org_id=6)
         self.assertEqual(ctx.exception.status_code, 403)
 
     def test_non_admin_team_role_denied(self) -> None:
+        """A team_role of "member" (not "admin") is denied (403) even
+        for their own org/team."""
         token = _token(sub="1", permissions=[], org_id=5, org_role=[], team_id=10, team_role="member")
         with self.assertRaises(HTTPException) as ctx:
             self._call(token)
@@ -125,13 +164,18 @@ class TeamAdminTestCase(RequireAnalyticsScopeTestCase):
 
 
 class RegularUserTestCase(RequireAnalyticsScopeTestCase):
+    """A regular (non-admin) user has no analytics access at all."""
+
     def test_regular_user_denied(self) -> None:
+        """A plain org "member" role is denied (403)."""
         token = _token(sub="1", permissions=[], org_id=5, org_role=["member"], team_id=None, team_role=None)
         with self.assertRaises(HTTPException) as ctx:
             self._call(token)
         self.assertEqual(ctx.exception.status_code, 403)
 
     def test_no_org_membership_at_all_denied(self) -> None:
+        """A token with no org/team claims at all is denied (403), not
+        an unhandled error."""
         token = _token(sub="1", permissions=[])
         with self.assertRaises(HTTPException) as ctx:
             self._call(token)

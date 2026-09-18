@@ -3,6 +3,15 @@ tests/test_routes_llm.py
 
 Unit tests for:
   - control_center.api.routes_llm  (GET /llms, GET /knowledge-base)
+
+Covers Ollama status/model parsing for GET /llms, and GET /knowledge-base's
+abstract/index directory scanning helpers (_count_json_files,
+_list_index_domains, _index_size_bytes -- excluding embedding-checkpoint
+scratch files, skipping unreadable/non-directory entries) plus the
+route's rag_status derivation from the RAG service's own health response.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -59,8 +68,11 @@ def _mock_async_client(get_side_effect=None, get_return_value=None):
 # ==============================================================================
 
 class TestGetLlms(unittest.TestCase):
+    """GET /llms's Ollama status/model parsing and api_keys reporting."""
 
     def test_ollama_unreachable_on_exception(self) -> None:
+        """An Ollama connection failure reports status="unreachable"
+        with an empty models list."""
         ctx = _mock_async_client(get_side_effect=RuntimeError("connection refused"))
         with patch.object(routes_llm.httpx, "AsyncClient", return_value=ctx):
             resp = client.get("/llms")
@@ -70,6 +82,7 @@ class TestGetLlms(unittest.TestCase):
         self.assertEqual(data["ollama"]["models"], [])
 
     def test_ollama_non_200_stays_unreachable(self) -> None:
+        """A non-200 Ollama response also reports status="unreachable"."""
         mock_resp = MagicMock(status_code=404)
         ctx = _mock_async_client(get_return_value=mock_resp)
         with patch.object(routes_llm.httpx, "AsyncClient", return_value=ctx):
@@ -78,6 +91,8 @@ class TestGetLlms(unittest.TestCase):
         self.assertEqual(data["ollama"]["status"], "unreachable")
 
     def test_ollama_running_parses_models(self) -> None:
+        """A successful Ollama response parses each model's size (bytes
+        to GB) and modified date, defaulting missing fields to 0.0/""."""
         mock_resp = MagicMock(status_code=200)
         mock_resp.json.return_value = {
             "models": [
@@ -99,6 +114,8 @@ class TestGetLlms(unittest.TestCase):
         self.assertEqual(models[1]["modified"], "")
 
     def test_api_keys_reflect_env(self) -> None:
+        """api_keys.configured for each provider reflects whether its
+        env var is actually set."""
         ctx = _mock_async_client(get_side_effect=RuntimeError("down"))
         with patch.object(routes_llm.httpx, "AsyncClient", return_value=ctx):
             with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test"}, clear=False):
@@ -114,8 +131,12 @@ class TestGetLlms(unittest.TestCase):
 # ==============================================================================
 
 class TestCountJsonFiles(unittest.TestCase):
+    """_count_json_files()'s per-domain .json count, skipping non-JSON
+    files, non-directory entries, and unreadable domain dirs."""
 
     def test_counts_json_files_across_domains(self) -> None:
+        """Total and per-domain counts include only .json files, across
+        every domain subdirectory, excluding empty domains from the list."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "cancer").mkdir()
@@ -132,11 +153,14 @@ class TestCountJsonFiles(unittest.TestCase):
         self.assertEqual(sorted(domains), ["cancer", "genomics"])
 
     def test_nonexistent_dir_returns_zero(self) -> None:
+        """A nonexistent root directory returns (0, [])."""
         total, domains = routes_llm._count_json_files(Path("/nonexistent/abstracts"))
         self.assertEqual(total, 0)
         self.assertEqual(domains, [])
 
     def test_file_instead_of_dir_entry_skipped(self) -> None:
+        """A file directly under the root (not a domain subdirectory)
+        is skipped, not counted."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "not_a_dir.json").write_text("{}")
@@ -145,6 +169,8 @@ class TestCountJsonFiles(unittest.TestCase):
         self.assertEqual(domains, [])
 
     def test_unreadable_domain_dir_skipped(self) -> None:
+        """A domain directory with no read permission is skipped
+        rather than raising a PermissionError."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             domain = root / "locked"
@@ -164,8 +190,12 @@ class TestCountJsonFiles(unittest.TestCase):
 # ==============================================================================
 
 class TestListIndexDomains(unittest.TestCase):
+    """_list_index_domains()'s listing of non-empty index domain
+    subdirectories, skipping empty ones, files, and unreadable dirs."""
 
     def test_lists_nonempty_domain_dirs(self) -> None:
+        """Only a domain directory with actual content is listed --
+        an empty one and a non-directory entry are excluded."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "cancer").mkdir()
@@ -178,10 +208,13 @@ class TestListIndexDomains(unittest.TestCase):
         self.assertEqual(domains, ["cancer"])
 
     def test_nonexistent_dir_returns_empty(self) -> None:
+        """A nonexistent root directory returns an empty list."""
         domains = routes_llm._list_index_domains(Path("/nonexistent/index"))
         self.assertEqual(domains, [])
 
     def test_unreadable_domain_dir_skipped(self) -> None:
+        """A domain directory with no read permission is skipped
+        rather than raising."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             domain = root / "locked"
@@ -200,8 +233,12 @@ class TestListIndexDomains(unittest.TestCase):
 # ==============================================================================
 
 class TestDuBytes(unittest.TestCase):
+    """_index_size_bytes()'s recursive byte-size total, excluding
+    embedding-checkpoint scratch files, failing safe to 0 on any error."""
 
     def test_returns_parsed_bytes(self) -> None:
+        """The total is the sum of every real index file's byte size,
+        recursively across subdirectories."""
         with tempfile.TemporaryDirectory() as tmp:
             domain_dir = Path(tmp) / "CRISPR"
             domain_dir.mkdir()
@@ -212,10 +249,13 @@ class TestDuBytes(unittest.TestCase):
         self.assertEqual(result, 123)
 
     def test_exception_returns_zero(self) -> None:
+        """A nonexistent path returns 0 rather than raising."""
         result = routes_llm._index_size_bytes(Path("/nonexistent/path/does/not/exist"))
         self.assertEqual(result, 0)
 
     def test_excludes_embedding_checkpoint_scratch_files(self) -> None:
+        """A transient embedding_checkpoint_*.json scratch file is
+        excluded from the total -- it isn't part of the real index."""
         with tempfile.TemporaryDirectory() as tmp:
             domain_dir = Path(tmp) / "CRISPR"
             domain_dir.mkdir()
@@ -231,8 +271,12 @@ class TestDuBytes(unittest.TestCase):
 # ==============================================================================
 
 class TestGetKnowledgeBase(unittest.TestCase):
+    """GET /knowledge-base's end-to-end abstract/index discovery and
+    rag_status derivation from RAG's own health response."""
 
     def test_no_data_dirs_found(self) -> None:
+        """With no PubMed data directories at all, pubmed_root/index_root
+        are None, abstracts.total is 0, and rag_status is "unreachable"."""
         with tempfile.TemporaryDirectory() as tmp:
             os.environ["WORKSPACE_ROOT"] = tmp
             ctx = _mock_async_client(get_side_effect=RuntimeError("down"))
@@ -249,6 +293,9 @@ class TestGetKnowledgeBase(unittest.TestCase):
         self.assertEqual(data["rag_status"], "unreachable")
 
     def test_finds_abstracts_and_index(self) -> None:
+        """A real PubMed data layout is discovered: abstracts/index
+        counts and domain lists reflect the actual files on disk, and
+        rag_status is "running" when RAG reports healthy."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             abstracts = root / "data" / "PubMed" / "Abstracts" / "cancer"
@@ -284,6 +331,8 @@ class TestGetKnowledgeBase(unittest.TestCase):
         self.assertIn("cancer", data["faiss_index"]["domain_list"])
 
     def test_rag_degraded_on_non_200(self) -> None:
+        """A non-200 response from the RAG service maps to
+        rag_status="degraded"."""
         with tempfile.TemporaryDirectory() as tmp:
             os.environ["WORKSPACE_ROOT"] = tmp
             mock_resp = MagicMock(status_code=500)

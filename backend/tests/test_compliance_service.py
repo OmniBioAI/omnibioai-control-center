@@ -3,6 +3,9 @@ auth_client/billing_client are patched out entirely (their own httpx
 behavior is covered by test_compliance_auth_client.py/
 test_compliance_billing_client.py); this file only proves the
 aggregation/shaping logic on top of them.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 from __future__ import annotations
 
@@ -24,6 +27,10 @@ def _patch_all(
     trunc_success=False, trunc_failure=False, trunc_org=False, trunc_rag=False,
     unavail_success=False, unavail_failure=False, unavail_org=False, unavail_rag=False,
 ):
+    """A list of unstarted patcher objects stubbing every downstream
+    call build_report() makes (org lookup, member list, 3 audit-event
+    queries, 1 usage-event query), each independently shaped/truncated/
+    marked-unavailable by keyword."""
     return [
         patch("control_center.compliance.service.auth_client.get_organization", AsyncMock(return_value=(org, org_status))),
         patch("control_center.compliance.service.auth_client.get_org_members", AsyncMock(return_value=(members or [], members_status))),
@@ -43,7 +50,12 @@ def _patch_all(
 
 
 class BuildReportTestCase(unittest.IsolatedAsyncioTestCase):
+    """build_report()'s aggregation/shaping logic on top of the
+    auth-client/billing-client stubs from _patch_all()."""
+
     async def _build(self, patches, **kwargs) -> dict:
+        """Start `patches`, call build_report() with sensible defaults
+        overridable by kwargs, and always stop the patches afterward."""
         for p in patches:
             p.start()
         try:
@@ -58,6 +70,9 @@ class BuildReportTestCase(unittest.IsolatedAsyncioTestCase):
                 p.stop()
 
     async def test_basic_shape_and_organization_name(self) -> None:
+        """The report carries the org's name/id and a correct member
+        count, and deliberately omits generated_by/generated_at (the
+        router stamps those fresh per request)."""
         report = await self._build(_patch_all(org={"id": 1, "name": "KUMC Research"}, members=_MEMBERS))
         self.assertEqual(report["organization_name"], "KUMC Research")
         self.assertEqual(report["organization_id"], 1)
@@ -69,11 +84,17 @@ class BuildReportTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("generated_at", report)
 
     async def test_organization_name_falls_back_when_org_unavailable(self) -> None:
+        """When the org lookup is unavailable (not a confirmed 404), the
+        report falls back to a generic "Organization #N" name and lists
+        the source as unavailable, rather than failing entirely."""
         report = await self._build(_patch_all(org=None, org_status="unavailable", members=_MEMBERS))
         self.assertEqual(report["organization_name"], "Organization #1")
         self.assertIn("Organization details (omnibioai-auth)", report["sources_unavailable"])
 
     async def test_nonexistent_organization_raises_not_found(self) -> None:
+        """A confirmed 404 for the org raises OrganizationNotFoundError
+        with the requested organization_id -- distinct from the
+        unavailable case above, which degrades instead of raising."""
         patches = _patch_all(org=None, org_status="not_found", members=[])
         for p in patches:
             p.start()
@@ -88,6 +109,9 @@ class BuildReportTestCase(unittest.IsolatedAsyncioTestCase):
                 p.stop()
 
     async def test_login_events_filtered_to_org_members_only(self) -> None:
+        """A login event from a user who is not a member of this org is
+        excluded from user_access -- only member logins are attributed
+        to the report."""
         login_success = [
             {"actor_user_id": 1, "actor_email": None, "metadata": {"email": "alice@kumc.edu"}, "created_at": "2026-08-05T10:00:00"},
             {"actor_user_id": None, "actor_email": None, "metadata": {"email": "outsider@other.org"}, "created_at": "2026-08-05T11:00:00"},
@@ -98,6 +122,9 @@ class BuildReportTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("outsider@other.org", labels)
 
     async def test_user_access_aggregates_login_count_and_last_login(self) -> None:
+        """Multiple login-success events for the same member aggregate
+        into a single row with the correct login_count, failed_attempts,
+        and most-recent last_login, and active_users counts them once."""
         login_success = [
             {"actor_user_id": 1, "actor_email": None, "metadata": {"email": "alice@kumc.edu"}, "created_at": "2026-08-05T10:00:00"},
             {"actor_user_id": 1, "actor_email": None, "metadata": {"email": "alice@kumc.edu"}, "created_at": "2026-08-20T10:00:00"},
@@ -113,6 +140,9 @@ class BuildReportTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report["summary"]["active_users"], 1)
 
     async def test_rag_queries_resolve_user_id_to_member_email(self) -> None:
+        """A RAG query's user_id is resolved to the matching member's
+        email when known, and left as the raw id string when the user
+        isn't a member of this org."""
         rag_events = [
             {"timestamp": "2026-08-10T09:00:00", "user_id": "2", "trace_id": "trace-1"},
             {"timestamp": "2026-08-11T09:00:00", "user_id": "999", "trace_id": "trace-2"},
@@ -124,6 +154,10 @@ class BuildReportTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report["summary"]["total_rag_queries"], 2)
 
     async def test_security_events_classifies_denial_vs_ordinary_change(self) -> None:
+        """A denial-type event outcome is "deny" (counted toward
+        security_events_requiring_review), an ordinary change is
+        "success", a system-actor event's actor_label is "system", and
+        an event type outside _SECURITY_EVENT_TYPES is excluded entirely."""
         org_events = [
             {"event_type": "role_assigned", "actor_email": "bob@kumc.edu", "actor_user_id": 2, "created_at": "2026-08-12T10:00:00"},
             {"event_type": "role_assignment_denied", "actor_email": "bob@kumc.edu", "actor_user_id": 2, "created_at": "2026-08-13T10:00:00"},
@@ -145,6 +179,10 @@ class BuildReportTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report["summary"]["failed_login_attempts"], 0)
 
     async def test_login_failures_appear_in_security_events_but_count_separately(self) -> None:
+        """A login failure appears in security_events as outcome=
+        "failure", but counts toward failed_login_attempts, not
+        security_events_requiring_review -- the two metrics are kept
+        distinct rather than conflated under one "incidents" number."""
         login_failure = [
             {"actor_user_id": 1, "actor_email": None, "metadata": {"email": "alice@kumc.edu"}, "created_at": "2026-08-06T10:00:00"},
         ]
@@ -161,10 +199,15 @@ class BuildReportTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report["summary"]["security_events_requiring_review"], 0)
 
     async def test_truncated_flag_propagates_from_any_source(self) -> None:
+        """A single truncated source (RAG here) sets the report's
+        overall truncated flag to True."""
         report = await self._build(_patch_all(org={"name": "KUMC"}, members=_MEMBERS, trunc_rag=True))
         self.assertTrue(report["truncated"])
 
     async def test_no_activity_returns_empty_sections(self) -> None:
+        """With no downstream activity at all, every section is an
+        empty list, every count is 0, and sources_unavailable is empty
+        (everything genuinely succeeded, just returned nothing)."""
         report = await self._build(_patch_all(org={"name": "KUMC"}, members=_MEMBERS))
         self.assertEqual(report["user_access"], [])
         self.assertEqual(report["rag_queries"], [])
@@ -176,6 +219,9 @@ class BuildReportTestCase(unittest.IsolatedAsyncioTestCase):
     # ── Pre-merge review fix: sources_unavailable ──────────────────────
 
     async def test_sources_unavailable_lists_every_failed_source_by_name(self) -> None:
+        """When every downstream source is unavailable, sources_
+        unavailable lists all 4 by their exact documented human-readable
+        names."""
         report = await self._build(_patch_all(
             org={"name": "KUMC"}, members=_MEMBERS,
             unavail_success=True, unavail_failure=True, unavail_org=True, unavail_rag=True,
@@ -188,6 +234,9 @@ class BuildReportTestCase(unittest.IsolatedAsyncioTestCase):
         ]))
 
     async def test_members_unavailable_is_recorded_and_report_still_returns(self) -> None:
+        """An unavailable member list is recorded in sources_unavailable
+        and the report still returns (degrading gracefully) rather than
+        raising, unlike the confirmed org-not-found case."""
         report = await self._build(_patch_all(org={"name": "KUMC"}, members=[], members_status="unavailable"))
         self.assertIn("Organization members (omnibioai-auth)", report["sources_unavailable"])
         # Degrades gracefully -- does not raise, unlike the confirmed
@@ -195,6 +244,10 @@ class BuildReportTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report["summary"]["total_users"], 0)
 
     async def test_partial_downstream_failure_does_not_silently_report_zero_everything(self) -> None:
+        """With RAG unavailable but login data working, the report
+        reflects both: real login activity AND an explicit warning that
+        only RAG is missing -- not a blanket "everything is empty" that
+        hides which part actually failed."""
         # RAG unavailable, but login data (a different, working source)
         # still came through -- the report must reflect BOTH: real login
         # activity AND an explicit warning that RAG data is missing, not
@@ -213,6 +266,10 @@ class BuildReportTestCase(unittest.IsolatedAsyncioTestCase):
     # deliberate decision, not an accidental regression). ─────────────
 
     async def test_multi_org_user_login_appears_in_every_member_org_report(self) -> None:
+        """A documented, known limitation locked in deliberately: a
+        shared login event with no organization_id at the source
+        appears in every org's report the user is a member of, since it
+        can't be disambiguated further today."""
         shared_user_login = [
             {"actor_user_id": 1, "actor_email": None, "metadata": {"email": "alice@kumc.edu"}, "created_at": "2026-08-05T10:00:00"},
         ]

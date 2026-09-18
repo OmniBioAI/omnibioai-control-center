@@ -4,6 +4,9 @@ Mocks the module's own `_redis` client directly (same style
 test_analytics_cache.py uses for analytics/cache.py's `_redis`), not a
 FakeRedis, since the only thing exercised here is "was xadd called with
 the right stream/payload", not real Streams semantics.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 from __future__ import annotations
 
@@ -15,6 +18,8 @@ from control_center.compliance import audit_log
 
 
 def test_log_report_access_writes_to_the_audit_events_stream() -> None:
+    """log_report_access() writes exactly one XADD to "audit:events" with
+    the configured maxlen and approximate trimming."""
     fake_redis = MagicMock()
     with patch.object(audit_log, "_redis", fake_redis):
         audit_log.log_report_access(
@@ -57,6 +62,8 @@ def test_log_report_access_payload_matches_auditevent_shape() -> None:
 
 
 def test_log_report_access_generates_a_distinct_event_id_per_call() -> None:
+    """Two calls with identical arguments still mint two distinct
+    event_ids -- each write is its own audit event."""
     fake_redis = MagicMock()
     with patch.object(audit_log, "_redis", fake_redis):
         audit_log.log_report_access(actor="a@x.org", organization_id=1, from_date=date(2026, 8, 1), to_date=date(2026, 8, 1), report_format="json")

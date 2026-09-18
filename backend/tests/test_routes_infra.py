@@ -3,6 +3,15 @@ tests/test_routes_infra.py
 
 Unit tests for:
   - control_center.api.routes_infra
+
+Each infra sub-route (gpu/celery/database/image-freshness/usage/
+gateway-traffic/activity/integrity) delegates to its own checker function
+and relays that function's return value verbatim. /license and /audit-
+trail additionally require platform.manage_infra (real customer emails /
+per-event user_id), unlike the rest of this router which is anonymous.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -29,38 +38,50 @@ _infra_headers = {"Authorization": f"Bearer {_INFRA_TOKEN}"}
 
 
 class TestInfraRoutes(unittest.TestCase):
+    """Each routes_infra endpoint relays its checker function's return
+    value verbatim; /license and /audit-trail additionally enforce
+    platform.manage_infra."""
 
     def test_gpu_route(self) -> None:
+        """GET /gpu returns get_gpu_status()'s result unchanged."""
         with patch.object(routes_infra, "get_gpu_status", return_value={"reachable": True}):
             resp = client.get("/gpu")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"reachable": True})
 
     def test_celery_route(self) -> None:
+        """GET /celery returns get_celery_status()'s result unchanged."""
         with patch.object(routes_infra, "get_celery_status", return_value={"workers": []}):
             resp = client.get("/celery")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"workers": []})
 
     def test_database_route(self) -> None:
+        """GET /database returns get_database_status()'s result unchanged."""
         with patch.object(routes_infra, "get_database_status", return_value={"mysql": None}):
             resp = client.get("/database")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"mysql": None})
 
     def test_image_freshness_route(self) -> None:
+        """GET /image-freshness returns get_image_freshness()'s result unchanged."""
         with patch.object(routes_infra, "get_image_freshness", return_value={"images": []}):
             resp = client.get("/image-freshness")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"images": []})
 
     def test_license_route(self) -> None:
+        """GET /license with a sufficient token returns
+        get_license_status()'s result unchanged."""
         with patch.object(routes_infra, "get_license_status", return_value={"seats_used": 0}):
             resp = client.get("/license", headers=_infra_headers)
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"seats_used": 0})
 
     def test_license_route_requires_auth(self) -> None:
+        """An anonymous request to /license is rejected with 401 --
+        it carries real customer/user email addresses and must never be
+        reachable without authentication."""
         # Public Read-Only Control Center: real customer/user email
         # addresses (checks/license_status.py's own `SELECT email ...`)
         # must never be reachable anonymously.
@@ -69,30 +90,39 @@ class TestInfraRoutes(unittest.TestCase):
         self.assertEqual(resp.status_code, 401)
 
     def test_license_route_rejects_insufficient_permission(self) -> None:
+        """GET /license with a token that carries no permissions is rejected with 403,
+        since platform.manage_infra is required."""
         token = jwt.encode({"sub": "1", "permissions": []}, JWT_SECRET, algorithm="HS256")
         with patch.object(routes_infra, "get_license_status", return_value={"seats_used": 0}):
             resp = client.get("/license", headers={"Authorization": f"Bearer {token}"})
         self.assertEqual(resp.status_code, 403)
 
     def test_usage_route(self) -> None:
+        """GET /usage returns get_usage_status()'s result unchanged."""
         with patch.object(routes_infra, "get_usage_status", return_value={"active_users_7d": 0}):
             resp = client.get("/usage")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"active_users_7d": 0})
 
     def test_gateway_traffic_route(self) -> None:
+        """GET /gateway-traffic returns get_gateway_traffic()'s result unchanged."""
         with patch.object(routes_infra, "get_gateway_traffic", return_value={"requests_7d": 0}):
             resp = client.get("/gateway-traffic")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"requests_7d": 0})
 
     def test_audit_trail_route(self) -> None:
+        """GET /audit-trail with a sufficient token returns
+        get_audit_trail()'s result unchanged."""
         with patch.object(routes_infra, "get_audit_trail", return_value={"total_events": 0}):
             resp = client.get("/audit-trail", headers=_infra_headers)
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"total_events": 0})
 
     def test_audit_trail_route_requires_auth(self) -> None:
+        """An anonymous request to /audit-trail is rejected with 401 --
+        it carries raw per-event user_id and must never be reachable
+        without authentication."""
         # Public Read-Only Control Center: raw per-event user_id
         # (checks/audit_trail.py's own `events` list) must never be
         # reachable anonymously.
@@ -101,18 +131,23 @@ class TestInfraRoutes(unittest.TestCase):
         self.assertEqual(resp.status_code, 401)
 
     def test_audit_trail_route_rejects_insufficient_permission(self) -> None:
+        """GET /audit-trail with a token that carries no permissions is rejected with
+        403, since platform.manage_infra is required."""
         token = jwt.encode({"sub": "1", "permissions": []}, JWT_SECRET, algorithm="HS256")
         with patch.object(routes_infra, "get_audit_trail", return_value={"total_events": 0}):
             resp = client.get("/audit-trail", headers={"Authorization": f"Bearer {token}"})
         self.assertEqual(resp.status_code, 403)
 
     def test_activity_route(self) -> None:
+        """GET /activity returns get_activity_status()'s result unchanged."""
         with patch.object(routes_infra, "get_activity_status", return_value={"reachable": True}):
             resp = client.get("/activity")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"reachable": True})
 
     def test_integrity_route_success(self) -> None:
+        """GET /integrity returns run_integrity_checks()'s results under
+        "checks" plus a "checked_at" timestamp."""
         fake_settings = object()
         with patch.object(routes_infra, "load_settings", return_value=fake_settings):
             with patch.object(routes_infra, "run_integrity_checks", return_value=[{"status": "ok"}]):
@@ -123,6 +158,8 @@ class TestInfraRoutes(unittest.TestCase):
         self.assertIn("checked_at", data)
 
     def test_integrity_route_missing_config_returns_500(self) -> None:
+        """A missing config file (load_settings raises FileNotFoundError)
+        returns 500 with the underlying error message."""
         with patch.object(routes_infra, "load_settings", side_effect=FileNotFoundError("no config")):
             resp = client.get("/integrity")
         self.assertEqual(resp.status_code, 500)

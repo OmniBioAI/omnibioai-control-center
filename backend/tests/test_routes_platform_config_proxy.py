@@ -11,6 +11,9 @@ itself requires no permission, just a valid token -- confirmed by
 reading app/api/routes_config.py directly). Read-only (GET) only, per
 this PR's own deliberate scope -- no PUT /auth/config route or test
 here (see routes_platform_config_proxy.py's own module comment for why).
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -27,6 +30,8 @@ client = TestClient(app)
 
 
 def _mock_response(status_code: int, json_body=None, raise_json_error: bool = False) -> MagicMock:
+    """A MagicMock httpx.Response stand-in; raise_json_error makes
+    .json() raise ValueError instead of returning json_body."""
     resp = MagicMock()
     resp.status_code = status_code
     if raise_json_error:
@@ -37,6 +42,8 @@ def _mock_response(status_code: int, json_body=None, raise_json_error: bool = Fa
 
 
 def _mock_async_client(response: MagicMock | None = None, side_effect=None):
+    """An async-context-manager mock of httpx.AsyncClient whose .get()
+    returns `response`, or raises `side_effect` if given."""
     mock_client = MagicMock()
     mock_get = AsyncMock()
     if side_effect is not None:
@@ -66,7 +73,11 @@ _CONFIG_UNSET_OUT = {
 
 
 class TestGetPlatformConfigProxy(unittest.TestCase):
+    """GET /auth/config's thin-relay behavior: success passthrough, auth
+    forwarding, and fail-safe error mapping."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged."""
         upstream = _mock_response(200, _CONFIG_OUT)
         with patch("control_center.api.routes_platform_config_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/auth/config", headers={"Authorization": "Bearer tok"})
@@ -74,6 +85,10 @@ class TestGetPlatformConfigProxy(unittest.TestCase):
         self.assertEqual(resp.json()["llm_provider"], "anthropic")
 
     def test_never_echoes_a_credential_field_because_upstream_never_sends_one(self) -> None:
+        """The response has has_llm_api_key/has_cloud_credentials booleans
+        but no llm_api_key/cloud_credentials value fields -- documents
+        that GlobalConfigOut never sends the raw credential upstream in
+        the first place, so a future richer payload change would be caught."""
         # Not this proxy's job to strip credentials -- GlobalConfigOut
         # never includes them upstream in the first place. This test
         # documents that invariant against the exact fixture shape, so a
@@ -89,6 +104,8 @@ class TestGetPlatformConfigProxy(unittest.TestCase):
         self.assertIn("has_cloud_credentials", body)
 
     def test_forwards_authorization_header(self) -> None:
+        """The caller's Authorization header is forwarded to the
+        upstream auth-service call unchanged."""
         upstream = _mock_response(200, _CONFIG_OUT)
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_platform_config_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -97,6 +114,8 @@ class TestGetPlatformConfigProxy(unittest.TestCase):
         self.assertEqual(call_kwargs["headers"]["Authorization"], "Bearer my-token-123")
 
     def test_works_when_no_config_has_ever_been_set(self) -> None:
+        """An all-null upstream config (never configured) still returns
+        200 with null fields, not an error."""
         upstream = _mock_response(200, _CONFIG_UNSET_OUT)
         with patch("control_center.api.routes_platform_config_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/auth/config", headers={"Authorization": "Bearer tok"})
@@ -104,12 +123,15 @@ class TestGetPlatformConfigProxy(unittest.TestCase):
         self.assertIsNone(resp.json()["llm_provider"])
 
     def test_forwards_401_for_missing_or_invalid_token(self) -> None:
+        """A 401 from the upstream auth-service is relayed as a 401."""
         upstream = _mock_response(401, {"detail": "Not authenticated"})
         with patch("control_center.api.routes_platform_config_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/auth/config")
         self.assertEqual(resp.status_code, 401)
 
     def test_auth_service_unreachable_returns_503(self) -> None:
+        """A connection failure to the auth-service returns 503 with an
+        "auth-service unreachable" message."""
         with patch(
             "control_center.api.routes_platform_config_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
@@ -119,6 +141,8 @@ class TestGetPlatformConfigProxy(unittest.TestCase):
         self.assertIn("auth-service unreachable", resp.json()["error"])
 
     def test_non_json_upstream_response_handled(self) -> None:
+        """A non-JSON upstream response body maps to a 500 error naming
+        "non-JSON" rather than propagating the parse exception."""
         upstream = _mock_response(500, raise_json_error=True)
         with patch("control_center.api.routes_platform_config_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/auth/config", headers={"Authorization": "Bearer tok"})

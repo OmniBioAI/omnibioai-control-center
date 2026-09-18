@@ -10,6 +10,9 @@ involved (env-var presence only, read at request time), so there is no
 query-param-forwarding behavior to test here -- same as GET /cloud, and
 for the same reason (see routes_integrations.py's own module comment on
 why this router is intentionally ungated).
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -43,8 +46,13 @@ def _clean_env(**overrides: str) -> dict:
 
 
 class TestGetIntegrations(unittest.TestCase):
+    """GET /integrations' env-var-driven configured/not-configured detection for Sentry
+    and the two Discord webhooks, unauthenticated by design; one test checks that secret
+    values set in the environment do not appear in the response body."""
 
     def test_returns_200_with_all_three_integrations(self) -> None:
+        """The response always includes sentry/discord_notifications/
+        discord_alerts keys."""
         with patch.dict(os.environ, _clean_env(), clear=True):
             resp = client.get("/integrations")
         self.assertEqual(resp.status_code, 200)
@@ -53,6 +61,8 @@ class TestGetIntegrations(unittest.TestCase):
             self.assertIn(key, data)
 
     def test_no_authentication_required(self) -> None:
+        """GET /integrations is reachable without a token -- deliberate,
+        not an oversight (same posture as GET /cloud)."""
         # Deliberate, not an oversight -- see routes_integrations.py's
         # module comment. Same posture as GET /cloud.
         with patch.dict(os.environ, _clean_env(), clear=True):
@@ -61,16 +71,21 @@ class TestGetIntegrations(unittest.TestCase):
         self.assertNotEqual(resp.status_code, 403)
 
     def test_sentry_not_configured_without_dsn(self) -> None:
+        """With SENTRY_DSN unset, sentry.configured is False."""
         with patch.dict(os.environ, _clean_env(), clear=True):
             data = client.get("/integrations").json()
         self.assertFalse(data["sentry"]["configured"])
 
     def test_sentry_configured_with_dsn(self) -> None:
+        """With SENTRY_DSN set, sentry.configured is True."""
         with patch.dict(os.environ, _clean_env(SENTRY_DSN="https://key@sentry.io/123"), clear=True):
             data = client.get("/integrations").json()
         self.assertTrue(data["sentry"]["configured"])
 
     def test_sentry_report_aggregation_requires_all_three_vars(self) -> None:
+        """report_aggregation_configured requires SENTRY_API_TOKEN AND
+        SENTRY_ORG AND SENTRY_PROJECT_SLUGS together -- the token alone
+        is not enough, mirroring scripts/sections/health.py's own gate."""
         # Token alone isn't enough -- mirrors scripts/sections/health.py's
         # own gate (token AND org AND project slugs).
         with patch.dict(os.environ, _clean_env(SENTRY_API_TOKEN="tok"), clear=True):
@@ -86,18 +101,25 @@ class TestGetIntegrations(unittest.TestCase):
         self.assertTrue(data["sentry"]["report_aggregation_configured"])
 
     def test_discord_notifications_independent_of_alerts(self) -> None:
+        """Setting only DISCORD_WEBHOOK_URL configures notifications but
+        leaves discord_alerts unconfigured."""
         with patch.dict(os.environ, _clean_env(DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/x"), clear=True):
             data = client.get("/integrations").json()
         self.assertTrue(data["discord_notifications"]["configured"])
         self.assertFalse(data["discord_alerts"]["configured"])
 
     def test_discord_alerts_independent_of_notifications(self) -> None:
+        """Setting only DISCORD_ALERT_WEBHOOK_URL configures alerts but
+        leaves discord_notifications unconfigured."""
         with patch.dict(os.environ, _clean_env(DISCORD_ALERT_WEBHOOK_URL="https://discord.com/api/webhooks/y"), clear=True):
             data = client.get("/integrations").json()
         self.assertFalse(data["discord_notifications"]["configured"])
         self.assertTrue(data["discord_alerts"]["configured"])
 
     def test_response_never_contains_a_secret_value(self) -> None:
+        """Defense-in-depth: with every secret env var set to a
+        recognizable value, none of those raw values appear anywhere in
+        the response body."""
         # Defense-in-depth: even if a future edit accidentally started
         # interpolating a credential into the response, this test fails
         # loudly rather than silently leaking it.
@@ -122,6 +144,8 @@ class TestGetIntegrations(unittest.TestCase):
             self.assertNotIn(secret, raw_body)
 
     def test_response_shape_is_booleans_and_static_strings_only(self) -> None:
+        """Every integration entry has label/purpose/configured, and
+        `configured` is always a real boolean."""
         with patch.dict(os.environ, _clean_env(), clear=True):
             data = client.get("/integrations").json()
         for entry in data.values():

@@ -9,6 +9,9 @@ from the real consumer's sign_audit_event(); a passing
 test_matches_real_consumer_signing_vector proves this port is byte-for-
 byte compatible with the real verifier without this repo importing or
 depending on that one.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 from __future__ import annotations
 
@@ -39,11 +42,15 @@ CROSS_REPO_VECTOR = {
 
 
 def test_matches_real_consumer_signing_vector():
+    """Byte-for-byte proof this hand-port produces the exact signature the
+    real omnibioai-security-audit consumer's verify_audit_event() would
+    accept -- without this repo importing or depending on that one."""
     v = CROSS_REPO_VECTOR
     assert sign_audit_event(v["service"], v["data"], v["secret"]) == v["sig"]
 
 
 def test_sign_audit_event_returns_v1_prefixed_hex():
+    """The signature is "v1:<hex mac>" -- a version prefix over valid hex."""
     sig = sign_audit_event("control-center", '{"a": 1}', "s3cr3t")
     version, sep, mac_hex = sig.partition(":")
     assert version == "v1"
@@ -52,22 +59,27 @@ def test_sign_audit_event_returns_v1_prefixed_hex():
 
 
 def test_sign_rejects_empty_service():
+    """An empty service string raises ValueError rather than signing."""
     with pytest.raises(ValueError):
         sign_audit_event("", '{"a": 1}', "s3cr3t")
 
 
 def test_sign_rejects_none_data():
+    """data=None raises ValueError rather than signing a null payload."""
     with pytest.raises(ValueError):
         sign_audit_event("control-center", None, "s3cr3t")
 
 
 def test_tampered_data_produces_a_different_signature():
+    """Changing the format field in the data string changes the
+    computed signature -- tampering is detectable."""
     sig_a = sign_audit_event("control-center", '{"format": "json"}', "s3cr3t")
     sig_b = sign_audit_event("control-center", '{"format": "csv"}', "s3cr3t")
     assert sig_a != sig_b
 
 
 def test_signing_is_deterministic():
+    """The same (service, data, secret) always produces the same signature."""
     data = '{"a": 1}'
     assert sign_audit_event("control-center", data, "s3cr3t") == sign_audit_event(
         "control-center", data, "s3cr3t"
@@ -75,11 +87,14 @@ def test_signing_is_deterministic():
 
 
 def test_signature_does_not_contain_the_secret():
+    """The signing secret never appears verbatim inside the output signature."""
     sig = sign_audit_event("control-center", '{"a": 1}', "super-secret-value")
     assert "super-secret-value" not in sig
 
 
 def test_signing_message_uses_newline_separator_not_concatenation():
+    """_signing_message() uses an unambiguous field separator: service="ab"
+    + data="cd" must not collide with service="a" + data="bcd"."""
     assert _signing_message("v1", "ab", "cd") != _signing_message("v1", "a", "bcd")
 
 
@@ -89,6 +104,9 @@ def test_signing_message_uses_newline_separator_not_concatenation():
 # ---------------------------------------------------------------------------
 
 def test_log_report_access_signs_the_exact_data_string_it_publishes():
+    """log_report_access() signs fields["data"] itself, and the sig it
+    writes matches an independent recomputation via sign_audit_event()
+    over that same wire string."""
     fake_redis = MagicMock()
     with patch.object(audit_log, "_redis", fake_redis), patch.object(
         audit_log, "JWT_SECRET", "s3cr3t"
@@ -106,6 +124,8 @@ def test_log_report_access_signs_the_exact_data_string_it_publishes():
 
 
 def test_log_report_access_includes_both_data_and_sig_fields():
+    """The XADD call carries both a "data" field and a "v1:"-prefixed
+    "sig" field."""
     fake_redis = MagicMock()
     with patch.object(audit_log, "_redis", fake_redis), patch.object(
         audit_log, "JWT_SECRET", "s3cr3t"
@@ -136,6 +156,8 @@ def test_log_report_access_signing_failure_still_never_raises():
 
 
 def test_log_report_access_exception_never_leaks_the_secret(capsys, caplog):
+    """When the best-effort xadd fails and a warning is logged, the JWT
+    secret never appears in stdout, stderr, or the log output."""
     fake_redis = MagicMock()
     fake_redis.xadd.side_effect = RuntimeError("boom")
     with patch.object(audit_log, "_redis", fake_redis), patch.object(

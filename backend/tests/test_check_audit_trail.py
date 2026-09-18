@@ -3,6 +3,15 @@ tests/test_check_audit_trail.py
 
 Unit tests for:
   - control_center.checks.audit_trail
+
+Covers get_audit_trail()'s Redis-unreachable fallback, its event
+aggregation into decision/status-code/reason/event-type breakdowns and
+health-ping sampling, and the HIPAA PR3c signature-integrity classification
+(_is_health_ping, verify_audit_event, classify_event_integrity) layered on
+top without changing any pre-existing aggregate behavior.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -18,6 +27,7 @@ from control_center.checks import audit_trail
 
 
 def _entry(eid: str, *, sig: Optional[str] = None, **fields: object) -> tuple[str, dict]:
+    """A Redis XRANGE-shaped (entry_id, fields) tuple with `fields` JSON-encoded into "data", plus an optional "sig"."""
     redis_fields: dict = {"data": json.dumps(fields)}
     if sig is not None:
         redis_fields["sig"] = sig
@@ -60,25 +70,32 @@ CROSS_REPO_VECTOR = {
 
 
 class TestIsHealthPing(unittest.TestCase):
+    """_is_health_ping()'s classification of a "request" event to a /health path as a ping."""
 
     def test_request_to_health_is_ping(self) -> None:
+        """A "request" event whose action ends in /health is a ping."""
         self.assertTrue(audit_trail._is_health_ping("request", "/service/health"))
 
     def test_request_to_other_path_is_not_ping(self) -> None:
+        """A "request" event to a non-health path is not a ping."""
         self.assertFalse(audit_trail._is_health_ping("request", "/service/data"))
 
     def test_non_request_event_type_is_not_ping(self) -> None:
+        """A /health path is only a ping when the event_type is "request"."""
         self.assertFalse(audit_trail._is_health_ping("auth_failed", "/service/health"))
 
 
 class TestGetAuditTrail(unittest.TestCase):
+    """get_audit_trail()'s Redis-backed aggregation of the audit stream into totals and breakdowns."""
 
     def test_redis_unreachable_returns_empty_shape(self) -> None:
+        """A Redis connection failure returns the fixed empty-result shape rather than raising."""
         with patch("redis.Redis.from_url", side_effect=ConnectionError("down")):
             result = audit_trail.get_audit_trail()
         self.assertEqual(result, dict(audit_trail._EMPTY))
 
     def test_aggregates_events_and_breakdowns(self) -> None:
+        """A mixed batch of events aggregates into correct total/health/actor counts and decision/status-code/reason/event-type breakdowns, with non-health events sorted newest-first."""
         entries = [
             _entry("1000-0", event_type="request", action="/api/foo", decision="allow",
                    user_id="u1", status_code=200, latency_ms=12, trace_id="t1"),
@@ -108,6 +125,7 @@ class TestGetAuditTrail(unittest.TestCase):
         self.assertEqual(non_health_ids, ["3000-0", "2000-0", "1000-0"])
 
     def test_deny_event_infers_status_code_from_map(self) -> None:
+        """A "policy_denied" event with no explicit status_code is bucketed as 403 via the event-type-to-status-code map."""
         entries = [_entry("1000-0", event_type="policy_denied", action="/api/secret")]
         mock_redis = MagicMock()
         mock_redis.xrange.return_value = entries
@@ -116,6 +134,7 @@ class TestGetAuditTrail(unittest.TestCase):
         self.assertEqual(result["status_code_breakdown"], {"403": 1})
 
     def test_malformed_json_entry_skipped(self) -> None:
+        """An entry whose "data" field isn't valid JSON is silently skipped rather than crashing the aggregation."""
         mock_redis = MagicMock()
         mock_redis.xrange.return_value = [("1000-0", {"data": "not-json"})]
         with patch("redis.Redis.from_url", return_value=mock_redis):
@@ -123,6 +142,7 @@ class TestGetAuditTrail(unittest.TestCase):
         self.assertEqual(result["total_events"], 0)
 
     def test_health_events_sampled_to_cap(self) -> None:
+        """health_check_pings counts every health event, but the returned per-event list caps health entries at _HEALTH_SAMPLE_CAP."""
         entries = [
             _entry(f"{i}-0", event_type="request", action="/svc/health", decision="allow")
             for i in range(1, audit_trail._HEALTH_SAMPLE_CAP + 20)
@@ -136,6 +156,7 @@ class TestGetAuditTrail(unittest.TestCase):
         self.assertEqual(len(health_events), audit_trail._HEALTH_SAMPLE_CAP)
 
     def test_decision_outside_known_set_not_counted(self) -> None:
+        """A decision value outside {"allow", "deny"} (e.g. "weird") is not counted in decision_breakdown, which still reports zero for both known keys."""
         entries = [_entry("1000-0", event_type="request", action="/api/foo", decision="weird")]
         mock_redis = MagicMock()
         mock_redis.xrange.return_value = entries
@@ -159,18 +180,21 @@ class TestVerifyAuditEvent(unittest.TestCase):
         )
 
     def test_tampered_data_fails_the_same_vector(self) -> None:
+        """The cross-repo vector's signature no longer verifies once the signed data is mutated."""
         v = CROSS_REPO_VECTOR
         self.assertFalse(
             audit_trail.verify_audit_event(v["service"], v["data"] + "x", v["sig"], v["secret"])
         )
 
     def test_wrong_secret_fails_the_same_vector(self) -> None:
+        """The cross-repo vector's signature does not verify against the wrong secret."""
         v = CROSS_REPO_VECTOR
         self.assertFalse(
             audit_trail.verify_audit_event(v["service"], v["data"], v["sig"], "not-the-secret")
         )
 
     def test_malformed_signature_fails_closed_not_crash(self) -> None:
+        """A garbage, empty, or None signature fails verification rather than raising."""
         self.assertFalse(
             audit_trail.verify_audit_event("gateway", '{"a": 1}', "not-a-real-signature", "s")
         )
@@ -178,11 +202,13 @@ class TestVerifyAuditEvent(unittest.TestCase):
         self.assertFalse(audit_trail.verify_audit_event("gateway", '{"a": 1}', None, "s"))
 
     def test_unknown_version_prefix_fails_closed(self) -> None:
+        """A signature with a version prefix other than "v1:" (e.g. "v2:") fails verification."""
         self.assertFalse(
             audit_trail.verify_audit_event("gateway", '{"a": 1}', "v2:deadbeef", "s")
         )
 
     def test_none_data_fails_closed(self) -> None:
+        """Passing None as the data to verify fails closed rather than raising."""
         v = CROSS_REPO_VECTOR
         self.assertFalse(
             audit_trail.verify_audit_event(v["service"], None, v["sig"], v["secret"])
@@ -197,11 +223,13 @@ class TestVerifyAuditEvent(unittest.TestCase):
         self.assertFalse(audit_trail.verify_audit_event(None, '{"a": 1}', "v1:ab", "s"))
 
     def test_classify_missing_signature_is_unsigned(self) -> None:
+        """An event with no signature is classified "unsigned"."""
         self.assertEqual(
             audit_trail.classify_event_integrity("gateway", None, '{"a": 1}', "s"), "unsigned"
         )
 
     def test_classify_valid_signature_is_valid(self) -> None:
+        """An event signed with the correct secret is classified "valid"."""
         data = '{"a": 1}'
         sig = _sign("gateway", data, "s3cr3t")
         self.assertEqual(
@@ -209,6 +237,7 @@ class TestVerifyAuditEvent(unittest.TestCase):
         )
 
     def test_classify_invalid_signature_is_invalid(self) -> None:
+        """An event whose signature is checked against the wrong secret is classified "invalid"."""
         data = '{"a": 1}'
         sig = _sign("gateway", data, "s3cr3t")
         self.assertEqual(
@@ -222,6 +251,7 @@ class TestAuditTrailIntegrityStatus(unittest.TestCase):
     (TestGetAuditTrail above) must not change."""
 
     def test_valid_signed_event_is_classified_valid(self) -> None:
+        """An event signed with the process's own JWT_SECRET is surfaced in get_audit_trail() with integrity_status "valid"."""
         fields = {"event_type": "request", "action": "/api/foo", "decision": "allow",
                    "service": "gateway"}
         data = json.dumps(fields)
@@ -234,6 +264,7 @@ class TestAuditTrailIntegrityStatus(unittest.TestCase):
         self.assertEqual(result["events"][0]["integrity_status"], "valid")
 
     def test_tampered_signature_is_classified_invalid(self) -> None:
+        """An event published with a valid signature over a different payload than what's stored is surfaced with integrity_status "invalid"."""
         fields = {"event_type": "request", "action": "/api/foo", "decision": "allow",
                    "service": "gateway"}
         data = json.dumps(fields)
@@ -249,6 +280,7 @@ class TestAuditTrailIntegrityStatus(unittest.TestCase):
         self.assertEqual(result["events"][0]["integrity_status"], "invalid")
 
     def test_unsigned_event_is_classified_unsigned(self) -> None:
+        """An event with no "sig" field is surfaced in get_audit_trail() with integrity_status "unsigned"."""
         entries = [_entry("1000-0", event_type="request", action="/api/foo",
                            decision="allow", service="gateway")]
         mock_redis = MagicMock()
@@ -258,6 +290,7 @@ class TestAuditTrailIntegrityStatus(unittest.TestCase):
         self.assertEqual(result["events"][0]["integrity_status"], "unsigned")
 
     def test_malformed_signature_is_classified_invalid_not_crash(self) -> None:
+        """An event with a garbage, non-hex/non-versioned "sig" is surfaced as integrity_status "invalid" instead of raising during aggregation."""
         entries = [_entry("1000-0", sig="garbage-not-hex-or-versioned",
                            event_type="request", action="/api/foo",
                            decision="allow", service="gateway")]

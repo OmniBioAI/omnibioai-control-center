@@ -1,4 +1,12 @@
-"""tests/test_routes_config.py — covers routes_config.py"""
+"""tests/test_routes_config.py — covers routes_config.py: GET /config
+returns the raw control_center.yaml content as text/plain (404 if
+missing), and POST /config/service adds a new service entry to it
+(defaulting type to "http", validating name/url), both gated behind
+platform.manage_infra at router-inclusion time.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
+"""
 from __future__ import annotations
 
 import os
@@ -27,8 +35,10 @@ client = TestClient(app, headers={"Authorization": f"Bearer {_INFRA_TOKEN}"})
 # ===========================================================================
 
 class TestGetConfig:
+    """GET /config returns the raw control_center.yaml content as plain text."""
 
     def test_returns_yaml_content(self, tmp_path):
+        """The response body includes the config file's raw YAML content."""
         cfg = tmp_path / "control_center.yaml"
         cfg.write_text("services:\n  redis:\n    type: redis\n")
         with patch("control_center.api.routes_config._DEFAULT_CONFIG", str(cfg)):
@@ -37,6 +47,7 @@ class TestGetConfig:
         assert "redis" in resp.text
 
     def test_content_type_is_text_plain(self, tmp_path):
+        """The response Content-Type is text/plain, not JSON."""
         cfg = tmp_path / "cc.yaml"
         cfg.write_text("key: value\n")
         with patch("control_center.api.routes_config._DEFAULT_CONFIG", str(cfg)):
@@ -44,12 +55,16 @@ class TestGetConfig:
         assert "text/plain" in resp.headers["content-type"]
 
     def test_missing_config_returns_404(self, tmp_path):
+        """A nonexistent config file path returns 404 with a "not found"
+        detail message."""
         with patch("control_center.api.routes_config._DEFAULT_CONFIG", str(tmp_path / "nonexistent.yaml")):
             resp = client.get("/config")
         assert resp.status_code == 404
         assert "not found" in resp.json()["detail"].lower()
 
     def test_returns_full_file_content(self, tmp_path):
+        """The response body is exactly the file's full content, not a
+        truncated or reformatted version."""
         content = "services:\n  mysql:\n    host: db\n    port: 3306\n"
         cfg = tmp_path / "cc.yaml"
         cfg.write_text(content)
@@ -63,13 +78,19 @@ class TestGetConfig:
 # ===========================================================================
 
 class TestAddService:
+    """POST /config/service's validation, defaulting, and file-write
+    behavior for adding a new service entry to control_center.yaml."""
 
     def _write_config(self, tmp_path, data=None):
+        """Write a config YAML file (default: an empty services map) and
+        return its path as a string."""
         cfg = tmp_path / "cc.yaml"
         cfg.write_text(yaml.dump(data or {"services": {}}))
         return str(cfg)
 
     def test_adds_service_to_config(self, tmp_path):
+        """A valid service POST returns ok=True with the service name,
+        and the new service appears in the written YAML file."""
         cfg_path = self._write_config(tmp_path)
         with patch("control_center.api.routes_config._DEFAULT_CONFIG", cfg_path):
             resp = client.post("/config/service", json={"name": "redis", "url": "http://redis:6379", "type": "tcp"})
@@ -80,6 +101,8 @@ class TestAddService:
         assert "redis" in raw["services"]
 
     def test_service_fields_written_correctly(self, tmp_path):
+        """The written service entry has the exact type/url given, plus
+        the default timeout_s."""
         cfg_path = self._write_config(tmp_path)
         with patch("control_center.api.routes_config._DEFAULT_CONFIG", cfg_path):
             client.post("/config/service", json={"name": "myapi", "url": "http://api:8080/health", "type": "http"})
@@ -90,6 +113,7 @@ class TestAddService:
         assert svc["timeout_s"] == 2
 
     def test_default_type_is_http(self, tmp_path):
+        """Omitting `type` defaults the written service's type to "http"."""
         cfg_path = self._write_config(tmp_path)
         with patch("control_center.api.routes_config._DEFAULT_CONFIG", cfg_path):
             client.post("/config/service", json={"name": "svc", "url": "http://svc/health"})
@@ -97,29 +121,37 @@ class TestAddService:
         assert raw["services"]["svc"]["type"] == "http"
 
     def test_missing_name_returns_422(self, tmp_path):
+        """A request body with no `name` field is rejected with 422."""
         cfg_path = self._write_config(tmp_path)
         with patch("control_center.api.routes_config._DEFAULT_CONFIG", cfg_path):
             resp = client.post("/config/service", json={"url": "http://svc/health"})
         assert resp.status_code == 422
 
     def test_missing_url_returns_422(self, tmp_path):
+        """A request body with no `url` field is rejected with 422."""
         cfg_path = self._write_config(tmp_path)
         with patch("control_center.api.routes_config._DEFAULT_CONFIG", cfg_path):
             resp = client.post("/config/service", json={"name": "svc"})
         assert resp.status_code == 422
 
     def test_empty_name_returns_422(self, tmp_path):
+        """A whitespace-only `name` is rejected with 422, not accepted
+        as a valid (if unhelpful) service name."""
         cfg_path = self._write_config(tmp_path)
         with patch("control_center.api.routes_config._DEFAULT_CONFIG", cfg_path):
             resp = client.post("/config/service", json={"name": "  ", "url": "http://svc"})
         assert resp.status_code == 422
 
     def test_missing_config_file_returns_404(self, tmp_path):
+        """Posting against a nonexistent config file path returns 404."""
         with patch("control_center.api.routes_config._DEFAULT_CONFIG", str(tmp_path / "missing.yaml")):
             resp = client.post("/config/service", json={"name": "svc", "url": "http://svc"})
         assert resp.status_code == 404
 
     def test_config_without_services_key_initialised(self, tmp_path):
+        """A config file that has no top-level "services" key at all
+        still succeeds -- the key is initialized rather than raising a
+        KeyError."""
         cfg = tmp_path / "cc.yaml"
         cfg.write_text("system:\n  disk_checks: []\n")
         with patch("control_center.api.routes_config._DEFAULT_CONFIG", str(cfg)):
@@ -129,6 +161,8 @@ class TestAddService:
         assert "new" in raw["services"]
 
     def test_multiple_services_can_be_added(self, tmp_path):
+        """Two sequential POSTs both persist -- adding a second service
+        doesn't overwrite the first."""
         cfg_path = self._write_config(tmp_path)
         with patch("control_center.api.routes_config._DEFAULT_CONFIG", cfg_path):
             client.post("/config/service", json={"name": "svc1", "url": "http://s1"})

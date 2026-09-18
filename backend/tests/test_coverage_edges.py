@@ -1,4 +1,13 @@
-"""Deterministic tests for control-center defensive boundary paths."""
+"""Deterministic tests for control-center defensive boundary paths:
+routes_auth_proxy's OAuth-authorize redirect relay and its non-JSON/
+transport-error handling, the logout proxy's malformed-body recovery,
+routes_org_mfa_proxy's raw empty-body passthrough for a 204, routes_
+storage's stale-cache-on-refresh-failure behavior, and audit_trail's
+fail-closed response to an unexpected exception from hmac.compare_digest.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
+"""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -12,6 +21,8 @@ from control_center.checks import audit_trail
 
 
 def request(*, headers=None, query=None, body=b"", cookies=None):
+    """A minimal Starlette POST Request with the given headers, raw query
+    string, and body."""
     raw_headers = [(key.lower().encode(), value.encode()) for key, value in (headers or {}).items()]
 
     async def receive():
@@ -36,6 +47,8 @@ def request(*, headers=None, query=None, body=b"", cookies=None):
 
 
 def async_http_context(response=None, side_effect=None):
+    """An async-context-manager mock of httpx.AsyncClient whose .get()
+    returns `response`, or raises `side_effect` if given."""
     client = MagicMock()
     client.get = AsyncMock(return_value=response, side_effect=side_effect)
     context = MagicMock()
@@ -46,6 +59,9 @@ def async_http_context(response=None, side_effect=None):
 
 @pytest.mark.asyncio
 async def test_oauth_authorize_redirect_is_relayed_without_consuming_it():
+    """A 302 redirect from the auth-service's /authorize endpoint is
+    relayed as-is (status + Location header), with the caller's
+    Authorization header and query params forwarded upstream."""
     upstream = MagicMock(status_code=302)
     upstream.headers = {"location": "https://auth.example/callback"}
     req = request(headers={"authorization": "Bearer token"}, query="state=abc")
@@ -64,6 +80,9 @@ async def test_oauth_authorize_redirect_is_relayed_without_consuming_it():
 
 @pytest.mark.asyncio
 async def test_oauth_authorize_non_json_response_becomes_error_payload():
+    """A non-JSON upstream error response is converted to a fixed
+    {"error": "auth-service returned a non-JSON response"} body rather
+    than raising or forwarding an unparseable body."""
     upstream = MagicMock(status_code=500)
     upstream.headers.get.return_value = None
     upstream.json.side_effect = ValueError("not json")
@@ -78,6 +97,8 @@ async def test_oauth_authorize_non_json_response_becomes_error_payload():
 
 @pytest.mark.asyncio
 async def test_oauth_authorize_request_error_returns_503():
+    """A connection failure to the auth-service returns 503 with an
+    "auth-service unreachable" message."""
     context = async_http_context(side_effect=httpx.ConnectError("refused"))
     with patch.object(routes_auth_proxy.httpx, "AsyncClient", return_value=context):
         response = await routes_auth_proxy.auth_first_party_authorize_proxy(request())
@@ -87,6 +108,8 @@ async def test_oauth_authorize_request_error_returns_503():
 
 @pytest.mark.asyncio
 async def test_logout_malformed_body_is_replaced_with_empty_json():
+    """A logout request whose body isn't valid JSON is forwarded upstream
+    with the body replaced by "{}" rather than the malformed bytes."""
     forwarded = AsyncMock(return_value=MagicMock(status_code=200))
     with patch.object(routes_auth_proxy, "_proxy_to_auth", forwarded):
         await routes_auth_proxy.auth_logout_proxy(request(body=b"not-json"))
@@ -96,6 +119,8 @@ async def test_logout_malformed_body_is_replaced_with_empty_json():
 
 @pytest.mark.asyncio
 async def test_mfa_proxy_returns_empty_response_without_parsing_body():
+    """A 204 No Content upstream response is passed through as an empty
+    body without attempting to parse it as JSON."""
     upstream = MagicMock(status_code=204, content=b"")
     context = async_http_context(upstream)
     context.__aenter__.return_value.request = AsyncMock(return_value=upstream)
@@ -106,6 +131,10 @@ async def test_mfa_proxy_returns_empty_response_without_parsing_body():
 
 
 def test_storage_refresh_failure_keeps_stale_snapshot():
+    """When the background storage-refresh future raised, _cached_storage()
+    keeps serving the last-known-good (stale) snapshot rather than
+    propagating the failure, and clears the failed future so a future
+    call can retry."""
     class FailedFuture:
         def done(self):
             return True
@@ -124,5 +153,8 @@ def test_storage_refresh_failure_keeps_stale_snapshot():
 
 
 def test_audit_verification_fails_closed_on_unexpected_compare_error():
+    """If hmac.compare_digest itself raises an unexpected exception,
+    verify_audit_event() returns False (fails closed) rather than
+    propagating the exception or silently treating it as valid."""
     with patch.object(audit_trail.hmac, "compare_digest", side_effect=RuntimeError("bad crypto")):
         assert audit_trail.verify_audit_event("gateway", "{}", "v1:abc", "secret") is False

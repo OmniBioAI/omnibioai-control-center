@@ -3,6 +3,16 @@ tests/test_check_celery_status.py
 
 Unit tests for:
   - control_center.checks.celery_status
+
+Covers worker online/offline classification and active-task counts
+(_collect), recent-task-history reconstruction from a Redis result
+backend (_recent_tasks: non-Redis backend, sorting by date_done
+descending, skipping missing/malformed entries, and the fixed history
+limit), and get_celery_status()'s overall timeout/exception fail-safe
+wrapper around _collect().
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -16,8 +26,12 @@ from control_center.checks import celery_status
 
 
 class TestCollect(unittest.TestCase):
+    """_collect()'s worker online/offline classification and active-task counting."""
 
     def test_workers_online_and_offline_with_active_task_counts(self) -> None:
+        """A worker that responded to ping is "online" with its active
+        task count; one that didn't respond (absent from ping but
+        present in active) is "offline" with its task count still reported."""
         mock_insp = MagicMock()
         mock_insp.ping.return_value = {"worker1@host": {"ok": "pong"}}
         mock_insp.active.return_value = {
@@ -38,6 +52,8 @@ class TestCollect(unittest.TestCase):
         self.assertEqual(workers["worker2@host"]["active_tasks"], 2)
 
     def test_no_workers_returns_empty_list(self) -> None:
+        """When ping/active both return None (no workers at all), the
+        result's "workers" list is empty."""
         mock_insp = MagicMock()
         mock_insp.ping.return_value = None
         mock_insp.active.return_value = None
@@ -52,13 +68,20 @@ class TestCollect(unittest.TestCase):
 
 
 class TestRecentTasks(unittest.TestCase):
+    """_recent_tasks()'s Redis-result-backend scan/parse/sort behavior."""
 
     def test_non_redis_backend_returns_empty(self) -> None:
+        """A non-Redis result_backend (e.g. "rpc://") returns an empty
+        list rather than attempting a Redis scan."""
         app = MagicMock()
         app.conf.result_backend = "rpc://"
         self.assertEqual(celery_status._recent_tasks(app), [])
 
     def test_parses_and_sorts_task_meta(self) -> None:
+        """Task metadata is parsed from each "celery-task-meta-*" key,
+        sorted by date_done descending, with runtime rounded to 2
+        decimals and the internal "_date_done" sort key not leaking into
+        the returned rows."""
         app = MagicMock()
         app.conf.result_backend = "redis://redis:6379/2"
 
@@ -90,6 +113,8 @@ class TestRecentTasks(unittest.TestCase):
         self.assertEqual(rows[1]["runtime_s"], 1.23)
 
     def test_skips_missing_and_malformed_entries(self) -> None:
+        """A key that GETs to None, and one that returns non-JSON text,
+        are both skipped rather than raising or producing a garbage row."""
         app = MagicMock()
         app.conf.result_backend = "redis://redis:6379/2"
 
@@ -103,6 +128,8 @@ class TestRecentTasks(unittest.TestCase):
         self.assertEqual(rows, [])
 
     def test_limits_to_recent_tasks_limit(self) -> None:
+        """More scanned entries than _RECENT_TASKS_LIMIT still returns
+        at most that many rows."""
         app = MagicMock()
         app.conf.result_backend = "redis://redis:6379/2"
 
@@ -122,13 +149,18 @@ class TestRecentTasks(unittest.TestCase):
 
 
 class TestGetCeleryStatus(unittest.TestCase):
+    """get_celery_status()'s timeout/exception fail-safe wrapper around _collect()."""
 
     def test_success_passthrough(self) -> None:
+        """A successful _collect() result is returned unchanged."""
         with patch.object(celery_status, "_collect", return_value={"workers": [], "recent_tasks": []}):
             result = celery_status.get_celery_status()
         self.assertEqual(result, {"workers": [], "recent_tasks": []})
 
     def test_timeout_reports_unreachable(self) -> None:
+        """A _collect() call that exceeds _OVERALL_TIMEOUT_S returns an
+        empty workers list with a "timed out" error message rather than
+        blocking indefinitely."""
         def slow_collect():
             time.sleep(0.3)
             return {"workers": [], "recent_tasks": []}
@@ -141,6 +173,8 @@ class TestGetCeleryStatus(unittest.TestCase):
         self.assertIn("timed out", result["error"])
 
     def test_generic_exception_reports_unreachable(self) -> None:
+        """A _collect() exception returns an empty workers list with an
+        error message naming the exception type and its message."""
         with patch.object(celery_status, "_collect", side_effect=RuntimeError("broker down")):
             result = celery_status.get_celery_status()
 

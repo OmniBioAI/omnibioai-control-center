@@ -1,3 +1,20 @@
+"""tests/test_integration_health_adapter.py -- control_center.
+integration_health_adapter: WorkbenchIntegrationAdapter.build() dynamically
+constructs the integration inventory from a real Workbench plugin
+registry + plugin source files (classifying probe_availability from
+which liveness function, if any, each plugin's client.py defines;
+excluding disabled plugins from readiness but not from the inventory;
+excluding non-biological categories like "pipeline"), JsonReadinessCache
+provides read-only cached provider status without mutating anything,
+configuration metadata is allowlisted (never leaking a raw credential
+value read from the config file), and build_integration_health_report()
+degrades gracefully -- an invalid registry raises a typed error the
+route turns into a safe 503, and a missing optional cache/regression-
+health source is non-fatal, just reported UNAVAILABLE.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
+"""
 import json
 from datetime import UTC, datetime
 from unittest.mock import patch
@@ -23,10 +40,15 @@ from fastapi import HTTPException
 
 
 def _manifest(slug: str, category: str = "reference_db", enabled: bool = True) -> dict:
+    """A single plugin_registry.json entry dict with sensible defaults."""
     return {"slug": slug, "name": slug.title(), "category": category, "enabled": enabled, "version": "1.0.0"}
 
 
 def _fixture(tmp_path, count: int = 3):
+    """A fake plugin registry + plugins directory with `count` plugins,
+    each with a distinct client.py liveness-signal shape (health_check,
+    health_live, then plain no-signal for the rest), the last one
+    disabled. Returns (plugins_dir, registry_path)."""
     root = tmp_path / "plugins"
     root.mkdir()
     manifests = []
@@ -46,6 +68,10 @@ def _fixture(tmp_path, count: int = 3):
 
 
 def test_adapter_dynamically_builds_inventory_and_excludes_non_biological(tmp_path):
+    """A non-biological category ("pipeline") is excluded from the
+    built inventory entirely, and each remaining plugin's probe_
+    availability/enabled_status/readiness reflects its actual client.py
+    liveness signal and its manifest's enabled flag."""
     root, registry = _fixture(tmp_path)
     payload = json.loads(registry.read_text()) + [_manifest("workflow", "pipeline")]
     registry.write_text(json.dumps(payload), encoding="utf-8")
@@ -58,6 +84,9 @@ def test_adapter_dynamically_builds_inventory_and_excludes_non_biological(tmp_pa
 
 
 def test_real_shape_compatibility_fixture_has_dynamic_67_and_49_10_8(tmp_path):
+    """Regression check against the real production plugin count/shape:
+    67 total plugins classify into exactly 49 READY_SIGNAL_EXISTS, 10
+    PLUGIN_LIVENESS_ONLY, and 8 NO_SAFE_READINESS_SIGNAL."""
     root = tmp_path / "plugins"
     root.mkdir()
     manifests = []
@@ -78,6 +107,9 @@ def test_real_shape_compatibility_fixture_has_dynamic_67_and_49_10_8(tmp_path):
 
 
 def test_duplicate_id_is_safe_error(tmp_path):
+    """Two manifests sharing the same integration id raise
+    IntegrationInventoryUnavailable("duplicate_integration_id") rather
+    than one silently overwriting the other."""
     root, registry = _fixture(tmp_path)
     registry.write_text(json.dumps([_manifest("same"), _manifest("same")]), encoding="utf-8")
     with patch.object(WorkbenchIntegrationAdapter, "_record", return_value=None):
@@ -90,6 +122,10 @@ def test_duplicate_id_is_safe_error(tmp_path):
 
 
 def test_cached_ready_degraded_and_unknown_are_read_only(tmp_path):
+    """A pre-populated readiness cache is read (not mutated) to supply
+    provider status/version for enabled providers, a disabled provider
+    is always NOT_CHECKED/DISABLED regardless of its cache entry, and a
+    provider with no cache entry stays UNKNOWN."""
     root, registry = _fixture(tmp_path)
     cache_path = tmp_path / "cache.json"
     cache_path.write_text(json.dumps({"provider_0": {
@@ -114,6 +150,9 @@ def test_cached_ready_degraded_and_unknown_are_read_only(tmp_path):
 
 
 def test_configuration_metadata_is_allowlisted(tmp_path, monkeypatch):
+    """The public report exposes only requirement/credential_configured
+    from a configuration entry -- a raw "token" value present in the
+    same config file never reaches the serialized payload."""
     root, registry = _fixture(tmp_path)
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps({"provider_0": {
@@ -132,6 +171,9 @@ def test_configuration_metadata_is_allowlisted(tmp_path, monkeypatch):
 
 
 def test_invalid_registry_and_safe_route_503(tmp_path, monkeypatch):
+    """An invalid registry propagates as IntegrationInventoryUnavailable,
+    and the route turns that into a fixed 503 body that never leaks the
+    underlying file path."""
     bad = tmp_path / "bad.json"
     bad.write_text("{}", encoding="utf-8")
     monkeypatch.setenv("WORKBENCH_PLUGIN_REGISTRY_PATH", str(bad))
@@ -144,6 +186,9 @@ def test_invalid_registry_and_safe_route_503(tmp_path, monkeypatch):
 
 
 def test_invalid_optional_cache_is_non_fatal(tmp_path, monkeypatch):
+    """A missing readiness-cache file path is reported UNAVAILABLE in
+    data_sources rather than raising -- the report still builds, just
+    with more providers UNKNOWN."""
     root, registry = _fixture(tmp_path)
     monkeypatch.setenv("WORKBENCH_PLUGIN_REGISTRY_PATH", str(registry))
     monkeypatch.setenv("WORKBENCH_PLUGINS_DIR", str(root))
@@ -154,6 +199,8 @@ def test_invalid_optional_cache_is_non_fatal(tmp_path, monkeypatch):
 
 
 def test_regression_health_source_failure_is_unavailable(tmp_path, monkeypatch):
+    """A regression-health load failure is reported UNAVAILABLE in
+    data_sources rather than failing the whole report."""
     root, registry = _fixture(tmp_path)
     monkeypatch.setenv("WORKBENCH_PLUGIN_REGISTRY_PATH", str(registry))
     monkeypatch.setenv("WORKBENCH_PLUGINS_DIR", str(root))
@@ -169,6 +216,10 @@ def test_regression_health_source_failure_is_unavailable(tmp_path, monkeypatch):
 
 
 def test_protected_route_authentication(tmp_path, monkeypatch):
+    """The /integration-health route's platform.manage_infra dependency
+    accepts a sufficiently-permissioned token, rejects an under-
+    permissioned one (403) and a missing token (401), and the route
+    itself is registered on the app."""
     root, registry = _fixture(tmp_path)
     monkeypatch.setenv("WORKBENCH_PLUGIN_REGISTRY_PATH", str(registry))
     monkeypatch.setenv("WORKBENCH_PLUGINS_DIR", str(root))
@@ -186,4 +237,5 @@ def test_protected_route_authentication(tmp_path, monkeypatch):
 
 
 def test_route_is_get_only():
+    """No POST method is registered for the /integration-health route."""
     assert not any(route.path == "/integration-health" and "POST" in route.methods for route in app.routes)

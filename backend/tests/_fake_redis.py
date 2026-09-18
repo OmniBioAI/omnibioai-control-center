@@ -6,6 +6,9 @@ test_analytics_cache.py so those tests exercise real Redis *semantics*
 (actual hash increments, actual set membership) instead of asserting on
 mock call counts, without adding a new dependency (no `fakeredis` package
 exists anywhere in this repo's dependency tree).
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 from __future__ import annotations
 

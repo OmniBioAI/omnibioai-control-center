@@ -14,6 +14,9 @@ thin relay, no authorization decision is made here (that's entirely
 omnibioai-auth's job, via require_org_permission_or_platform_admin/
 get_org_membership_or_platform_admin/require_team_manage_permission, all
 pre-existing and unmodified).
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -30,6 +33,8 @@ client = TestClient(app)
 
 
 def _mock_response(status_code: int, json_body=None, raise_json_error: bool = False, content: bytes = b"x") -> MagicMock:
+    """A MagicMock httpx.Response stand-in; raise_json_error makes
+    .json() raise ValueError instead of returning json_body."""
     resp = MagicMock()
     resp.status_code = status_code
     resp.content = content
@@ -52,6 +57,8 @@ def _mock_no_content_response(status_code: int = 204) -> MagicMock:
 
 
 def _mock_async_client(response: MagicMock = None, side_effect=None):
+    """An async-context-manager mock of httpx.AsyncClient whose
+    .request() returns `response`, or raises `side_effect` if given."""
     mock_client = MagicMock()
     mock_request = AsyncMock()
     if side_effect is not None:
@@ -67,7 +74,10 @@ def _mock_async_client(response: MagicMock = None, side_effect=None):
 
 
 class TestListTeamsProxy(unittest.TestCase):
+    """GET /orgs/{org_id}/teams's thin-relay behavior."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged."""
         upstream = _mock_response(200, [{"id": 1, "organization_id": 7, "name": "Genomics", "member_user_ids": [3, 4]}])
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/orgs/7/teams", headers={"Authorization": "Bearer tok"})
@@ -75,6 +85,7 @@ class TestListTeamsProxy(unittest.TestCase):
         self.assertEqual(resp.json()[0]["name"], "Genomics")
 
     def test_forwards_authorization_header(self) -> None:
+        """The caller's Authorization header is forwarded unchanged."""
         upstream = _mock_response(200, [])
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -83,6 +94,7 @@ class TestListTeamsProxy(unittest.TestCase):
         self.assertEqual(call_kwargs["headers"]["Authorization"], "Bearer my-token-123")
 
     def test_forwards_org_id_in_path(self) -> None:
+        """The path's org_id is forwarded into the upstream URL."""
         upstream = _mock_response(200, [])
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -91,12 +103,14 @@ class TestListTeamsProxy(unittest.TestCase):
         self.assertTrue(call_args.args[1].endswith("/orgs/42/teams"))
 
     def test_forwards_404_for_non_member(self) -> None:
+        """A 404 for a nonexistent/non-member org is relayed as a 404."""
         upstream = _mock_response(404, {"detail": "Organization not found"})
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/orgs/999999/teams", headers={"Authorization": "Bearer tok"})
         self.assertEqual(resp.status_code, 404)
 
     def test_auth_service_unreachable_returns_503(self) -> None:
+        """A connection failure to the auth-service returns 503."""
         with patch(
             "control_center.api.routes_team_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
@@ -106,6 +120,8 @@ class TestListTeamsProxy(unittest.TestCase):
         self.assertIn("auth-service unreachable", resp.json()["error"])
 
     def test_non_json_upstream_response_handled(self) -> None:
+        """A non-JSON upstream response body maps to a 500 error
+        naming "non-JSON"."""
         upstream = _mock_response(500, raise_json_error=True)
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/orgs/7/teams", headers={"Authorization": "Bearer tok"})
@@ -114,7 +130,10 @@ class TestListTeamsProxy(unittest.TestCase):
 
 
 class TestCreateTeamProxy(unittest.TestCase):
+    """POST /orgs/{org_id}/teams's thin-relay behavior."""
+
     def test_forwards_post_body_and_status(self) -> None:
+        """The POST body/method reach the upstream call correctly."""
         upstream = _mock_response(201, {"id": 1, "organization_id": 7, "name": "Genomics", "member_user_ids": []})
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -125,12 +144,14 @@ class TestCreateTeamProxy(unittest.TestCase):
         self.assertIn(b"Genomics", call_args.kwargs["content"])
 
     def test_forwards_403_for_non_manager(self) -> None:
+        """A 403 from the upstream auth-service is relayed as a 403."""
         upstream = _mock_response(403, {"detail": "Forbidden"})
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post("/orgs/7/teams", json={"name": "Genomics"}, headers={"Authorization": "Bearer tok"})
         self.assertEqual(resp.status_code, 403)
 
     def test_forwards_query_params(self) -> None:
+        """A query param on the POST request is forwarded to upstream."""
         upstream = _mock_response(201, {"id": 1, "organization_id": 7, "name": "Genomics", "member_user_ids": []})
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -143,7 +164,10 @@ class TestCreateTeamProxy(unittest.TestCase):
 
 
 class TestUpdateTeamMembersProxy(unittest.TestCase):
+    """PUT /orgs/{org_id}/teams/{team_id}/members's thin-relay behavior."""
+
     def test_forwards_put_body_and_method(self) -> None:
+        """The PUT method and JSON body reach the upstream call unchanged."""
         upstream = _mock_response(200, {"id": 1, "organization_id": 7, "name": "Genomics", "member_user_ids": [3, 4]})
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -157,6 +181,7 @@ class TestUpdateTeamMembersProxy(unittest.TestCase):
         self.assertIn(b"[3,4]", call_args.kwargs["content"])
 
     def test_forwards_400_for_invalid_member(self) -> None:
+        """A 400 for a user not a member of the org is relayed as a 400."""
         upstream = _mock_response(400, {"detail": "Users not members of this organization: [999]"})
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.put(
@@ -165,6 +190,7 @@ class TestUpdateTeamMembersProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
 
     def test_forwards_404_for_nonexistent_team(self) -> None:
+        """A 404 for a nonexistent team is relayed as a 404."""
         upstream = _mock_response(404, {"detail": "Team not found"})
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.put(
@@ -174,7 +200,11 @@ class TestUpdateTeamMembersProxy(unittest.TestCase):
 
 
 class TestDeleteTeamProxy(unittest.TestCase):
+    """DELETE /orgs/{org_id}/teams/{team_id}'s thin-relay behavior."""
+
     def test_forwards_method_and_preserves_204_empty_body(self) -> None:
+        """The DELETE method reaches the upstream call, and the 204
+        empty body is preserved."""
         upstream = _mock_no_content_response(204)
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -186,12 +216,14 @@ class TestDeleteTeamProxy(unittest.TestCase):
         self.assertTrue(call_args.args[1].endswith("/orgs/7/teams/1"))
 
     def test_forwards_403_for_non_manager(self) -> None:
+        """A 403 from the upstream auth-service is relayed as a 403."""
         upstream = _mock_response(403, {"detail": "Forbidden"})
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.delete("/orgs/7/teams/1", headers={"Authorization": "Bearer tok"})
         self.assertEqual(resp.status_code, 403)
 
     def test_forwards_404_for_nonexistent_team(self) -> None:
+        """A 404 for a nonexistent team is relayed as a 404."""
         upstream = _mock_response(404, {"detail": "Team not found"})
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.delete("/orgs/7/teams/999999", headers={"Authorization": "Bearer tok"})
@@ -199,7 +231,10 @@ class TestDeleteTeamProxy(unittest.TestCase):
 
 
 class TestRenameTeamProxy(unittest.TestCase):
+    """PATCH /orgs/{org_id}/teams/{team_id}'s thin-relay behavior."""
+
     def test_forwards_patch_body_and_method(self) -> None:
+        """The PATCH method and JSON body reach the upstream call unchanged."""
         upstream = _mock_response(200, {"id": 1, "organization_id": 7, "name": "New Name", "member_user_ids": []})
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -211,6 +246,7 @@ class TestRenameTeamProxy(unittest.TestCase):
         self.assertIn(b"New Name", call_args.kwargs["content"])
 
     def test_forwards_403_for_non_manager(self) -> None:
+        """A 403 from the upstream auth-service is relayed as a 403."""
         upstream = _mock_response(403, {"detail": "Forbidden"})
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.patch("/orgs/7/teams/1", json={"name": "New Name"}, headers={"Authorization": "Bearer tok"})
@@ -218,7 +254,10 @@ class TestRenameTeamProxy(unittest.TestCase):
 
 
 class TestGetTeamMembersProxy(unittest.TestCase):
+    """GET /orgs/{org_id}/teams/{team_id}/members's thin-relay behavior."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged."""
         upstream = _mock_response(200, [{"user_id": 3, "role": "admin", "invited_by_user_id": None, "joined_at": None}])
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/orgs/7/teams/1/members", headers={"Authorization": "Bearer tok"})
@@ -226,6 +265,7 @@ class TestGetTeamMembersProxy(unittest.TestCase):
         self.assertEqual(resp.json()[0]["role"], "admin")
 
     def test_forwards_404_for_nonexistent_team(self) -> None:
+        """A 404 for a nonexistent team is relayed as a 404."""
         upstream = _mock_response(404, {"detail": "Team not found"})
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/orgs/7/teams/999999/members", headers={"Authorization": "Bearer tok"})
@@ -233,7 +273,10 @@ class TestGetTeamMembersProxy(unittest.TestCase):
 
 
 class TestInviteTeamMemberProxy(unittest.TestCase):
+    """POST /orgs/{org_id}/teams/{team_id}/invite's thin-relay behavior."""
+
     def test_forwards_post_body_and_status(self) -> None:
+        """The POST body/method reach the upstream call correctly."""
         upstream = _mock_response(201, {"user_id": 9, "role": "member", "invited_by_user_id": 3, "joined_at": "2026-08-11T00:00:00"})
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -248,6 +291,8 @@ class TestInviteTeamMemberProxy(unittest.TestCase):
         self.assertIn(b"new@acme.test", call_args.kwargs["content"])
 
     def test_forwards_400_for_org_outsider(self) -> None:
+        """A 400 for an invitee who isn't a member of the organization
+        is relayed as a 400."""
         upstream = _mock_response(400, {"detail": "User is not a member of this organization: new@acme.test"})
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post(
@@ -256,6 +301,7 @@ class TestInviteTeamMemberProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
 
     def test_forwards_404_for_unknown_account(self) -> None:
+        """A 404 for an email with no matching account is relayed as a 404."""
         upstream = _mock_response(404, {"detail": "No account exists for that email yet"})
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post(
@@ -265,7 +311,11 @@ class TestInviteTeamMemberProxy(unittest.TestCase):
 
 
 class TestUpdateTeamMemberRoleProxy(unittest.TestCase):
+    """PUT /orgs/{org_id}/teams/{team_id}/members/{user_id}/role's
+    thin-relay behavior, including the last-admin-demotion guard."""
+
     def test_forwards_put_body_and_method(self) -> None:
+        """The PUT method and JSON body reach the upstream call unchanged."""
         upstream = _mock_response(200, {"user_id": 9, "role": "admin", "invited_by_user_id": 3, "joined_at": None})
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -279,6 +329,7 @@ class TestUpdateTeamMemberRoleProxy(unittest.TestCase):
         self.assertIn(b"admin", call_args.kwargs["content"])
 
     def test_forwards_400_for_last_admin_demotion(self) -> None:
+        """A 400 for attempting to demote the last team admin is relayed as a 400."""
         upstream = _mock_response(400, {"detail": "Cannot demote the last team admin"})
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.put(
@@ -287,6 +338,7 @@ class TestUpdateTeamMemberRoleProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
 
     def test_forwards_403_for_non_manager(self) -> None:
+        """A 403 from the upstream auth-service is relayed as a 403."""
         upstream = _mock_response(403, {"detail": "Forbidden"})
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.put(
@@ -296,7 +348,12 @@ class TestUpdateTeamMemberRoleProxy(unittest.TestCase):
 
 
 class TestRemoveTeamMemberProxy(unittest.TestCase):
+    """DELETE /orgs/{org_id}/teams/{team_id}/members/{user_id}'s
+    thin-relay behavior, including the last-admin-removal guard."""
+
     def test_forwards_method_and_preserves_204_empty_body(self) -> None:
+        """The DELETE method reaches the upstream call, and the 204
+        empty body is preserved."""
         upstream = _mock_no_content_response(204)
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -308,12 +365,14 @@ class TestRemoveTeamMemberProxy(unittest.TestCase):
         self.assertTrue(call_args.args[1].endswith("/orgs/7/teams/1/members/9"))
 
     def test_forwards_400_for_last_admin_removal(self) -> None:
+        """A 400 for attempting to remove the last team admin is relayed as a 400."""
         upstream = _mock_response(400, {"detail": "Cannot remove the last team admin"})
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.delete("/orgs/7/teams/1/members/9", headers={"Authorization": "Bearer tok"})
         self.assertEqual(resp.status_code, 400)
 
     def test_forwards_403_for_non_manager(self) -> None:
+        """A 403 from the upstream auth-service is relayed as a 403."""
         upstream = _mock_response(403, {"detail": "Forbidden"})
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.delete("/orgs/7/teams/1/members/9", headers={"Authorization": "Bearer tok"})
@@ -321,7 +380,12 @@ class TestRemoveTeamMemberProxy(unittest.TestCase):
 
 
 class TestLeaveTeamProxy(unittest.TestCase):
+    """POST /orgs/{org_id}/teams/{team_id}/leave's thin-relay behavior,
+    including the last-admin-leave guard."""
+
     def test_forwards_method_and_preserves_204_empty_body(self) -> None:
+        """The POST method reaches the upstream call, and the 204
+        empty body is preserved."""
         upstream = _mock_no_content_response(204)
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -333,6 +397,7 @@ class TestLeaveTeamProxy(unittest.TestCase):
         self.assertTrue(call_args.args[1].endswith("/orgs/7/teams/1/leave"))
 
     def test_forwards_400_for_last_admin_leave(self) -> None:
+        """A 400 for the last team admin attempting to leave is relayed as a 400."""
         upstream = _mock_response(
             400, {"detail": "The last team admin cannot leave -- transfer ownership or delete the team instead"},
         )
@@ -341,6 +406,7 @@ class TestLeaveTeamProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
 
     def test_forwards_404_for_non_member(self) -> None:
+        """A 404 for a caller who isn't a member of the team is relayed as a 404."""
         upstream = _mock_response(404, {"detail": "Not a member of this team"})
         with patch("control_center.api.routes_team_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post("/orgs/7/teams/1/leave", headers={"Authorization": "Bearer tok"})

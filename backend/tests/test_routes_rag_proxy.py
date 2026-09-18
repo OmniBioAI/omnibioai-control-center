@@ -28,6 +28,9 @@ router-inclusion-gated routes; TestStudiesAndCacheStatsAuthorization
 below is the permanent regression guard for the authorization layer
 itself, mirroring test_main.py's TestPlatformManageInfraAuth. /rag/health
 carries no such requirement, matching its no-auth-upstream behavior.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -71,6 +74,8 @@ def _cron_only_headers() -> dict:
 
 
 def _mock_response(status_code: int, json_body=None, raise_json_error: bool = False) -> MagicMock:
+    """A MagicMock httpx.Response stand-in; raise_json_error makes
+    .json() raise ValueError instead of returning json_body."""
     resp = MagicMock()
     resp.status_code = status_code
     if raise_json_error:
@@ -81,6 +86,8 @@ def _mock_response(status_code: int, json_body=None, raise_json_error: bool = Fa
 
 
 def _mock_async_client(response: MagicMock | None = None, side_effect=None):
+    """An async-context-manager mock of httpx.AsyncClient whose .get()
+    returns `response`, or raises `side_effect` if given."""
     mock_client = MagicMock()
     mock_get = AsyncMock()
     if side_effect is not None:
@@ -101,7 +108,11 @@ _HEALTH_OUT = {"status": "ok", "version": "1.1.0", "faiss_version": "1.8.0", "ca
 
 
 class TestListStudiesProxy(unittest.TestCase):
+    """GET /rag/studies's thin-relay behavior plus its service-key
+    injection (never the caller's own token) and platform.manage_infra gating."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged."""
         upstream = _mock_response(200, _STUDIES_OUT)
         with patch("control_center.api.routes_rag_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/rag/studies", headers=_admin_headers())
@@ -109,6 +120,10 @@ class TestListStudiesProxy(unittest.TestCase):
         self.assertEqual(resp.json(), _STUDIES_OUT)
 
     def test_injects_service_key_not_callers_own_token(self) -> None:
+        """The upstream call carries the control-center-held
+        RAGBIO_API_KEY as Authorization, not the caller's own token --
+        RAG's _verify requires the bearer token to literally equal that
+        shared secret."""
         # The core behavioral guarantee for this endpoint: the caller's
         # own Authorization header must NOT be forwarded -- RAG's
         # _verify requires the bearer token to literally equal
@@ -125,6 +140,8 @@ class TestListStudiesProxy(unittest.TestCase):
         self.assertNotEqual(call_kwargs["headers"]["Authorization"], admin_headers["Authorization"])
 
     def test_sends_no_authorization_header_when_service_key_unconfigured(self) -> None:
+        """With RAGBIO_API_KEY unset, no Authorization header is sent
+        upstream at all (nothing to inject), and the resulting 403 is relayed."""
         upstream = _mock_response(403, {"detail": "Not authenticated"})
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_rag_proxy.httpx.AsyncClient", return_value=mock_ctx), \
@@ -135,6 +152,8 @@ class TestListStudiesProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 403)
 
     def test_rag_service_unreachable_returns_503(self) -> None:
+        """A connection failure to the RAG service returns 503 with a
+        "rag-service unreachable" message."""
         with patch(
             "control_center.api.routes_rag_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
@@ -144,6 +163,8 @@ class TestListStudiesProxy(unittest.TestCase):
         self.assertIn("rag-service unreachable", resp.json()["error"])
 
     def test_non_json_upstream_response_handled(self) -> None:
+        """A non-JSON upstream response body maps to a 500 error naming
+        "non-JSON" rather than propagating the parse exception."""
         upstream = _mock_response(500, raise_json_error=True)
         with patch("control_center.api.routes_rag_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/rag/studies", headers=_admin_headers())
@@ -152,7 +173,10 @@ class TestListStudiesProxy(unittest.TestCase):
 
 
 class TestCacheStatsProxy(unittest.TestCase):
+    """GET /rag/cache-stats's thin-relay behavior plus its service-key injection."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged."""
         upstream = _mock_response(200, _CACHE_STATS_OUT)
         with patch("control_center.api.routes_rag_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/rag/cache-stats", headers=_admin_headers())
@@ -160,6 +184,8 @@ class TestCacheStatsProxy(unittest.TestCase):
         self.assertEqual(resp.json()["hit_rate"], 80.0)
 
     def test_injects_service_key_not_callers_own_token(self) -> None:
+        """The upstream call carries RAGBIO_API_KEY as Authorization,
+        not the caller's own token."""
         upstream = _mock_response(200, _CACHE_STATS_OUT)
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_rag_proxy.httpx.AsyncClient", return_value=mock_ctx), \
@@ -169,6 +195,7 @@ class TestCacheStatsProxy(unittest.TestCase):
         self.assertEqual(call_kwargs["headers"]["Authorization"], "Bearer the-service-secret")
 
     def test_rag_service_unreachable_returns_503(self) -> None:
+        """A connection failure to the RAG service returns 503."""
         with patch(
             "control_center.api.routes_rag_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
@@ -189,21 +216,26 @@ class TestStudiesAndCacheStatsAuthorization(unittest.TestCase):
     here the way it does for services_router/docker_router/etc.)."""
 
     def _cases(self):
+        """The two routes this authorization boundary applies to."""
         return ("/rag/studies", "/rag/cache-stats")
 
     def test_401_when_no_token(self) -> None:
+        """Both routes reject a request with no token at all (401)."""
         for path in self._cases():
             with self.subTest(path=path):
                 resp = client.get(path)
                 self.assertEqual(resp.status_code, 401)
 
     def test_403_for_cron_permission_only(self) -> None:
+        """Both routes reject a token holding an unrelated permission (403)."""
         for path in self._cases():
             with self.subTest(path=path):
                 resp = client.get(path, headers=_cron_only_headers())
                 self.assertEqual(resp.status_code, 403)
 
     def test_not_401_or_403_with_infra_permission(self) -> None:
+        """Both routes accept a token holding platform.manage_infra --
+        neither 401 nor 403."""
         upstream = _mock_response(200, _STUDIES_OUT)
         with patch("control_center.api.routes_rag_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             for path in self._cases():
@@ -213,7 +245,11 @@ class TestStudiesAndCacheStatsAuthorization(unittest.TestCase):
 
 
 class TestHealthProxy(unittest.TestCase):
+    """GET /rag/health's thin-relay behavior -- unauthenticated
+    upstream, so no service-key injection here, unlike the two routes above."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged."""
         upstream = _mock_response(200, _HEALTH_OUT)
         with patch("control_center.api.routes_rag_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/rag/health")
@@ -221,6 +257,9 @@ class TestHealthProxy(unittest.TestCase):
         self.assertEqual(resp.json(), _HEALTH_OUT)
 
     def test_never_sends_the_service_key_even_when_configured(self) -> None:
+        """Even with RAGBIO_API_KEY configured, /rag/health forwards
+        whatever the caller sent (or nothing) rather than injecting the
+        service key -- this route has no auth upstream."""
         # GET /health has no auth upstream, so this route must never
         # inject RAGBIO_API_KEY (unlike /rag/studies and
         # /rag/cache-stats) -- if the caller sent their own token, that
@@ -237,6 +276,8 @@ class TestHealthProxy(unittest.TestCase):
         self.assertEqual(call_kwargs["headers"]["Authorization"], "Bearer admin-own-token")
 
     def test_forwards_no_authorization_header_when_caller_sent_none(self) -> None:
+        """With no caller Authorization header, none is sent upstream --
+        nothing fabricated."""
         upstream = _mock_response(200, _HEALTH_OUT)
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_rag_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -245,6 +286,8 @@ class TestHealthProxy(unittest.TestCase):
         self.assertNotIn("Authorization", call_kwargs["headers"])
 
     def test_non_json_upstream_response_handled(self) -> None:
+        """A non-JSON upstream response body maps to the same status
+        code with a "non-JSON" error message."""
         upstream = _mock_response(502, raise_json_error=True)
         with patch("control_center.api.routes_rag_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/rag/health")

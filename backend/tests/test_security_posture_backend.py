@@ -1,3 +1,19 @@
+"""tests/test_security_posture_backend.py -- control_center.
+security_posture_backend: assemble_security_posture()'s mapping from the
+regression-health artifact and live runtime-check results onto the fixed
+SecurityControl set (explicit id mapping, never inventing an unmapped
+finding/debt id, never letting a STALE artifact's certification get
+"strengthened" back to fully verified, never fabricating VERIFIED from an
+UNAVAILABLE runtime source), collect_runtime_evidence()'s reduction of a
+raw check-result list to per-source DataSourceStatus + a
+availability-only public dict (dropping any private message/target
+field), and the GET /security-posture route's auth (401/403), safe-503
+fallback on any internal failure, and its response never containing a
+credential-, path-, or topology-shaped string.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
+"""
 import json
 
 import pytest
@@ -22,6 +38,8 @@ from fastapi import HTTPException
 
 
 def artifact():
+    """A well-formed regression-health artifact dict with two
+    capabilities, one fixed finding, and one technical-debt entry."""
     return {
         "generated_at": "2026-08-30T01:16:35.820590Z",
         "freshness": {"status": "CURRENT"},
@@ -35,6 +53,11 @@ def artifact():
 
 
 def test_regression_mapping_is_explicit_and_historical_findings_are_safe():
+    """Regression-artifact capability ids map explicitly onto their
+    matching security control (isolation.organization <- tenant-
+    isolation, audit.correlation <- audit-correlation), a partial live
+    check keeps posture PARTIAL with a limitation noted, and a fixed
+    finding is classified FIXED_HISTORICAL, not counted toward verified."""
     report = assemble_security_posture(regression=artifact(), generated_at="2026-08-30T12:00:00Z")
     isolation = next(c for c in report.controls if c.control_id == "isolation.organization")
     correlation = next(c for c in report.controls if c.control_id == "audit.correlation")
@@ -47,6 +70,9 @@ def test_regression_mapping_is_explicit_and_historical_findings_are_safe():
 
 
 def test_complete_evidence_without_material_coverage_limitation_remains_verified():
+    """A control with complete evidence across every dimension
+    (implemented/tested/live/certified/current) is VERIFIED -- the
+    limitation logic never downgrades a genuinely complete control."""
     control = SecurityControl(
         "test.complete", "Complete evidence", ControlCategory.AUTHENTICATION, Priority.P1,
         implementation_status="IMPLEMENTED", test_status="PASS", live_status="AVAILABLE",
@@ -56,6 +82,9 @@ def test_complete_evidence_without_material_coverage_limitation_remains_verified
 
 
 def test_stale_regression_certification_is_not_strengthened():
+    """A STALE regression artifact keeps certification_status=CERTIFIED
+    (the underlying fact) but downgrades posture to PARTIAL -- staleness
+    is never silently upgraded back to a fresh-looking VERIFIED."""
     data = artifact()
     data["freshness"] = {"status": "STALE"}
     report = assemble_security_posture(regression=data, generated_at="2026-08-30T12:00:00Z")
@@ -66,6 +95,10 @@ def test_stale_regression_certification_is_not_strengthened():
 
 
 def test_runtime_adapter_normalizes_only_availability():
+    """collect_runtime_evidence() reduces each raw check result to an
+    AVAILABLE/UNAVAILABLE DataSourceStatus and an {"available": bool}
+    public dict -- the private "message"/"target" fields never survive
+    into the returned results."""
     settings = object()
     statuses, results = collect_runtime_evidence(settings, check=lambda _: [
         {"name": "auth-service", "status": "UP", "target": "private", "message": "private"},
@@ -78,6 +111,9 @@ def test_runtime_adapter_normalizes_only_availability():
 
 
 def test_runtime_adapter_handles_missing_and_failed_sources():
+    """An empty check result yields UNKNOWN status with no results, and
+    a raised exception from the check yields UNAVAILABLE for every
+    source with no results -- neither case raises into the caller."""
     statuses, results = collect_runtime_evidence(object(), check=lambda _: [])
     assert statuses["auth"] is DataSourceStatus.UNKNOWN
     assert results == {}
@@ -87,6 +123,8 @@ def test_runtime_adapter_handles_missing_and_failed_sources():
 
 
 def test_runtime_available_sources_update_their_controls():
+    """Every runtime source reported AVAILABLE updates its mapped
+    control's live_status to AVAILABLE."""
     runtime = {source: DataSourceStatus.AVAILABLE for source in ("auth", "gateway", "policy", "hpc_policy", "security_audit")}
     report = assemble_security_posture(runtime_statuses=runtime, generated_at="2026-08-30T12:00:00Z")
     assert all(control.live_status is LiveStatus.AVAILABLE for control in report.controls if control.control_id in {
@@ -96,6 +134,9 @@ def test_runtime_available_sources_update_their_controls():
 
 
 def test_unknown_freshness_and_unmapped_artifact_items_are_safe():
+    """An empty freshness dict maps to Freshness.UNKNOWN, and an
+    artifact finding/debt entry with an id that has no explicit mapping
+    is dropped rather than surfacing as a phantom finding."""
     data = artifact()
     data["freshness"] = {}
     data["findings"].append({"id": "unmapped", "status": "unknown"})
@@ -107,6 +148,9 @@ def test_unknown_freshness_and_unmapped_artifact_items_are_safe():
 
 
 def test_runtime_unavailable_does_not_fabricate_verified():
+    """A runtime source reported UNAVAILABLE sets its control's
+    live_status to UNAVAILABLE, and the posture is never VERIFIED
+    without a real successful live check."""
     report = assemble_security_posture(
         runtime_statuses={"auth": DataSourceStatus.UNAVAILABLE},
         generated_at="2026-08-30T12:00:00Z",
@@ -117,6 +161,10 @@ def test_runtime_unavailable_does_not_fabricate_verified():
 
 
 def test_optional_sources_and_known_limitations_are_present():
+    """With no regression/runtime data supplied at all, optional data
+    sources still report their documented default availability, and a
+    control with a known, real limitation (auth.revocation) still
+    surfaces it."""
     report = assemble_security_posture(generated_at="2026-08-30T12:00:00Z")
     data = report.as_dict()
     assert data["data_sources"]["regression_health"] == "UNAVAILABLE"
@@ -126,6 +174,8 @@ def test_optional_sources_and_known_limitations_are_present():
 
 
 def test_endpoint_authorized_200_and_registered_read_only(monkeypatch):
+    """The endpoint returns 200 with an all-zero summary for an empty
+    report, and the /security-posture route only registers GET."""
     report = SecurityPostureReport("1.0", "2026-08-30T12:00:00Z")
     monkeypatch.setattr(routes_security_posture, "load_security_posture_report", lambda: report)
     response = routes_security_posture.security_posture({"sub": "admin"})
@@ -137,6 +187,9 @@ def test_endpoint_authorized_200_and_registered_read_only(monkeypatch):
 
 @pytest.mark.parametrize("status,detail", [(401, "unauthenticated"), (403, "forbidden")])
 def test_endpoint_authentication_and_permission_semantics(monkeypatch, status, detail):
+    """The route's manage_all_orgs dependency rejects a missing token
+    with 401 and a validly-authenticated but under-permissioned token
+    with 403."""
     def denied():
         raise HTTPException(status_code=status, detail=detail)
 
@@ -156,6 +209,9 @@ def test_endpoint_authentication_and_permission_semantics(monkeypatch, status, d
 
 
 def test_endpoint_safe_503(monkeypatch):
+    """An internal exception while loading the report returns a fixed
+    503 body with no leaked exception text -- "private upstream path"
+    never appears in the response."""
     def unavailable():
         raise RuntimeError("private upstream path")
 
@@ -167,6 +223,9 @@ def test_endpoint_safe_503(monkeypatch):
 
 
 def test_route_response_has_no_sensitive_or_topology_fields(monkeypatch):
+    """A full, real report's serialized response never contains a
+    credential-, secret-, cookie-, path-, or internal-topology-shaped
+    string, across a broad set of forbidden patterns."""
     report = assemble_security_posture(generated_at="2026-08-30T12:00:00Z")
     monkeypatch.setattr(routes_security_posture, "load_security_posture_report", lambda: report)
     payload = routes_security_posture.security_posture({"sub": "admin"}).body.decode().lower()

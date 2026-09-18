@@ -15,6 +15,9 @@ in-process checks. These tests prove:
     is null (not merely empty) otherwise;
   - any single unreachable/erroring upstream degrades only its own
     section to null instead of failing the whole request.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ client = TestClient(app)
 
 
 def _resp(status_code: int, json_body=None) -> MagicMock:
+    """A mock httpx.Response with the given status code and .json() return value."""
     r = MagicMock()
     r.status_code = status_code
     r.json.return_value = json_body
@@ -50,6 +54,7 @@ def _mock_get_by_url(routes: dict[str, MagicMock], default_status=404):
 
 
 def _mock_client(routes: dict[str, MagicMock]):
+    """A mock async context manager whose __aenter__ yields a client whose .get() is routed by URL substring via `routes`."""
     mock_client = MagicMock()
     mock_client.get = _mock_get_by_url(routes)
     mock_ctx = MagicMock()
@@ -80,7 +85,10 @@ RUNS = [
 
 
 class TestIdentitySection(unittest.TestCase):
+    """The dashboard's identity section: aggregation from auth's orgs/users/roles endpoints."""
+
     def test_populates_from_platform_orgs_users_roles(self) -> None:
+        """organizations/users/teams/roles are correctly extracted from their respective upstream responses, with active_sessions left null (no upstream concept)."""
         routes = {
             "/platform/orgs": _resp(200, ORGS_PAGE),
             "/platform/users": _resp(200, USERS_PAGE),
@@ -97,6 +105,7 @@ class TestIdentitySection(unittest.TestCase):
         self.assertIsNone(identity["active_sessions"])
 
     def test_missing_authorization_never_fabricates_identity(self) -> None:
+        """With no Authorization header, every identity field is null rather than a fabricated value."""
         with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client({})):
             resp = client.get("/dashboard/summary")
         identity = resp.json()["identity"]
@@ -105,6 +114,7 @@ class TestIdentitySection(unittest.TestCase):
         })
 
     def test_upstream_unreachable_degrades_to_null_without_failing_request(self) -> None:
+        """A connection failure to auth-service degrades only the identity section to null, not the whole request."""
         mock_client = MagicMock()
         mock_client.get = AsyncMock(side_effect=httpx.ConnectError("refused"))
         mock_ctx = MagicMock()
@@ -117,7 +127,12 @@ class TestIdentitySection(unittest.TestCase):
 
 
 class TestAiPlatformSection(unittest.TestCase):
+    """The dashboard's ai_platform section: model-registry model counting and LLM
+    provider counting."""
     def test_dedupes_versions_into_distinct_models_and_counts_active(self) -> None:
+        """Three model-registry rows collapse to 2 distinct (task, model_name) models,
+        only the model with a staging or production version counts as active, and
+        embedding_models stays null."""
         routes = {"/v1/models": _resp(200, MODELS)}
         with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client(routes)):
             resp = client.get("/dashboard/summary")
@@ -137,6 +152,8 @@ class TestAiPlatformSection(unittest.TestCase):
         self.assertEqual(resp.json()["ai_platform"]["registered_models"], 0)
 
     def test_llm_providers_counts_configured_keys_plus_running_ollama(self) -> None:
+        """llm_providers counts each configured API key plus one for a running Ollama,
+        so one configured key and a running Ollama give 2; get_llms is stubbed."""
         from fastapi.responses import JSONResponse
 
         fake_llms = JSONResponse({
@@ -153,7 +170,11 @@ class TestAiPlatformSection(unittest.TestCase):
 
 
 class TestKnowledgeSection(unittest.TestCase):
+    """The dashboard's knowledge section: RAG collection and document counts from
+    /v1/studies, null when RAG is not configured or its response is malformed."""
     def test_null_when_ragbio_api_key_not_configured(self) -> None:
+        """With RAGBIO_API_KEY unset, rag_collections is null even though /v1/studies
+        would return studies."""
         with patch("control_center.api.routes_dashboard.RAGBIO_API_KEY", ""):
             with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client({"/v1/studies": _resp(200, STUDIES)})):
                 resp = client.get("/dashboard/summary")
@@ -161,6 +182,8 @@ class TestKnowledgeSection(unittest.TestCase):
         self.assertIsNone(knowledge["rag_collections"])
 
     def test_malformed_upstream_response_yields_null_not_a_crash(self) -> None:
+        """An unexpected /v1/studies response shape yields null rag_collections and
+        indexed_documents instead of a crash."""
         with patch("control_center.api.routes_dashboard.RAGBIO_API_KEY", "test-key"):
             with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client({"/v1/studies": _resp(200, {"detail": "unexpected shape"})})):
                 resp = client.get("/dashboard/summary")
@@ -169,6 +192,9 @@ class TestKnowledgeSection(unittest.TestCase):
         self.assertIsNone(knowledge["indexed_documents"])
 
     def test_sums_abstract_counts_when_configured(self) -> None:
+        """With the API key configured, rag_collections is 2 and indexed_documents is
+        128 (the summed abstract counts), with indexed_publications and knowledge_bases
+        mirroring the same figures."""
         with patch("control_center.api.routes_dashboard.RAGBIO_API_KEY", "test-key"):
             with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client({"/v1/studies": _resp(200, STUDIES)})):
                 resp = client.get("/dashboard/summary")
@@ -181,13 +207,18 @@ class TestKnowledgeSection(unittest.TestCase):
 
 
 class TestWorkflowSection(unittest.TestCase):
+    """The dashboard's workflow section: bundle counts from /v1/categories and job
+    counts by state from /api/runs."""
     def test_bundle_count_sums_categories(self) -> None:
+        """workflow_bundles sums the category counts (4 + 3 = 7)."""
         routes = {"/v1/categories": _resp(200, CATEGORIES)}
         with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client(routes)):
             resp = client.get("/dashboard/summary")
         self.assertEqual(resp.json()["workflow"]["workflow_bundles"], 7)  # 4 + 3
 
     def test_job_counts_filtered_by_state_and_require_authorization(self) -> None:
+        """With an Authorization header, running, queued and failed job counts are taken
+        from /api/runs by state (2, 1 and 1)."""
         routes = {"/v1/categories": _resp(200, []), "/api/runs": _resp(200, RUNS)}
         with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client(routes)):
             resp = client.get("/dashboard/summary", headers={"Authorization": "Bearer tok"})
@@ -197,6 +228,8 @@ class TestWorkflowSection(unittest.TestCase):
         self.assertEqual(wf["failed_jobs"], 1)
 
     def test_job_counts_null_without_authorization(self) -> None:
+        """Without an Authorization header, running, queued and failed job counts are
+        all null."""
         routes = {"/v1/categories": _resp(200, []), "/api/runs": _resp(200, RUNS)}
         with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client(routes)):
             resp = client.get("/dashboard/summary")
@@ -207,7 +240,13 @@ class TestWorkflowSection(unittest.TestCase):
 
 
 class TestInfrastructureAndOperationsSection(unittest.TestCase):
+    """The dashboard's infrastructure and operations sections, which are populated only
+    for callers holding platform.manage_infra and are null otherwise."""
     def test_included_when_caller_has_platform_manage_infra(self) -> None:
+        """A caller holding platform.manage_infra gets populated infrastructure
+        (containers, healthy services, GPU utilization, storage used) and operations
+        (health UP, one open alert) sections, with cpu_pct and uptime left null; all
+        in-process collectors are stubbed."""
         with (
             patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client({})),
             patch("control_center.api.routes_dashboard.verify_token", return_value={"permissions": ["platform.manage_infra"]}),
@@ -235,6 +274,8 @@ class TestInfrastructureAndOperationsSection(unittest.TestCase):
         self.assertIsNone(ops["uptime"])
 
     def test_null_without_platform_manage_infra_and_upstream_not_called(self) -> None:
+        """A token lacking platform.manage_infra gets every infrastructure and
+        operations field null, and get_containers_status is never called."""
         with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client({})):
             with patch("control_center.api.routes_dashboard.verify_token", return_value={"permissions": []}):
                 with patch("control_center.api.routes_dashboard.get_containers_status") as mock_containers:
@@ -246,6 +287,8 @@ class TestInfrastructureAndOperationsSection(unittest.TestCase):
         self.assertTrue(all(v is None for v in ops.values()))
 
     def test_health_reflects_worst_service_status(self) -> None:
+        """operations.health is the worst service status: WARN for [UP, WARN] and DOWN
+        for [UP, DOWN, WARN]."""
         for statuses, expected in [
             (["UP", "WARN"], "WARN"),
             (["UP", "DOWN", "WARN"], "DOWN"),
@@ -268,6 +311,8 @@ class TestInfrastructureAndOperationsSection(unittest.TestCase):
             self.assertEqual(resp.json()["operations"]["health"], expected)
 
     def test_load_settings_failure_yields_zero_services_not_a_500(self) -> None:
+        """When load_settings raises FileNotFoundError the request still returns 200,
+        with services_total 0 and operations.health UP."""
         with (
             patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client({})),
             patch("control_center.api.routes_dashboard.verify_token", return_value={"permissions": ["platform.manage_infra"]}),
@@ -286,6 +331,8 @@ class TestInfrastructureAndOperationsSection(unittest.TestCase):
         self.assertEqual(resp.json()["operations"]["health"], "UP")
 
     def test_known_issues_read_failure_yields_null_alerts_not_a_500(self) -> None:
+        """When list_known_issues raises, the request still returns 200 with
+        operations.alerts null."""
         with (
             patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client({})),
             patch("control_center.api.routes_dashboard.verify_token", return_value={"permissions": ["platform.manage_infra"]}),
@@ -305,6 +352,8 @@ class TestInfrastructureAndOperationsSection(unittest.TestCase):
         self.assertIsNone(resp.json()["operations"]["alerts"])
 
     def test_null_without_any_authorization_header(self) -> None:
+        """With no Authorization header, containers_running is null and
+        get_containers_status is never called."""
         with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client({})):
             with patch("control_center.api.routes_dashboard.get_containers_status") as mock_containers:
                 resp = client.get("/dashboard/summary")
@@ -332,7 +381,12 @@ _BUSINESS_NULL = {
 
 
 class TestBusinessSection(unittest.TestCase):
+    """The dashboard's business section: the caller's own organization, subscription
+    plan and usage from the orgs, subscription and usage endpoints."""
     def test_populates_plan_and_subscription_for_callers_own_org(self) -> None:
+        """For the caller's own org, the business section reports the organization id
+        and name, plan name, subscription status, a usage service count of 2 and
+        billing_service_available true."""
         routes = {
             "/orgs": _resp(200, MY_ORGS),
             "/subscription": _resp(200, SUBSCRIPTION),
@@ -349,17 +403,22 @@ class TestBusinessSection(unittest.TestCase):
         self.assertTrue(business["billing_service_available"])
 
     def test_missing_authorization_never_fabricates_business(self) -> None:
+        """With no Authorization header, the business section equals the all-null shape."""
         with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client({})):
             resp = client.get("/dashboard/summary")
         self.assertEqual(resp.json()["business"], _BUSINESS_NULL)
 
     def test_no_organization_membership_returns_all_null(self) -> None:
+        """A caller who belongs to no organization gets the all-null business section."""
         routes = {"/orgs": _resp(200, [])}
         with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client(routes)):
             resp = client.get("/dashboard/summary", headers={"Authorization": "Bearer tok"})
         self.assertEqual(resp.json()["business"], _BUSINESS_NULL)
 
     def test_no_active_subscription_distinguishes_from_billing_service_down(self) -> None:
+        """A 404 for the subscription (no active subscription) leaves plan_name and
+        subscription_status null but billing_service_available true and usage still
+        populated, which differs from the billing service being down."""
         # 404 (no subscription for this org) is NOT the same as the
         # billing service being unreachable -- both must not collapse
         # into the same "billing_service_available: null" the generic
@@ -379,6 +438,8 @@ class TestBusinessSection(unittest.TestCase):
         self.assertEqual(business["usage_services_count"], 2)
 
     def test_billing_service_unreachable_sets_available_false(self) -> None:
+        """A connection error on the subscription endpoint sets
+        billing_service_available to false and plan_name to null."""
         async def _get(url, headers=None, params=None, timeout=None):
             if "/orgs" in url:
                 return _resp(200, MY_ORGS)
@@ -398,6 +459,8 @@ class TestBusinessSection(unittest.TestCase):
         self.assertIsNone(business["plan_name"])
 
     def test_usage_failure_does_not_block_subscription_data(self) -> None:
+        """A 503 from the usage endpoint leaves usage_services_count null while the
+        subscription's plan_name is still populated."""
         # Partial-failure case: usage endpoint down/404, subscription
         # still succeeds -- each upstream degrades independently, same
         # convention every other section in this file already follows.
@@ -436,6 +499,8 @@ class TestPublicFieldsContract(unittest.TestCase):
         return resp.json()
 
     def test_no_unlisted_field_is_non_null_for_anonymous_caller(self) -> None:
+        """For an anonymous caller, no ai_platform, knowledge or workflow field outside
+        PUBLIC_FIELDS comes back non-null."""
         from control_center.api import routes_dashboard as rd
 
         body = self._anonymous_response()
@@ -450,6 +515,9 @@ class TestPublicFieldsContract(unittest.TestCase):
             )
 
     def test_allowlisted_fields_are_still_populated_anonymously(self) -> None:
+        """Every field listed in PUBLIC_FIELDS, except the always-null embedding_models,
+        is non-null for an anonymous caller when all upstreams are reachable, so the
+        allowlist is not stale."""
         # The inverse check: PUBLIC_FIELDS isn't accidentally stale either
         # -- every field it claims is public actually comes back non-null
         # for an anonymous caller under these fixtures (all upstreams
@@ -471,7 +539,11 @@ class TestPublicFieldsContract(unittest.TestCase):
 
 
 class TestResponseShape(unittest.TestCase):
+    """The top-level shape of the /dashboard/summary response."""
     def test_top_level_keys_and_generated_at(self) -> None:
+        """The response has exactly the keys generated_at, identity, ai_platform,
+        knowledge, workflow, infrastructure, operations and business, and generated_at
+        is non-empty."""
         with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client({})):
             resp = client.get("/dashboard/summary")
         body = resp.json()

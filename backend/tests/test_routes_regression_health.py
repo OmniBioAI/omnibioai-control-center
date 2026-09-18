@@ -1,3 +1,18 @@
+"""tests/test_routes_regression_health.py -- control_center.
+regression_health.load_regression_health() and the GET /regression-
+health endpoint. A valid artifact's phases/capabilities/findings pass
+through unchanged with a computed freshness status (CURRENT/STALE/
+UNKNOWN for a bad timestamp), while any structurally invalid or unsafe
+artifact (wrong schema_version, missing phases, an unrecognized
+certification/validation status, an unexpected top-level field, an
+absolute path in free text) raises RegressionHealthUnavailable rather
+than being trusted. The endpoint itself requires platform.manage_infra
+and, on an unavailable artifact, returns a fixed 503 body that never
+leaks the underlying file path.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
+"""
 from __future__ import annotations
 
 import json
@@ -19,6 +34,7 @@ from control_center.regression_health import (
 
 
 def _artifact(*, generated_at: str = "2026-08-29T12:00:00Z") -> dict:
+    """A well-formed, fully-populated regression-health artifact dict."""
     statuses = {
         "local-nextflow": ("Local Nextflow", "pass", "pass", "certified"),
         "slurm-tes": ("Slurm/TES", "pass", "pass", "certified"),
@@ -64,12 +80,16 @@ def _artifact(*, generated_at: str = "2026-08-29T12:00:00Z") -> dict:
 
 
 def _write_artifact(tmp_path: Path, data: dict) -> Path:
+    """Write `data` as regression-health.json under tmp_path and return
+    its path."""
     path = tmp_path / "regression-health.json"
     path.write_text(json.dumps(data), encoding="utf-8")
     return path
 
 
 def test_valid_artifact_preserves_phases_capabilities_and_findings(tmp_path: Path) -> None:
+    """A well-formed artifact's phases/capabilities/findings pass
+    through unchanged, and a current generated_at is freshness=CURRENT."""
     path = _write_artifact(tmp_path, _artifact())
     with patch.dict(os.environ, {"REGRESSION_HEALTH_ARTIFACT_PATH": str(path), "REGRESSION_HEALTH_STALE_AFTER_HOURS": "168"}):
         result = load_regression_health(now=datetime(2026, 8, 29, 13, tzinfo=UTC))
@@ -84,6 +104,8 @@ def test_valid_artifact_preserves_phases_capabilities_and_findings(tmp_path: Pat
 
 
 def test_old_artifact_is_stale_without_mutating_certification(tmp_path: Path) -> None:
+    """An artifact older than REGRESSION_HEALTH_STALE_AFTER_HOURS is
+    freshness=STALE, but its certification data itself is unchanged."""
     path = _write_artifact(tmp_path, _artifact(generated_at="2026-08-20T12:00:00Z"))
     with patch.dict(os.environ, {"REGRESSION_HEALTH_ARTIFACT_PATH": str(path), "REGRESSION_HEALTH_STALE_AFTER_HOURS": "24"}):
         result = load_regression_health(now=datetime(2026, 8, 29, 12, tzinfo=UTC))
@@ -92,6 +114,8 @@ def test_old_artifact_is_stale_without_mutating_certification(tmp_path: Path) ->
 
 
 def test_invalid_timestamp_is_unknown(tmp_path: Path) -> None:
+    """An unparseable generated_at yields freshness=UNKNOWN rather than
+    raising or defaulting to CURRENT/STALE."""
     path = _write_artifact(tmp_path, _artifact(generated_at="not-a-timestamp"))
     with patch.dict(os.environ, {"REGRESSION_HEALTH_ARTIFACT_PATH": str(path)}):
         result = load_regression_health()
@@ -107,6 +131,11 @@ def test_invalid_timestamp_is_unknown(tmp_path: Path) -> None:
     lambda data: data["technical_debt"].append({"summary": "/internal/absolute/path"}),
 ])
 def test_invalid_or_unsafe_artifact_is_unavailable(tmp_path: Path, mutator) -> None:
+    """Each way an artifact can be structurally invalid or carry
+    unrecognized/unsafe content (wrong schema_version, missing phases,
+    an unrecognized status enum value, an unexpected top-level field
+    like "password", or an absolute-path-looking string in free text)
+    raises RegressionHealthUnavailable rather than being trusted."""
     data = _artifact()
     mutator(data)
     path = _write_artifact(tmp_path, data)
@@ -116,6 +145,8 @@ def test_invalid_or_unsafe_artifact_is_unavailable(tmp_path: Path, mutator) -> N
 
 @pytest.mark.parametrize("content", ["not json", "{}"])
 def test_missing_or_malformed_artifact_is_unavailable(tmp_path: Path, content: str) -> None:
+    """Non-JSON content and an empty JSON object both raise
+    RegressionHealthUnavailable."""
     path = tmp_path / "regression-health.json"
     path.write_text(content, encoding="utf-8")
     with patch.dict(os.environ, {"REGRESSION_HEALTH_ARTIFACT_PATH": str(path)}), pytest.raises(RegressionHealthUnavailable):
@@ -123,6 +154,9 @@ def test_missing_or_malformed_artifact_is_unavailable(tmp_path: Path, content: s
 
 
 def test_endpoint_requires_manage_infra_and_returns_safe_unavailable(tmp_path: Path) -> None:
+    """A missing artifact makes the endpoint return a fixed 503 body
+    that never leaks the underlying file path, and the platform.
+    manage_infra dependency rejects an unauthenticated caller with 401."""
     missing = tmp_path / "missing" / "regression-health.json"
     with patch.dict(os.environ, {"REGRESSION_HEALTH_ARTIFACT_PATH": str(missing)}):
         response = get_regression_health()
@@ -140,6 +174,8 @@ def test_endpoint_requires_manage_infra_and_returns_safe_unavailable(tmp_path: P
 
 
 def test_authorized_dependency_and_endpoint_succeed(tmp_path: Path) -> None:
+    """A token carrying platform.manage_infra passes the permission
+    dependency, and the endpoint returns 200 for a valid artifact."""
     path = _write_artifact(tmp_path, _artifact())
     dependency = require_permission("platform.manage_infra")
     with patch("control_center.core.auth.verify_token", return_value={"permissions": ["platform.manage_infra"]}):
@@ -149,6 +185,8 @@ def test_authorized_dependency_and_endpoint_succeed(tmp_path: Path) -> None:
 
 
 def test_endpoint_denies_valid_token_without_permission() -> None:
+    """A validly-authenticated token lacking platform.manage_infra is
+    rejected with 403."""
     dependency = require_permission("platform.manage_infra")
     with patch("control_center.core.auth.verify_token", return_value={"permissions": []}), pytest.raises(HTTPException) as error:
         dependency("Bearer test-token")
@@ -156,4 +194,5 @@ def test_endpoint_denies_valid_token_without_permission() -> None:
 
 
 def test_route_is_registered() -> None:
+    """The /regression-health route is registered on the app."""
     assert any(route.path == "/regression-health" for route in app.routes)

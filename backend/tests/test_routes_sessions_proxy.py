@@ -9,6 +9,9 @@ Mirrors test_routes_audit_proxy.py's exact conventions -- this route is a
 thin relay, no authorization decision is made here (that's entirely
 omnibioai-auth's job: every /sessions endpoint there is self-service,
 scoped to the caller's own `sub` claim, Phase 4 PR-A).
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -25,6 +28,8 @@ client = TestClient(app)
 
 
 def _mock_response(status_code: int, json_body=None, raise_json_error: bool = False, content: bytes = b"x") -> MagicMock:
+    """A MagicMock httpx.Response stand-in; raise_json_error makes
+    .json() raise ValueError instead of returning json_body."""
     resp = MagicMock()
     resp.status_code = status_code
     resp.content = content
@@ -36,6 +41,8 @@ def _mock_response(status_code: int, json_body=None, raise_json_error: bool = Fa
 
 
 def _mock_async_client(response: MagicMock = None, side_effect=None):
+    """An async-context-manager mock of httpx.AsyncClient whose
+    .request() returns `response`, or raises `side_effect` if given."""
     mock_client = MagicMock()
     mock_request = AsyncMock()
     if side_effect is not None:
@@ -69,7 +76,13 @@ _OTHER_SESSION = {**_SESSION, "session_id": "not-mine-session-id"}
 
 
 class TestListMySessionsProxy(unittest.TestCase):
+    """GET /sessions's thin-relay behavior: success passthrough (never
+    leaking a token/secret-shaped field), auth forwarding, and fail-safe
+    error mapping."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged,
+        and no token/secret-shaped substring appears in the response text."""
         upstream = _mock_response(200, [_SESSION])
         with patch("control_center.api.routes_sessions_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/sessions", headers={"Authorization": "Bearer tok"})
@@ -85,6 +98,8 @@ class TestListMySessionsProxy(unittest.TestCase):
             self.assertNotIn(forbidden, body_text.lower())
 
     def test_forwards_authorization_header(self) -> None:
+        """The caller's Authorization header is forwarded to the
+        upstream auth-service call unchanged."""
         upstream = _mock_response(200, [_SESSION])
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_sessions_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -93,6 +108,8 @@ class TestListMySessionsProxy(unittest.TestCase):
         self.assertEqual(call_kwargs["headers"]["Authorization"], "Bearer my-token-123")
 
     def test_missing_authorization_header_is_not_forged(self) -> None:
+        """No Authorization header on the incoming request means none
+        is forwarded upstream -- the proxy never invents one."""
         # No Authorization header on the incoming request -- the proxy
         # must not invent one; omnibioai-auth's own get_current_user is
         # what actually rejects the request (mocked here as a 401, same
@@ -106,6 +123,8 @@ class TestListMySessionsProxy(unittest.TestCase):
         self.assertNotIn("Authorization", call_kwargs["headers"])
 
     def test_upstream_401_is_forwarded_for_unauthenticated_request(self) -> None:
+        """An upstream 401 for missing/invalid credentials is relayed
+        as a 401 -- the proxy makes no auth decision of its own."""
         # No credentials (or an invalid/expired token) -- this proxy makes
         # no authorization decision itself, so the existing authentication
         # error behavior is entirely whatever omnibioai-auth's own
@@ -116,6 +135,8 @@ class TestListMySessionsProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 401)
 
     def test_auth_service_unreachable_returns_503(self) -> None:
+        """A connection failure to the auth-service returns 503 with an
+        "auth-service unreachable" message."""
         with patch(
             "control_center.api.routes_sessions_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
@@ -125,6 +146,7 @@ class TestListMySessionsProxy(unittest.TestCase):
         self.assertIn("auth-service unreachable", resp.json()["error"])
 
     def test_network_timeout_returns_503(self) -> None:
+        """A request timeout to the auth-service also returns 503."""
         with patch(
             "control_center.api.routes_sessions_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.TimeoutException("timed out")),
@@ -133,6 +155,8 @@ class TestListMySessionsProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 503)
 
     def test_non_json_upstream_response_handled(self) -> None:
+        """A non-JSON upstream response body maps to a 500 error naming
+        "non-JSON" rather than propagating the parse exception."""
         upstream = _mock_response(500, raise_json_error=True)
         with patch("control_center.api.routes_sessions_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/sessions", headers={"Authorization": "Bearer tok"})
@@ -140,12 +164,15 @@ class TestListMySessionsProxy(unittest.TestCase):
         self.assertIn("non-JSON", resp.json()["error"])
 
     def test_upstream_5xx_is_forwarded(self) -> None:
+        """A 500 from the upstream auth-service is relayed as a 500."""
         upstream = _mock_response(500, {"detail": "Internal Server Error"})
         with patch("control_center.api.routes_sessions_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/sessions", headers={"Authorization": "Bearer tok"})
         self.assertEqual(resp.status_code, 500)
 
     def test_empty_upstream_body_preserved(self) -> None:
+        """An empty (b"") upstream body with no content to parse passes
+        through as an empty body."""
         upstream = MagicMock()
         upstream.status_code = 200
         upstream.content = b""
@@ -158,7 +185,12 @@ class TestListMySessionsProxy(unittest.TestCase):
 
 
 class TestGetMySessionProxy(unittest.TestCase):
+    """GET /sessions/{session_id}'s thin-relay behavior, including the
+    ownership boundary enforced entirely upstream."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged,
+        and the path's session_id reaches the upstream URL."""
         upstream = _mock_response(200, _SESSION)
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_sessions_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -169,6 +201,9 @@ class TestGetMySessionProxy(unittest.TestCase):
         self.assertTrue(forwarded_path.endswith(f"/sessions/{_SESSION['session_id']}"))
 
     def test_other_users_session_id_is_not_exposed(self) -> None:
+        """A session_id belonging to another user is relayed as
+        upstream's own 404 (ownership enforced server-side), never
+        substituted with a different session or leaked in the body."""
         # The proxy relays exactly whatever omnibioai-auth returns for
         # this session_id -- since that endpoint 404s a session_id that
         # doesn't belong to the caller (Phase 4 PR-A, ownership enforced
@@ -181,6 +216,7 @@ class TestGetMySessionProxy(unittest.TestCase):
         self.assertNotIn("session_id", resp.text)
 
     def test_upstream_404_for_unknown_session_id(self) -> None:
+        """A 404 for a genuinely nonexistent session_id is relayed as a 404."""
         upstream = _mock_response(404, {"detail": "Session not found"})
         with patch("control_center.api.routes_sessions_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/sessions/does-not-exist", headers={"Authorization": "Bearer tok"})
@@ -188,7 +224,12 @@ class TestGetMySessionProxy(unittest.TestCase):
 
 
 class TestRevokeMySessionProxy(unittest.TestCase):
+    """POST /sessions/{session_id}/revoke's thin-relay behavior,
+    including its ownership boundary and idempotence."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful revoke response's body is relayed, and the
+        POST method/path reach the upstream call correctly."""
         revoked = {**_SESSION, "status": "revoked", "revoked_reason": "user_revoked", "revoked_at": "2026-08-09T00:05:00"}
         upstream = _mock_response(200, revoked)
         mock_ctx = _mock_async_client(upstream)
@@ -202,6 +243,8 @@ class TestRevokeMySessionProxy(unittest.TestCase):
         self.assertTrue(forwarded_path.endswith(f"/sessions/{_SESSION['session_id']}/revoke"))
 
     def test_forwards_authorization_header(self) -> None:
+        """The caller's Authorization header is forwarded to the
+        upstream revoke call unchanged."""
         upstream = _mock_response(200, {**_SESSION, "status": "revoked"})
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_sessions_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -210,6 +253,8 @@ class TestRevokeMySessionProxy(unittest.TestCase):
         self.assertEqual(call_kwargs["headers"]["Authorization"], "Bearer owner-token")
 
     def test_cannot_revoke_another_users_session(self) -> None:
+        """Revoking a session_id belonging to another user is relayed
+        as upstream's own 404, never turned into a success."""
         # Same ownership boundary as the GET case -- omnibioai-auth 404s
         # a revoke attempt against a session_id the caller doesn't own;
         # this proxy must not turn that into a success or otherwise
@@ -220,6 +265,9 @@ class TestRevokeMySessionProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 404)
 
     def test_revoke_is_idempotent_through_the_proxy(self) -> None:
+        """Revoking an already-revoked session twice through the proxy
+        returns 200 both times with the same revoked_at, with no extra
+        special-casing added by this proxy layer."""
         # Revoking an already-revoked session is a safe 200 no-op
         # upstream (Phase 4 PR-A) -- confirm the proxy doesn't add any
         # special-casing (e.g. erroring on a second call) of its own.
@@ -233,6 +281,7 @@ class TestRevokeMySessionProxy(unittest.TestCase):
         self.assertEqual(second.json()["revoked_at"], first.json()["revoked_at"])
 
     def test_auth_service_unreachable_returns_503(self) -> None:
+        """A connection failure to the auth-service returns 503."""
         with patch(
             "control_center.api.routes_sessions_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
@@ -241,6 +290,7 @@ class TestRevokeMySessionProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 503)
 
     def test_get_method_not_allowed_on_revoke_path(self) -> None:
+        """GET on the revoke path returns 405 -- only POST is registered."""
         resp = client.get(f"/sessions/{_SESSION['session_id']}/revoke", headers={"Authorization": "Bearer tok"})
         self.assertEqual(resp.status_code, 405)
 

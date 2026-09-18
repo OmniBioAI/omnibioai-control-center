@@ -11,6 +11,9 @@ are a thin relay, no authorization decision is made here (that's
 entirely omnibioai-tes's own job, via require_permission(WORKFLOW_EXECUTE)
 for /runs, unauthenticated for /tools per api/routes_tools.py). All four
 routes are GET-only.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -27,6 +30,8 @@ client = TestClient(app)
 
 
 def _mock_response(status_code: int, json_body=None, raise_json_error: bool = False) -> MagicMock:
+    """A MagicMock httpx.Response stand-in; raise_json_error makes
+    .json() raise ValueError instead of returning json_body."""
     resp = MagicMock()
     resp.status_code = status_code
     if raise_json_error:
@@ -37,6 +42,8 @@ def _mock_response(status_code: int, json_body=None, raise_json_error: bool = Fa
 
 
 def _mock_async_client(response: MagicMock | None = None, side_effect=None):
+    """An async-context-manager mock of httpx.AsyncClient whose .get()
+    returns `response`, or raises `side_effect` if given."""
     mock_client = MagicMock()
     mock_get = AsyncMock()
     if side_effect is not None:
@@ -58,7 +65,11 @@ _RUN_DETAIL_OUT = {"run_id": "r-1", "tool_id": "fastqc", "state": "RUNNING", "or
 
 
 class TestListToolsProxy(unittest.TestCase):
+    """GET /tes/tools's thin-relay behavior: success passthrough, optional
+    auth (unauthenticated upstream), and fail-safe error mapping."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged."""
         upstream = _mock_response(200, _TOOLS_OUT)
         with patch("control_center.api.routes_tes_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/tes/tools")
@@ -66,6 +77,8 @@ class TestListToolsProxy(unittest.TestCase):
         self.assertEqual(resp.json(), _TOOLS_OUT)
 
     def test_works_without_authorization_header(self) -> None:
+        """No Authorization header still succeeds -- nothing is
+        forwarded, since /api/tools is unauthenticated upstream."""
         # /api/tools is unauthenticated upstream -- no Authorization
         # header should still be forwarded successfully (nothing to
         # forward, not an error).
@@ -78,6 +91,8 @@ class TestListToolsProxy(unittest.TestCase):
         self.assertNotIn("Authorization", call_kwargs["headers"])
 
     def test_tes_service_unreachable_returns_503(self) -> None:
+        """A connection failure to TES returns 503 with a "tes-service
+        unreachable" message."""
         with patch(
             "control_center.api.routes_tes_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
@@ -87,6 +102,8 @@ class TestListToolsProxy(unittest.TestCase):
         self.assertIn("tes-service unreachable", resp.json()["error"])
 
     def test_non_json_upstream_response_handled(self) -> None:
+        """A non-JSON upstream response body maps to a 500 error naming
+        "non-JSON" rather than propagating the parse exception."""
         upstream = _mock_response(500, raise_json_error=True)
         with patch("control_center.api.routes_tes_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/tes/tools")
@@ -95,7 +112,10 @@ class TestListToolsProxy(unittest.TestCase):
 
 
 class TestToolsCapabilitiesProxy(unittest.TestCase):
+    """GET /tes/tools/capabilities's thin-relay behavior."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged."""
         upstream = _mock_response(200, _CAPABILITIES_OUT)
         with patch("control_center.api.routes_tes_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/tes/tools/capabilities")
@@ -104,7 +124,11 @@ class TestToolsCapabilitiesProxy(unittest.TestCase):
 
 
 class TestListRunsProxy(unittest.TestCase):
+    """GET /tes/runs's thin-relay behavior, including the auth/permission
+    statuses TES itself enforces (unlike the unauthenticated /tools route)."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged."""
         upstream = _mock_response(200, _RUNS_OUT)
         with patch("control_center.api.routes_tes_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/tes/runs", headers={"Authorization": "Bearer tok"})
@@ -112,6 +136,8 @@ class TestListRunsProxy(unittest.TestCase):
         self.assertEqual(resp.json(), _RUNS_OUT)
 
     def test_forwards_authorization_header(self) -> None:
+        """The caller's Authorization header is forwarded to the
+        upstream TES call unchanged."""
         upstream = _mock_response(200, _RUNS_OUT)
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_tes_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -120,18 +146,21 @@ class TestListRunsProxy(unittest.TestCase):
         self.assertEqual(call_kwargs["headers"]["Authorization"], "Bearer my-token-123")
 
     def test_forwards_401_for_missing_permission(self) -> None:
+        """A missing-token 401 from TES is relayed as a 401."""
         upstream = _mock_response(401, {"detail": "Not authenticated"})
         with patch("control_center.api.routes_tes_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/tes/runs")
         self.assertEqual(resp.status_code, 401)
 
     def test_forwards_403_for_missing_workflow_execute_permission(self) -> None:
+        """A 403 from TES (missing WORKFLOW_EXECUTE) is relayed as a 403."""
         upstream = _mock_response(403, {"detail": "Forbidden"})
         with patch("control_center.api.routes_tes_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/tes/runs", headers={"Authorization": "Bearer tok"})
         self.assertEqual(resp.status_code, 403)
 
     def test_tes_service_unreachable_returns_503(self) -> None:
+        """A connection failure to TES returns 503."""
         with patch(
             "control_center.api.routes_tes_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
@@ -141,7 +170,11 @@ class TestListRunsProxy(unittest.TestCase):
 
 
 class TestGetRunProxy(unittest.TestCase):
+    """GET /tes/runs/{run_id}'s thin-relay behavior, including the
+    run_id path forwarding and the not-found-for-wrong-org convention."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged."""
         upstream = _mock_response(200, _RUN_DETAIL_OUT)
         with patch("control_center.api.routes_tes_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/tes/runs/r-1", headers={"Authorization": "Bearer tok"})
@@ -149,6 +182,8 @@ class TestGetRunProxy(unittest.TestCase):
         self.assertEqual(resp.json()["run_id"], "r-1")
 
     def test_forwards_run_id_in_path(self) -> None:
+        """The path's run_id segment is forwarded into the upstream
+        request URL."""
         upstream = _mock_response(200, _RUN_DETAIL_OUT)
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_tes_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -157,6 +192,9 @@ class TestGetRunProxy(unittest.TestCase):
         self.assertTrue(call_args.args[0].endswith("/api/runs/r-42"))
 
     def test_forwards_404_for_run_in_different_org(self) -> None:
+        """A run belonging to a different org is relayed as 404
+        (TES's deliberate not-found-for-wrong-org convention, avoiding
+        an enumeration oracle -- this proxy just relays it)."""
         # TES treats a wrong-org run identically to "not found" (_require_
         # same_org raises KeyError -> 404), deliberately not a 403, to
         # avoid an enumeration oracle -- this proxy just relays that.

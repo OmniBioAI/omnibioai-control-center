@@ -14,6 +14,9 @@ called, the Authorization header is forwarded, query params are
 forwarded, and upstream status/body/unreachable/non-JSON cases are
 relayed unchanged -- the same four things test_routes_auth_proxy.py
 already proves for /auth/login and /auth/validate.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -30,6 +33,8 @@ client = TestClient(app)
 
 
 def _mock_response(status_code: int, json_body=None, raise_json_error: bool = False) -> MagicMock:
+    """A MagicMock httpx.Response stand-in; raise_json_error makes
+    .json() raise ValueError instead of returning json_body."""
     resp = MagicMock()
     resp.status_code = status_code
     if raise_json_error:
@@ -40,6 +45,8 @@ def _mock_response(status_code: int, json_body=None, raise_json_error: bool = Fa
 
 
 def _mock_async_client(response: MagicMock = None, side_effect=None):
+    """An async-context-manager mock of httpx.AsyncClient whose
+    .request() returns `response`, or raises `side_effect` if given."""
     mock_client = MagicMock()
     mock_request = AsyncMock()
     if side_effect is not None:
@@ -55,7 +62,10 @@ def _mock_async_client(response: MagicMock = None, side_effect=None):
 
 
 class TestListMyOrgsProxy(unittest.TestCase):
+    """GET /orgs's thin-relay behavior for the caller's own orgs list."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged."""
         upstream = _mock_response(200, [{"id": 1, "slug": "acme", "name": "Acme", "plan": "beta", "status": "active"}])
         with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/orgs", headers={"Authorization": "Bearer tok"})
@@ -63,6 +73,8 @@ class TestListMyOrgsProxy(unittest.TestCase):
         self.assertEqual(resp.json()[0]["slug"], "acme")
 
     def test_forwards_authorization_header(self) -> None:
+        """The caller's Authorization header is forwarded to the
+        upstream auth-service call unchanged."""
         upstream = _mock_response(200, [])
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -83,6 +95,8 @@ class TestListMyOrgsProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 401)
 
     def test_auth_service_unreachable_returns_503(self) -> None:
+        """A connection failure to the auth-service returns 503 with an
+        "auth-service unreachable" message."""
         with patch(
             "control_center.api.routes_org_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
@@ -93,7 +107,11 @@ class TestListMyOrgsProxy(unittest.TestCase):
 
 
 class TestCreateOrgProxy(unittest.TestCase):
+    """POST /orgs's thin-relay behavior."""
+
     def test_forwards_post_body_and_status(self) -> None:
+        """The POST body/method reach the upstream call, and the
+        created status is relayed."""
         upstream = _mock_response(201, {"id": 1, "slug": "acme", "name": "Acme", "plan": "beta", "status": "active"})
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -106,6 +124,7 @@ class TestCreateOrgProxy(unittest.TestCase):
         self.assertIn(b'"acme"', call_args.kwargs["content"])
 
     def test_forwards_409_for_duplicate_slug(self) -> None:
+        """A 409 for a duplicate slug is relayed as a 409."""
         upstream = _mock_response(409, {"detail": "Organization slug already exists"})
         with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post(
@@ -115,7 +134,10 @@ class TestCreateOrgProxy(unittest.TestCase):
 
 
 class TestGetOrgProxy(unittest.TestCase):
+    """GET /orgs/{org_id}'s thin-relay behavior."""
+
     def test_forwards_org_id_in_path(self) -> None:
+        """The path's org_id segment is forwarded into the upstream URL."""
         upstream = _mock_response(200, {"id": 42, "slug": "acme", "name": "Acme", "plan": "beta", "status": "active"})
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -126,12 +148,15 @@ class TestGetOrgProxy(unittest.TestCase):
         self.assertTrue(call_args.args[1].endswith("/orgs/42"))
 
     def test_forwards_404_unchanged(self) -> None:
+        """A 404 for a nonexistent org is relayed as a 404."""
         upstream = _mock_response(404, {"detail": "Organization not found"})
         with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/orgs/999999", headers={"Authorization": "Bearer tok"})
         self.assertEqual(resp.status_code, 404)
 
     def test_non_json_upstream_response_handled(self) -> None:
+        """A non-JSON upstream response body maps to a 500 error naming
+        "non-JSON" rather than propagating the parse exception."""
         upstream = _mock_response(500, raise_json_error=True)
         with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/orgs/1", headers={"Authorization": "Bearer tok"})
@@ -140,7 +165,10 @@ class TestGetOrgProxy(unittest.TestCase):
 
 
 class TestUpdateOrgProxy(unittest.TestCase):
+    """PATCH /orgs/{org_id}'s thin-relay behavior."""
+
     def test_forwards_patch_body_and_method(self) -> None:
+        """The PATCH method and JSON body reach the upstream call unchanged."""
         upstream = _mock_response(200, {"id": 1, "status": "suspended"})
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -153,6 +181,7 @@ class TestUpdateOrgProxy(unittest.TestCase):
         self.assertIn(b'"suspended"', call_args.kwargs["content"])
 
     def test_forwards_403_unchanged(self) -> None:
+        """A 403 (only platform admins can change org status) is relayed as a 403."""
         upstream = _mock_response(403, {"detail": "Only platform admins can change organization status"})
         with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.patch(
@@ -162,7 +191,11 @@ class TestUpdateOrgProxy(unittest.TestCase):
 
 
 class TestListPlatformOrgsProxy(unittest.TestCase):
+    """GET /platform/orgs's thin-relay behavior."""
+
     def test_forwards_query_params(self) -> None:
+        """page/page_size/search/sort_by/sort_order query params are
+        all forwarded to the upstream request."""
         upstream = _mock_response(200, {"items": [], "total": 0, "page": 2, "page_size": 10, "total_pages": 0})
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -178,6 +211,7 @@ class TestListPlatformOrgsProxy(unittest.TestCase):
         self.assertEqual(forwarded_params["sort_by"], "name")
 
     def test_forwards_403_for_non_platform_admin(self) -> None:
+        """A 403 from the upstream auth-service is relayed as a 403."""
         upstream = _mock_response(403, {"detail": "Forbidden"})
         with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/platform/orgs", headers={"Authorization": "Bearer org-admin-token"})
@@ -185,7 +219,10 @@ class TestListPlatformOrgsProxy(unittest.TestCase):
 
 
 class TestGetPlatformOrgProxy(unittest.TestCase):
+    """GET /platform/orgs/{org_id}'s thin-relay behavior."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged."""
         upstream = _mock_response(200, {"id": 7, "slug": "acme", "member_summary": {"total": 3}})
         with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/platform/orgs/7", headers={"Authorization": "Bearer tok"})
@@ -193,6 +230,7 @@ class TestGetPlatformOrgProxy(unittest.TestCase):
         self.assertEqual(resp.json()["id"], 7)
 
     def test_forwards_404_for_nonexistent_org(self) -> None:
+        """A 404 for a nonexistent org is relayed as a 404."""
         upstream = _mock_response(404, {"detail": "Organization not found"})
         with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/platform/orgs/999999", headers={"Authorization": "Bearer tok"})
@@ -205,6 +243,7 @@ class TestListOrgMembersProxy(unittest.TestCase):
     endpoint itself is Phase 1, unmodified; only the proxy route is new."""
 
     def test_forwards_success_response(self) -> None:
+        """A successful upstream member-list response is relayed unchanged."""
         upstream = _mock_response(200, [{"user_id": 1, "email": "a@b.com", "status": "active", "roles": ["org_admin"]}])
         with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/orgs/7/members", headers={"Authorization": "Bearer tok"})
@@ -212,6 +251,7 @@ class TestListOrgMembersProxy(unittest.TestCase):
         self.assertEqual(resp.json()[0]["roles"], ["org_admin"])
 
     def test_forwards_org_id_in_path(self) -> None:
+        """The path's org_id segment is forwarded into the upstream URL."""
         upstream = _mock_response(200, [])
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -220,12 +260,14 @@ class TestListOrgMembersProxy(unittest.TestCase):
         self.assertTrue(call_args.args[1].endswith("/orgs/42/members"))
 
     def test_forwards_403_for_non_member(self) -> None:
+        """A 403 for a caller who isn't a member of the org is relayed as a 403."""
         upstream = _mock_response(403, {"detail": "Forbidden"})
         with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/orgs/7/members", headers={"Authorization": "Bearer tok"})
         self.assertEqual(resp.status_code, 403)
 
     def test_forwards_404_for_nonmember_org(self) -> None:
+        """A 404 for a nonexistent org is relayed as a 404."""
         upstream = _mock_response(404, {"detail": "Organization not found"})
         with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/orgs/999999/members", headers={"Authorization": "Bearer tok"})
