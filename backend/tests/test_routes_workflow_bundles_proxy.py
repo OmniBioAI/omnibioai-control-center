@@ -26,6 +26,9 @@ through it completely unchanged, organization_id included, with no
 control-center-side filtering added. Adding such filtering here would
 itself violate this PR's own rule against duplicating/inventing
 authorization logic outside the service that owns it.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -42,6 +45,8 @@ client = TestClient(app)
 
 
 def _mock_response(status_code: int, json_body=None, raise_json_error: bool = False) -> MagicMock:
+    """A MagicMock httpx.Response stand-in; raise_json_error makes
+    .json() raise ValueError instead of returning json_body."""
     resp = MagicMock()
     resp.status_code = status_code
     if raise_json_error:
@@ -52,6 +57,8 @@ def _mock_response(status_code: int, json_body=None, raise_json_error: bool = Fa
 
 
 def _mock_async_client(response: MagicMock | None = None, side_effect=None):
+    """An async-context-manager mock of httpx.AsyncClient whose .get()
+    returns `response`, or raises `side_effect` if given."""
     mock_client = MagicMock()
     mock_get = AsyncMock()
     if side_effect is not None:
@@ -93,7 +100,11 @@ _RUN_DETAIL_OUT = {"run_id": "r-1", "workflow_id": 1, "workflow_name": "star-sal
 
 
 class TestListWorkflowsProxy(unittest.TestCase):
+    """GET /workflow-bundles/workflows's thin-relay behavior, gated
+    upstream by workflow.read."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged."""
         upstream = _mock_response(200, _WORKFLOWS_OUT)
         with patch("control_center.api.routes_workflow_bundles_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/workflow-bundles/workflows", headers={"Authorization": "Bearer tok"})
@@ -101,6 +112,8 @@ class TestListWorkflowsProxy(unittest.TestCase):
         self.assertEqual(resp.json(), _WORKFLOWS_OUT)
 
     def test_forwards_authorization_header(self) -> None:
+        """The caller's Authorization header is forwarded to the
+        upstream call unchanged."""
         upstream = _mock_response(200, _WORKFLOWS_OUT)
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_workflow_bundles_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -109,18 +122,22 @@ class TestListWorkflowsProxy(unittest.TestCase):
         self.assertEqual(call_kwargs["headers"]["Authorization"], "Bearer my-token-123")
 
     def test_forwards_401_for_missing_token(self) -> None:
+        """A 401 for a missing token is relayed as a 401."""
         upstream = _mock_response(401, {"detail": "Missing or malformed Authorization header"})
         with patch("control_center.api.routes_workflow_bundles_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/workflow-bundles/workflows")
         self.assertEqual(resp.status_code, 401)
 
     def test_forwards_403_for_missing_workflow_read_permission(self) -> None:
+        """A 403 for a token missing workflow.read is relayed as a 403."""
         upstream = _mock_response(403, {"detail": "Missing required permission: workflow.read"})
         with patch("control_center.api.routes_workflow_bundles_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/workflow-bundles/workflows", headers={"Authorization": "Bearer tok"})
         self.assertEqual(resp.status_code, 403)
 
     def test_workflow_bundles_service_unreachable_returns_503(self) -> None:
+        """A connection failure to workflow-bundles returns 503 with a
+        "workflow-bundles-service unreachable" message."""
         with patch(
             "control_center.api.routes_workflow_bundles_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
@@ -130,6 +147,8 @@ class TestListWorkflowsProxy(unittest.TestCase):
         self.assertIn("workflow-bundles-service unreachable", resp.json()["error"])
 
     def test_non_json_upstream_response_handled(self) -> None:
+        """A non-JSON upstream response body maps to a 500 error naming
+        "non-JSON" rather than propagating the parse exception."""
         upstream = _mock_response(500, raise_json_error=True)
         with patch("control_center.api.routes_workflow_bundles_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/workflow-bundles/workflows", headers={"Authorization": "Bearer tok"})
@@ -138,7 +157,10 @@ class TestListWorkflowsProxy(unittest.TestCase):
 
 
 class TestGetWorkflowVersionsProxy(unittest.TestCase):
+    """GET /workflow-bundles/workflows/{name}'s thin-relay behavior."""
+
     def test_forwards_name_in_path(self) -> None:
+        """The path's workflow name is forwarded into the upstream URL."""
         upstream = _mock_response(200, _WORKFLOWS_OUT)
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_workflow_bundles_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -147,6 +169,7 @@ class TestGetWorkflowVersionsProxy(unittest.TestCase):
         self.assertTrue(call_args.args[0].endswith("/v1/workflows/star-salmon"))
 
     def test_forwards_404_for_unknown_workflow(self) -> None:
+        """A 404 for an unknown workflow name is relayed as a 404."""
         upstream = _mock_response(404, {"detail": "No workflow named 'bogus'"})
         with patch("control_center.api.routes_workflow_bundles_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/workflow-bundles/workflows/bogus", headers={"Authorization": "Bearer tok"})
@@ -154,7 +177,10 @@ class TestGetWorkflowVersionsProxy(unittest.TestCase):
 
 
 class TestListCategoriesProxy(unittest.TestCase):
+    """GET /workflow-bundles/categories's thin-relay behavior."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged."""
         upstream = _mock_response(200, _CATEGORIES_OUT)
         with patch("control_center.api.routes_workflow_bundles_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/workflow-bundles/categories", headers={"Authorization": "Bearer tok"})
@@ -163,7 +189,10 @@ class TestListCategoriesProxy(unittest.TestCase):
 
 
 class TestGetWorkflowInputsProxy(unittest.TestCase):
+    """GET /workflow-bundles/workflows/{id}/inputs's thin-relay behavior."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged."""
         upstream = _mock_response(200, _INPUTS_OUT)
         with patch("control_center.api.routes_workflow_bundles_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/workflow-bundles/workflows/1/inputs", headers={"Authorization": "Bearer tok"})
@@ -171,6 +200,7 @@ class TestGetWorkflowInputsProxy(unittest.TestCase):
         self.assertEqual(resp.json()["manifest"]["name"], "star-salmon")
 
     def test_forwards_workflow_id_in_path(self) -> None:
+        """The path's workflow id is forwarded into the upstream URL."""
         upstream = _mock_response(200, _INPUTS_OUT)
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_workflow_bundles_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -180,7 +210,11 @@ class TestGetWorkflowInputsProxy(unittest.TestCase):
 
 
 class TestListRunsProxy(unittest.TestCase):
+    """GET /workflow-bundles/runs's thin-relay behavior, gated upstream
+    by workflow.execute, and its deliberate lack of org-side filtering."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged."""
         upstream = _mock_response(200, _RUNS_OUT)
         with patch("control_center.api.routes_workflow_bundles_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/workflow-bundles/runs", headers={"Authorization": "Bearer tok"})
@@ -188,6 +222,8 @@ class TestListRunsProxy(unittest.TestCase):
         self.assertEqual(resp.json(), _RUNS_OUT)
 
     def test_forwards_authorization_header(self) -> None:
+        """The caller's Authorization header is forwarded to the
+        upstream call unchanged."""
         upstream = _mock_response(200, _RUNS_OUT)
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_workflow_bundles_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -196,12 +232,17 @@ class TestListRunsProxy(unittest.TestCase):
         self.assertEqual(call_kwargs["headers"]["Authorization"], "Bearer my-token-123")
 
     def test_forwards_403_for_missing_workflow_execute_permission(self) -> None:
+        """A 403 for a token missing workflow.execute is relayed as a 403."""
         upstream = _mock_response(403, {"detail": "Missing required permission: workflow.execute"})
         with patch("control_center.api.routes_workflow_bundles_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/workflow-bundles/runs", headers={"Authorization": "Bearer tok"})
         self.assertEqual(resp.status_code, 403)
 
     def test_multi_organization_response_passes_through_unfiltered(self) -> None:
+        """A response spanning multiple organizations comes back
+        through this proxy exactly as-is -- this proxy never filters,
+        groups, or reshapes by organization_id, since that would
+        duplicate authorization logic that belongs entirely upstream."""
         # The key behavioral guarantee for this endpoint: this proxy does
         # NOT filter, group, or otherwise reshape the upstream payload by
         # organization_id -- a response spanning multiple orgs (as GET
@@ -219,6 +260,7 @@ class TestListRunsProxy(unittest.TestCase):
         self.assertEqual({r["organization_id"] for r in body}, {3, 7})
 
     def test_workflow_bundles_service_unreachable_returns_503(self) -> None:
+        """A connection failure to workflow-bundles returns 503."""
         with patch(
             "control_center.api.routes_workflow_bundles_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
@@ -228,7 +270,12 @@ class TestListRunsProxy(unittest.TestCase):
 
 
 class TestGetRunProxy(unittest.TestCase):
+    """GET /workflow-bundles/runs/{run_id}'s thin-relay behavior."""
+
     def test_forwards_success_response_including_organization_id(self) -> None:
+        """The response's organization_id is rendered straight from
+        upstream -- never derived, computed, or checked against the
+        caller's own identity by this proxy."""
         # organization_id is rendered straight from the upstream response
         # -- not derived, computed, or checked against the caller's own
         # identity anywhere in this file.
@@ -239,6 +286,7 @@ class TestGetRunProxy(unittest.TestCase):
         self.assertEqual(resp.json()["organization_id"], 3)
 
     def test_forwards_run_id_in_path(self) -> None:
+        """The path's run_id segment is forwarded into the upstream URL."""
         upstream = _mock_response(200, _RUN_DETAIL_OUT)
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_workflow_bundles_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -247,6 +295,7 @@ class TestGetRunProxy(unittest.TestCase):
         self.assertTrue(call_args.args[0].endswith("/v1/runs/r-42"))
 
     def test_forwards_404_for_unknown_run(self) -> None:
+        """A 404 for an unknown run_id is relayed as a 404."""
         upstream = _mock_response(404, {"detail": "Run r-999 not found"})
         with patch("control_center.api.routes_workflow_bundles_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/workflow-bundles/runs/r-999", headers={"Authorization": "Bearer tok"})

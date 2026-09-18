@@ -2,7 +2,17 @@
 tests/test_routes_auth_proxy.py
 
 Unit tests for:
-  - control_center.api.routes_auth_proxy  (POST /auth/login, /auth/validate)
+  - control_center.api.routes_auth_proxy  (POST /auth/login, /auth/validate,
+    /auth/refresh, /auth/logout, /auth/switch-team)
+
+Covers each route's success/error/upstream-unreachable relay through
+_proxy_to_auth, request-body forwarding, the omnibioai_session
+Set-Cookie/Cookie relay in both directions, /auth/logout's
+cookie-vs-body refresh_token injection priority, and IAM_URL's
+environment-driven default.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -24,6 +34,7 @@ def _mock_response(
     raise_json_error: bool = False,
     set_cookies: list[str] | None = None,
 ) -> MagicMock:
+    """A mock httpx.Response with the given status/json body/Set-Cookie headers, optionally raising on .json()."""
     resp = MagicMock()
     resp.status_code = status_code
     if raise_json_error:
@@ -36,6 +47,7 @@ def _mock_response(
 
 
 def _mock_async_client(response: MagicMock = None, side_effect=None):
+    """A mock async context manager whose __aenter__ yields a client whose .post() resolves to `response` or raises `side_effect`."""
     mock_client = MagicMock()
     mock_post = AsyncMock()
     if side_effect is not None:
@@ -51,8 +63,10 @@ def _mock_async_client(response: MagicMock = None, side_effect=None):
 
 
 class TestAuthLoginProxy(unittest.TestCase):
+    """POST /auth/login's relay of success/error/unreachable/non-JSON upstream responses, and its request-body forwarding."""
 
     def test_forwards_success_response(self) -> None:
+        """A successful upstream login response is relayed through with its access_token intact."""
         upstream = _mock_response(200, {"access_token": "tok", "refresh_token": "rtok", "token_type": "bearer"})
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post("/auth/login", json={"email": "a@b.com", "password": "x"})
@@ -60,6 +74,7 @@ class TestAuthLoginProxy(unittest.TestCase):
         self.assertEqual(resp.json()["access_token"], "tok")
 
     def test_forwards_upstream_error_status(self) -> None:
+        """A 401 invalid-credentials response from auth-service is relayed through unchanged."""
         upstream = _mock_response(401, {"detail": "Invalid credentials"})
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post("/auth/login", json={"email": "a@b.com", "password": "wrong"})
@@ -67,6 +82,7 @@ class TestAuthLoginProxy(unittest.TestCase):
         self.assertEqual(resp.json()["detail"], "Invalid credentials")
 
     def test_auth_service_unreachable_returns_503(self) -> None:
+        """A connection failure to auth-service returns 503 with an "auth-service unreachable" message."""
         with patch(
             "control_center.api.routes_auth_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
@@ -76,6 +92,7 @@ class TestAuthLoginProxy(unittest.TestCase):
         self.assertIn("auth-service unreachable", resp.json()["error"])
 
     def test_non_json_upstream_response_handled(self) -> None:
+        """A non-JSON upstream response body is handled gracefully, surfacing a "non-JSON" error message."""
         upstream = _mock_response(500, raise_json_error=True)
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post("/auth/login", json={"email": "a@b.com", "password": "x"})
@@ -83,6 +100,7 @@ class TestAuthLoginProxy(unittest.TestCase):
         self.assertIn("non-JSON", resp.json()["error"])
 
     def test_forwards_request_body_unchanged(self) -> None:
+        """The incoming login body (email/password) is forwarded to auth-service unchanged."""
         upstream = _mock_response(200, {"access_token": "tok"})
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -92,8 +110,10 @@ class TestAuthLoginProxy(unittest.TestCase):
 
 
 class TestAuthValidateProxy(unittest.TestCase):
+    """POST /auth/validate's relay of a valid/invalid token check and its unreachable-upstream handling."""
 
     def test_forwards_success_response(self) -> None:
+        """A valid-token response's roles/permissions are relayed through unchanged."""
         upstream = _mock_response(200, {"valid": True, "user_id": 1, "roles": ["admin"], "permissions": ["manage_roles"]})
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post("/auth/validate", json={"token": "sometoken"})
@@ -101,6 +121,7 @@ class TestAuthValidateProxy(unittest.TestCase):
         self.assertEqual(resp.json()["roles"], ["admin"])
 
     def test_invalid_token_forwarded(self) -> None:
+        """An invalid-token result (valid: False, still HTTP 200) is relayed through as-is."""
         upstream = _mock_response(200, {"valid": False})
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post("/auth/validate", json={"token": "garbage"})
@@ -108,6 +129,7 @@ class TestAuthValidateProxy(unittest.TestCase):
         self.assertFalse(resp.json()["valid"])
 
     def test_auth_service_unreachable_returns_503(self) -> None:
+        """A connection failure to auth-service returns 503."""
         with patch(
             "control_center.api.routes_auth_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
@@ -121,6 +143,7 @@ class TestAuthRefreshProxy(unittest.TestCase):
     production before this route existed."""
 
     def test_request_reaches_auth_service_at_correct_path(self) -> None:
+        """The refresh request is forwarded to auth-service at the /auth/refresh path."""
         upstream = _mock_response(200, {"access_token": "new-tok", "refresh_token": "new-rtok"})
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -129,6 +152,7 @@ class TestAuthRefreshProxy(unittest.TestCase):
         self.assertEqual(call_args.args[0], "http://auth-service:8001/auth/refresh")
 
     def test_successful_response_returned(self) -> None:
+        """A successful refresh response's new tokens are relayed through unchanged."""
         upstream = _mock_response(200, {"access_token": "new-tok", "refresh_token": "new-rtok"})
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post("/auth/refresh", json={"refresh_token": "old-rtok"})
@@ -136,6 +160,7 @@ class TestAuthRefreshProxy(unittest.TestCase):
         self.assertEqual(resp.json()["access_token"], "new-tok")
 
     def test_failure_response_propagated(self) -> None:
+        """A 401 invalid-refresh-token response is relayed through unchanged."""
         upstream = _mock_response(401, {"detail": "Invalid refresh token"})
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post("/auth/refresh", json={"refresh_token": "expired"})
@@ -143,6 +168,7 @@ class TestAuthRefreshProxy(unittest.TestCase):
         self.assertEqual(resp.json()["detail"], "Invalid refresh token")
 
     def test_auth_service_unreachable_returns_503(self) -> None:
+        """A connection failure to auth-service returns 503."""
         with patch(
             "control_center.api.routes_auth_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
@@ -151,6 +177,7 @@ class TestAuthRefreshProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 503)
 
     def test_forwards_request_body_unchanged(self) -> None:
+        """The incoming refresh_token value is forwarded to auth-service unchanged."""
         upstream = _mock_response(200, {"access_token": "tok"})
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -164,6 +191,7 @@ class TestAuthLogoutProxy(unittest.TestCase):
     production before this route existed."""
 
     def test_request_reaches_auth_service_at_correct_path(self) -> None:
+        """The logout request is forwarded to auth-service at the /auth/logout path."""
         upstream = _mock_response(200, {"message": "Logged out"})
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -172,6 +200,7 @@ class TestAuthLogoutProxy(unittest.TestCase):
         self.assertEqual(call_args.args[0], "http://auth-service:8001/auth/logout")
 
     def test_successful_logout_response_returned(self) -> None:
+        """A successful logout response is relayed through unchanged."""
         upstream = _mock_response(200, {"message": "Logged out"})
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post("/auth/logout", json={"refresh_token": "rtok", "access_token": "atok"})
@@ -179,6 +208,7 @@ class TestAuthLogoutProxy(unittest.TestCase):
         self.assertEqual(resp.json()["message"], "Logged out")
 
     def test_failure_response_propagated(self) -> None:
+        """A 400 malformed-request response is relayed through unchanged."""
         upstream = _mock_response(400, {"detail": "Malformed request"})
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post("/auth/logout", json={})
@@ -186,6 +216,7 @@ class TestAuthLogoutProxy(unittest.TestCase):
         self.assertEqual(resp.json()["detail"], "Malformed request")
 
     def test_auth_service_unreachable_returns_503(self) -> None:
+        """A connection failure to auth-service returns 503."""
         with patch(
             "control_center.api.routes_auth_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
@@ -202,6 +233,7 @@ class TestSwitchTeamProxy(unittest.TestCase):
     shape exactly."""
 
     def test_request_reaches_auth_service_at_correct_path(self) -> None:
+        """The switch-team request is forwarded to auth-service at the /auth/switch-team path."""
         upstream = _mock_response(200, {"access_token": "new-tok", "refresh_token": "new-rtok"})
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -210,6 +242,7 @@ class TestSwitchTeamProxy(unittest.TestCase):
         self.assertEqual(call_args.args[0], "http://auth-service:8001/auth/switch-team")
 
     def test_successful_response_returned(self) -> None:
+        """A successful switch-team response's new tokens are relayed through unchanged."""
         upstream = _mock_response(200, {"access_token": "new-tok", "refresh_token": "new-rtok"})
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post("/auth/switch-team", json={"team_id": 7})
@@ -228,6 +261,7 @@ class TestSwitchTeamProxy(unittest.TestCase):
         self.assertIn(b'"team_id":null', call_kwargs["content"].replace(b" ", b""))
 
     def test_denied_response_propagated(self) -> None:
+        """A 403 not-a-member response is relayed through unchanged."""
         upstream = _mock_response(403, {"detail": "Not a member of this team"})
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post("/auth/switch-team", json={"team_id": 999})
@@ -235,12 +269,14 @@ class TestSwitchTeamProxy(unittest.TestCase):
         self.assertEqual(resp.json()["detail"], "Not a member of this team")
 
     def test_not_found_response_propagated(self) -> None:
+        """A 404 team-not-found response is relayed through unchanged."""
         upstream = _mock_response(404, {"detail": "Team not found"})
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post("/auth/switch-team", json={"team_id": 999})
         self.assertEqual(resp.status_code, 404)
 
     def test_auth_service_unreachable_returns_503(self) -> None:
+        """A connection failure to auth-service returns 503."""
         with patch(
             "control_center.api.routes_auth_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
@@ -249,6 +285,7 @@ class TestSwitchTeamProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 503)
 
     def test_forwards_set_cookie_to_browser(self) -> None:
+        """Auth-service's Set-Cookie for the session is relayed through to the browser."""
         upstream = _mock_response(
             200, {"access_token": "new-tok", "refresh_token": "new-rtok"},
             set_cookies=["omnibioai_session=new-rtok; HttpOnly; Path=/; Domain=.omnibioai.org"],
@@ -258,6 +295,7 @@ class TestSwitchTeamProxy(unittest.TestCase):
         self.assertIn("omnibioai_session=new-rtok", resp.headers.get("set-cookie", ""))
 
     def test_forwards_incoming_session_cookie_upstream(self) -> None:
+        """The browser's incoming omnibioai_session cookie is forwarded upstream to auth-service."""
         upstream = _mock_response(200, {"access_token": "tok"})
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -273,6 +311,7 @@ class TestSessionCookieForwarding(unittest.TestCase):
     header upstream."""
 
     def test_login_forwards_set_cookie_to_browser(self) -> None:
+        """A login response's Set-Cookie for the session is relayed through to the browser."""
         upstream = _mock_response(
             200,
             {"access_token": "tok", "refresh_token": "rtok", "token_type": "bearer"},
@@ -283,6 +322,7 @@ class TestSessionCookieForwarding(unittest.TestCase):
         self.assertIn("omnibioai_session=rtok", resp.headers.get("set-cookie", ""))
 
     def test_refresh_forwards_set_cookie_to_browser(self) -> None:
+        """A refresh response's Set-Cookie for the session is relayed through to the browser."""
         upstream = _mock_response(
             200,
             {"access_token": "new-tok", "refresh_token": "new-rtok"},
@@ -293,6 +333,7 @@ class TestSessionCookieForwarding(unittest.TestCase):
         self.assertIn("omnibioai_session=new-rtok", resp.headers.get("set-cookie", ""))
 
     def test_logout_forwards_clearing_set_cookie_to_browser(self) -> None:
+        """A logout response's cookie-clearing Set-Cookie (Max-Age=0) is relayed through to the browser."""
         upstream = _mock_response(
             200,
             {"message": "Logged out"},
@@ -330,6 +371,7 @@ class TestSessionCookieForwarding(unittest.TestCase):
         self.assertNotIn("some_other_cookie", call_kwargs["headers"].get("Cookie", ""))
 
     def test_logout_injects_refresh_token_from_cookie_when_body_omits_it(self) -> None:
+        """When the logout body omits refresh_token, it's injected from the omnibioai_session cookie."""
         upstream = _mock_response(200, {"message": "Logged out"})
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -338,6 +380,7 @@ class TestSessionCookieForwarding(unittest.TestCase):
         self.assertIn(b'"cookie-rtok"', call_kwargs["content"])
 
     def test_logout_body_refresh_token_takes_priority_over_cookie(self) -> None:
+        """When the logout body already includes refresh_token, that value wins over the cookie's."""
         upstream = _mock_response(200, {"message": "Logged out"})
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -363,8 +406,10 @@ class TestSessionCookieForwarding(unittest.TestCase):
 
 
 class TestIamUrlDefault(unittest.TestCase):
+    """The module's IAM_URL default value when no environment override is set."""
 
     def test_default_matches_ecosystem_convention(self) -> None:
+        """With no IAM_URL/AUTH_SERVICE_URL environment variable set, IAM_URL defaults to the ecosystem's standard auth-service address."""
         from control_center.api import routes_auth_proxy
         with patch.dict("os.environ", {}, clear=True):
             import importlib

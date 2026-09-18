@@ -1,4 +1,23 @@
-"""tests/test_main.py"""
+"""
+tests/test_main.py
+
+Unit and end-to-end tests for control_center.main: the _JobState /
+_workspace_root() helpers, the dashboard (/) route's login/report
+rendering and its platform.manage_infra auth gate, /report/generate and
+/report/status (the report-generation job and its deliberately-public
+status polling), /coverage/generate and /coverage/status (their own
+parallel job), the background _run_report_job()/_run_coverage_job()
+subprocess-driven workers and _reset_job_to_idle()'s auto-clear, the
+_scheduler_loop()/on_startup() background thread wiring, the
+router-inclusion-time platform.manage_infra gate applied to
+docker/services/summary/config, the deliberately-public /report/data
+and /report/public-stats (with the latter's per-repo-array leak
+guarantees), and the public-vs-gated field split on /llms and
+/knowledge-base.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
+"""
 from __future__ import annotations
 import os, subprocess, tempfile, threading, time, unittest
 from pathlib import Path
@@ -14,6 +33,7 @@ client = TestClient(app)
 
 
 def _admin_headers():
+    """A bearer-token header for an admin holding manage_infra/manage_cron/manage_content."""
     token = jwt.encode(
         {
             "sub": "1",
@@ -37,6 +57,7 @@ def _cron_only_headers():
     return {"Authorization": f"Bearer {token}"}
 
 def _reset_job():
+    """Reset the module-level report-generation _job back to idle, bypassing its own state machine."""
     j = main_module._job
     with j._lock:
         j.status = "idle"
@@ -45,50 +66,73 @@ def _reset_job():
         j.message = ""
 
 class TestJobState(unittest.TestCase):
+    """_JobState's idle/running/done/error state machine and its thread-safety."""
+
     def _fresh(self): return _JobState()
     def setUp(self): _reset_job()
-    def test_initial_idle(self): self.assertEqual(self._fresh().as_dict()["status"], "idle")
-    def test_initial_started_at_none(self): self.assertIsNone(self._fresh().as_dict()["started_at"])
-    def test_initial_finished_at_none(self): self.assertIsNone(self._fresh().as_dict()["finished_at"])
-    def test_initial_message_empty(self): self.assertEqual(self._fresh().as_dict()["message"], "")
+    def test_initial_idle(self):
+        """A fresh _JobState starts in status "idle"."""
+        self.assertEqual(self._fresh().as_dict()["status"], "idle")
+    def test_initial_started_at_none(self):
+        """A fresh _JobState has started_at=None."""
+        self.assertIsNone(self._fresh().as_dict()["started_at"])
+    def test_initial_finished_at_none(self):
+        """A fresh _JobState has finished_at=None."""
+        self.assertIsNone(self._fresh().as_dict()["finished_at"])
+    def test_initial_message_empty(self):
+        """A fresh _JobState has an empty message."""
+        self.assertEqual(self._fresh().as_dict()["message"], "")
     def test_start_sets_running(self):
+        """start() transitions status to "running"."""
         j = self._fresh(); j.start()
         self.assertEqual(j.as_dict()["status"], "running")
     def test_start_sets_started_at(self):
+        """start() sets started_at to a non-None timestamp."""
         j = self._fresh(); j.start()
         self.assertIsNotNone(j.as_dict()["started_at"])
     def test_start_clears_finished_at(self):
+        """Calling start() again after a finish() clears finished_at back to None."""
         j = self._fresh(); j.start(); j.finish(); j.start()
         self.assertIsNone(j.as_dict()["finished_at"])
     def test_start_clears_message(self):
+        """Calling start() after a fail() clears the previous error message."""
         j = self._fresh(); j.fail("old"); j.start()
         self.assertEqual(j.as_dict()["message"], "")
     def test_finish_sets_done(self):
+        """finish() transitions status to "done"."""
         j = self._fresh(); j.start(); j.finish("x")
         self.assertEqual(j.as_dict()["status"], "done")
     def test_finish_sets_message(self):
+        """finish() records the given message."""
         j = self._fresh(); j.start(); j.finish("done msg")
         self.assertEqual(j.as_dict()["message"], "done msg")
     def test_finish_sets_finished_at(self):
+        """finish() sets finished_at to a non-None timestamp."""
         j = self._fresh(); j.start(); j.finish()
         self.assertIsNotNone(j.as_dict()["finished_at"])
     def test_finish_empty_message_ok(self):
+        """finish() with no message argument leaves message empty rather than raising."""
         j = self._fresh(); j.start(); j.finish()
         self.assertEqual(j.as_dict()["message"], "")
     def test_fail_sets_error(self):
+        """fail() transitions status to "error"."""
         j = self._fresh(); j.start(); j.fail("err")
         self.assertEqual(j.as_dict()["status"], "error")
     def test_fail_sets_message(self):
+        """fail() records the given error message."""
         j = self._fresh(); j.start(); j.fail("FileNotFoundError")
         self.assertIn("FileNotFoundError", j.as_dict()["message"])
     def test_fail_sets_finished_at(self):
+        """fail() sets finished_at to a non-None timestamp."""
         j = self._fresh(); j.start(); j.fail("e")
         self.assertIsNotNone(j.as_dict()["finished_at"])
     def test_as_dict_has_all_keys(self):
+        """as_dict() always includes status/started_at/finished_at/message keys."""
         d = self._fresh().as_dict()
         for k in ("status","started_at","finished_at","message"):
             self.assertIn(k, d)
     def test_thread_safety(self):
+        """Concurrent start()/finish() calls from 10 threads never raise or corrupt state."""
         j = self._fresh(); errors = []
         def w():
             try: j.start(); time.sleep(0.005); j.finish("ok")
@@ -99,30 +143,49 @@ class TestJobState(unittest.TestCase):
         self.assertEqual(errors, [])
 
 class TestWorkspaceRoot(unittest.TestCase):
+    """_workspace_root()'s WORKSPACE_ROOT environment override, defaulting to /workspace."""
+
     def test_default(self):
+        """With no WORKSPACE_ROOT set, _workspace_root() defaults to Path("/workspace")."""
         os.environ.pop("WORKSPACE_ROOT", None)
         self.assertEqual(_workspace_root(), Path("/workspace"))
     def test_env_var(self):
+        """With WORKSPACE_ROOT set, _workspace_root() returns that path."""
         os.environ["WORKSPACE_ROOT"] = "/x"
         try: self.assertEqual(_workspace_root(), Path("/x"))
         finally: del os.environ["WORKSPACE_ROOT"]
-    def test_returns_path(self): self.assertIsInstance(_workspace_root(), Path)
+    def test_returns_path(self):
+        """_workspace_root() always returns a pathlib.Path instance."""
+        self.assertIsInstance(_workspace_root(), Path)
 
 class TestDashboard(unittest.TestCase):
+    """GET /'s login-form/report-generation dashboard rendering, and its platform.manage_infra auth gate."""
+
     def setUp(self): _reset_job()
-    def test_200(self): self.assertEqual(client.get("/", headers=_admin_headers()).status_code, 200)
-    def test_html(self): self.assertIn("text/html", client.get("/", headers=_admin_headers()).headers["content-type"])
-    def test_generate_button(self): self.assertIn("Generate Report", client.get("/", headers=_admin_headers()).text)
-    def test_status_poll(self): self.assertIn("/report/status", client.get("/", headers=_admin_headers()).text)
+    def test_200(self):
+        """An authorized request succeeds with 200."""
+        self.assertEqual(client.get("/", headers=_admin_headers()).status_code, 200)
+    def test_html(self):
+        """The response Content-Type is text/html."""
+        self.assertIn("text/html", client.get("/", headers=_admin_headers()).headers["content-type"])
+    def test_generate_button(self):
+        """The rendered page includes a "Generate Report" control."""
+        self.assertIn("Generate Report", client.get("/", headers=_admin_headers()).text)
+    def test_status_poll(self):
+        """The rendered page references /report/status for status polling."""
+        self.assertIn("/report/status", client.get("/", headers=_admin_headers()).text)
     def test_login_form_present_when_no_report(self):
+        """With no generated report yet, the page renders a login-email/login-password form."""
         resp = client.get("/", headers=_admin_headers())
         self.assertIn("login-email", resp.text)
         self.assertIn("login-password", resp.text)
     def test_no_dashboard_link_when_no_report(self):
+        """The page never links to "View Dashboard" (now that /dashboard just redirects back to /)."""
         # The old "View Dashboard" link is gone now that /dashboard just
         # redirects back to / -- nothing should link to it anymore.
         self.assertNotIn("View Dashboard", client.get("/", headers=_admin_headers()).text)
     def test_401_when_no_token(self):
+        """An unauthenticated request is rejected with 401."""
         # / previously had no auth requirement at all -- this is the exact
         # gap control.omnibioai.org exposed by routing directly to this
         # backend, bypassing nginx-router's auth_request gate.
@@ -130,13 +193,18 @@ class TestDashboard(unittest.TestCase):
 
 
 class TestDashboardRedirect(unittest.TestCase):
+    """GET /dashboard's redirect back to /."""
+
     def test_redirects_to_root(self):
+        """/dashboard responds with a 302 redirect to /."""
         resp = client.get("/dashboard", follow_redirects=False)
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp.headers["location"], "/")
 
 
 class TestRootWithReport(unittest.TestCase):
+    """GET /'s injection of a sticky status bar into an already-generated report's HTML."""
+
     def setUp(self):
         _reset_job()
         self._tmp = tempfile.mkdtemp()
@@ -151,47 +219,74 @@ class TestRootWithReport(unittest.TestCase):
         import shutil
         shutil.rmtree(self._tmp, ignore_errors=True)
 
-    def test_200(self): self.assertEqual(client.get("/", headers=_admin_headers()).status_code, 200)
-    def test_html(self): self.assertIn("text/html", client.get("/", headers=_admin_headers()).headers["content-type"])
-    def test_injects_sticky_bar(self): self.assertIn("omni-header", client.get("/", headers=_admin_headers()).text)
-    def test_report_content_preserved(self): self.assertIn("<h1>My Report</h1>", client.get("/", headers=_admin_headers()).text)
-    def test_summary_in_sticky_bar(self): self.assertIn("/summary", client.get("/", headers=_admin_headers()).text)
-    def test_setInterval_in_sticky_bar(self): self.assertIn("setInterval", client.get("/", headers=_admin_headers()).text)
+    def test_200(self):
+        """An authorized request succeeds with 200."""
+        self.assertEqual(client.get("/", headers=_admin_headers()).status_code, 200)
+    def test_html(self):
+        """The response Content-Type is text/html."""
+        self.assertIn("text/html", client.get("/", headers=_admin_headers()).headers["content-type"])
+    def test_injects_sticky_bar(self):
+        """The report HTML has the "omni-header" sticky status bar injected into it."""
+        self.assertIn("omni-header", client.get("/", headers=_admin_headers()).text)
+    def test_report_content_preserved(self):
+        """The report's original content is preserved alongside the injected sticky bar."""
+        self.assertIn("<h1>My Report</h1>", client.get("/", headers=_admin_headers()).text)
+    def test_summary_in_sticky_bar(self):
+        """The sticky bar references /summary for its live data."""
+        self.assertIn("/summary", client.get("/", headers=_admin_headers()).text)
+    def test_setInterval_in_sticky_bar(self):
+        """The sticky bar polls via a JS setInterval call."""
+        self.assertIn("setInterval", client.get("/", headers=_admin_headers()).text)
 
     def test_no_body_tag_prepends_bar(self):
+        """A report HTML file with no <body> tag still gets the sticky bar prepended rather than failing to inject."""
         self._report_file.write_text("<h1>No Body Tag</h1>")
         response = client.get("/", headers=_admin_headers())
         self.assertIn("<h1>No Body Tag</h1>", response.text)
         self.assertIn("omni-header", response.text)
 
 class TestReportGenerate(unittest.TestCase):
+    """POST /report/generate's job-starting behavior, its 409-when-running guard, and its manage_content auth gate."""
+
     def setUp(self): _reset_job()
     def _post(self):
+        """POST /report/generate with the background Thread mocked out, returning (response, mock_thread_class)."""
         with patch("control_center.main.threading.Thread") as m:
             m.return_value = MagicMock()
             return client.post("/report/generate", headers=_admin_headers()), m
-    def test_200_when_idle(self): self.assertEqual(self._post()[0].status_code, 200)
-    def test_started_status(self): self.assertEqual(self._post()[0].json()["status"], "started")
+    def test_200_when_idle(self):
+        """Starting a report generation while idle succeeds with 200."""
+        self.assertEqual(self._post()[0].status_code, 200)
+    def test_started_status(self):
+        """The response body reports status="started"."""
+        self.assertEqual(self._post()[0].json()["status"], "started")
     def test_409_when_running(self):
+        """Requesting generation while a job is already running is rejected with 409."""
         main_module._job.start()
         self.assertEqual(client.post("/report/generate", headers=_admin_headers()).status_code, 409)
     def test_409_has_error_key(self):
+        """The 409-when-running response body includes an "error" key."""
         main_module._job.start()
         self.assertIn("error", client.post("/report/generate", headers=_admin_headers()).json())
     def test_job_set_running(self):
+        """After a successful POST, the module-level job's status is "running"."""
         self._post()
         self.assertEqual(main_module._job.as_dict()["status"], "running")
     def test_thread_started(self):
+        """The background worker thread's start() is called exactly once."""
         _, m = self._post()
         m.return_value.start.assert_called_once()
     def test_thread_is_daemon(self):
+        """The background worker thread is created with daemon=True."""
         with patch("control_center.main.threading.Thread") as m:
             m.return_value = MagicMock()
             client.post("/report/generate", headers=_admin_headers())
         self.assertTrue(m.call_args[1].get("daemon", False))
     def test_401_when_no_token(self):
+        """An unauthenticated request is rejected with 401."""
         self.assertEqual(client.post("/report/generate").status_code, 401)
     def test_403_when_not_admin(self):
+        """A non-admin token is rejected with 403."""
         token = jwt.encode({"sub": "2", "roles": ["user"]}, JWT_SECRET, algorithm="HS256")
         resp = client.post("/report/generate", headers={"Authorization": f"Bearer {token}"})
         self.assertEqual(resp.status_code, 403)
@@ -202,13 +297,26 @@ class TestReportGenerate(unittest.TestCase):
         self.assertEqual(resp.status_code, 403)
 
 class TestReportStatus(unittest.TestCase):
+    """GET /report/status's job-status polling shape, its deliberately-public access, and its filesystem-backed report metadata."""
+
     def setUp(self): _reset_job()
-    def test_200(self): self.assertEqual(client.get("/report/status", headers=_admin_headers()).status_code, 200)
-    def test_has_status(self): self.assertIn("status", client.get("/report/status", headers=_admin_headers()).json())
-    def test_has_report_exists(self): self.assertIn("report_exists", client.get("/report/status", headers=_admin_headers()).json())
-    def test_has_generated_at(self): self.assertIn("report_generated_at", client.get("/report/status", headers=_admin_headers()).json())
-    def test_idle_by_default(self): self.assertEqual(client.get("/report/status", headers=_admin_headers()).json()["status"], "idle")
+    def test_200(self):
+        """An authorized request succeeds with 200."""
+        self.assertEqual(client.get("/report/status", headers=_admin_headers()).status_code, 200)
+    def test_has_status(self):
+        """The response body includes a "status" key."""
+        self.assertIn("status", client.get("/report/status", headers=_admin_headers()).json())
+    def test_has_report_exists(self):
+        """The response body includes a "report_exists" key."""
+        self.assertIn("report_exists", client.get("/report/status", headers=_admin_headers()).json())
+    def test_has_generated_at(self):
+        """The response body includes a "report_generated_at" key."""
+        self.assertIn("report_generated_at", client.get("/report/status", headers=_admin_headers()).json())
+    def test_idle_by_default(self):
+        """With no job started, status is "idle"."""
+        self.assertEqual(client.get("/report/status", headers=_admin_headers()).json()["status"], "idle")
     def test_200_when_no_token(self):
+        """An unauthenticated request still succeeds with 200 -- this route is deliberately public."""
         # DELIBERATELY PUBLIC (restored): commit 8705cbf gated this route
         # behind platform.manage_infra, which broke ControlApp's anonymous
         # Ecosystem Report page (PublicEcosystemPage.tsx polls it). The
@@ -219,14 +327,17 @@ class TestReportStatus(unittest.TestCase):
         self.assertIn("status", resp.json())
         self.assertIn("report_exists", resp.json())
     def test_report_exists_false(self):
+        """With no report file present, report_exists is False."""
         os.environ["WORKSPACE_ROOT"] = "/nonexistent"
         try: self.assertFalse(client.get("/report/status", headers=_admin_headers()).json()["report_exists"])
         finally: del os.environ["WORKSPACE_ROOT"]
     def test_report_generated_at_none(self):
+        """With no report file present, report_generated_at is None."""
         os.environ["WORKSPACE_ROOT"] = "/nonexistent"
         try: self.assertIsNone(client.get("/report/status", headers=_admin_headers()).json()["report_generated_at"])
         finally: del os.environ["WORKSPACE_ROOT"]
     def test_report_exists_true(self):
+        """With a report file present, report_exists is True."""
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp)/"work"/"out"/"reports"; p.mkdir(parents=True)
             (p/"omnibioai_ecosystem_report.html").write_text("<html/>")
@@ -234,6 +345,7 @@ class TestReportStatus(unittest.TestCase):
             try: self.assertTrue(client.get("/report/status", headers=_admin_headers()).json()["report_exists"])
             finally: del os.environ["WORKSPACE_ROOT"]
     def test_generated_at_set(self):
+        """With a report file present, report_generated_at is set from its mtime."""
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp)/"work"/"out"/"reports"; p.mkdir(parents=True)
             (p/"omnibioai_ecosystem_report.html").write_text("<html/>")
@@ -241,20 +353,25 @@ class TestReportStatus(unittest.TestCase):
             try: self.assertIsNotNone(client.get("/report/status", headers=_admin_headers()).json()["report_generated_at"])
             finally: del os.environ["WORKSPACE_ROOT"]
     def test_reflects_running(self):
+        """A running job is reflected in status="running"."""
         main_module._job.start()
         self.assertEqual(client.get("/report/status", headers=_admin_headers()).json()["status"], "running")
     def test_reflects_done(self):
+        """A finished job is reflected in status="done"."""
         main_module._job.start(); main_module._job.finish("ok")
         self.assertEqual(client.get("/report/status", headers=_admin_headers()).json()["status"], "done")
     def test_reflects_error(self):
+        """A failed job is reflected in status="error"."""
         main_module._job.start(); main_module._job.fail("bad")
         self.assertEqual(client.get("/report/status", headers=_admin_headers()).json()["status"], "error")
     def test_message_in_response(self):
+        """A failed job's error message is included in the response's "message" field."""
         main_module._job.start(); main_module._job.fail("Script not found")
         self.assertIn("Script not found", client.get("/report/status", headers=_admin_headers()).json()["message"])
 
 
 def _reset_coverage_job():
+    """Reset the module-level coverage-generation _coverage_job back to idle, bypassing its own state machine."""
     j = main_module._coverage_job
     with j._lock:
         j.status = "idle"
@@ -264,33 +381,47 @@ def _reset_coverage_job():
 
 
 class TestCoverageGenerate(unittest.TestCase):
+    """POST /coverage/generate's job-starting behavior, its 409-when-running guard, and its manage_content auth gate."""
+
     def setUp(self): _reset_coverage_job()
     def _post(self):
+        """POST /coverage/generate with the background Thread mocked out, returning (response, mock_thread_class)."""
         with patch("control_center.main.threading.Thread") as m:
             m.return_value = MagicMock()
             return client.post("/coverage/generate", headers=_admin_headers()), m
-    def test_200_when_idle(self): self.assertEqual(self._post()[0].status_code, 200)
-    def test_started_status(self): self.assertEqual(self._post()[0].json()["status"], "started")
+    def test_200_when_idle(self):
+        """Starting coverage generation while idle succeeds with 200."""
+        self.assertEqual(self._post()[0].status_code, 200)
+    def test_started_status(self):
+        """The response body reports status="started"."""
+        self.assertEqual(self._post()[0].json()["status"], "started")
     def test_409_when_running(self):
+        """Requesting generation while a job is already running is rejected with 409."""
         main_module._coverage_job.start()
         self.assertEqual(client.post("/coverage/generate", headers=_admin_headers()).status_code, 409)
     def test_409_has_error_key(self):
+        """The 409-when-running response body includes an "error" key."""
         main_module._coverage_job.start()
         self.assertIn("error", client.post("/coverage/generate", headers=_admin_headers()).json())
     def test_job_set_running(self):
+        """After a successful POST, the module-level coverage job's status is "running"."""
         self._post()
         self.assertEqual(main_module._coverage_job.as_dict()["status"], "running")
     def test_thread_started(self):
+        """The background worker thread's start() is called exactly once."""
         _, m = self._post()
         m.return_value.start.assert_called_once()
     def test_thread_is_daemon(self):
+        """The background worker thread is created with daemon=True."""
         with patch("control_center.main.threading.Thread") as m:
             m.return_value = MagicMock()
             client.post("/coverage/generate", headers=_admin_headers())
         self.assertTrue(m.call_args[1].get("daemon", False))
     def test_401_when_no_token(self):
+        """An unauthenticated request is rejected with 401."""
         self.assertEqual(client.post("/coverage/generate").status_code, 401)
     def test_403_when_not_admin(self):
+        """A non-admin token is rejected with 403."""
         token = jwt.encode({"sub": "2", "roles": ["user"]}, JWT_SECRET, algorithm="HS256")
         resp = client.post("/coverage/generate", headers={"Authorization": f"Bearer {token}"})
         self.assertEqual(resp.status_code, 403)
@@ -302,17 +433,31 @@ class TestCoverageGenerate(unittest.TestCase):
 
 
 class TestCoverageStatus(unittest.TestCase):
+    """GET /coverage/status's job-status polling shape and its manage_infra auth gate."""
+
     def setUp(self): _reset_coverage_job()
-    def test_200(self): self.assertEqual(client.get("/coverage/status", headers=_admin_headers()).status_code, 200)
-    def test_has_status(self): self.assertIn("status", client.get("/coverage/status", headers=_admin_headers()).json())
-    def test_has_result_exists(self): self.assertIn("result_exists", client.get("/coverage/status", headers=_admin_headers()).json())
-    def test_has_generated_at(self): self.assertIn("result_generated_at", client.get("/coverage/status", headers=_admin_headers()).json())
-    def test_idle_by_default(self): self.assertEqual(client.get("/coverage/status", headers=_admin_headers()).json()["status"], "idle")
+    def test_200(self):
+        """An authorized request succeeds with 200."""
+        self.assertEqual(client.get("/coverage/status", headers=_admin_headers()).status_code, 200)
+    def test_has_status(self):
+        """The response body includes a "status" key."""
+        self.assertIn("status", client.get("/coverage/status", headers=_admin_headers()).json())
+    def test_has_result_exists(self):
+        """The response body includes a "result_exists" key."""
+        self.assertIn("result_exists", client.get("/coverage/status", headers=_admin_headers()).json())
+    def test_has_generated_at(self):
+        """The response body includes a "result_generated_at" key."""
+        self.assertIn("result_generated_at", client.get("/coverage/status", headers=_admin_headers()).json())
+    def test_idle_by_default(self):
+        """With no job started, status is "idle"."""
+        self.assertEqual(client.get("/coverage/status", headers=_admin_headers()).json()["status"], "idle")
     def test_401_when_no_token(self):
+        """An unauthenticated request is rejected with 401."""
         # Previously open to everyone (no admin gate) -- closed as part of
         # the same fix as /report/status, /storage, /cron/jobs, etc.
         self.assertEqual(client.get("/coverage/status").status_code, 401)
     def test_result_exists_true_and_generated_at_set(self):
+        """With a coverage result file present under WORKSPACE_ROOT, result_exists is True and result_generated_at is set."""
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "omnibioai-work" / "out" / "coverage"
             p.mkdir(parents=True)
@@ -324,6 +469,8 @@ class TestCoverageStatus(unittest.TestCase):
 
 
 class TestRunCoverageJob(unittest.TestCase):
+    """_run_coverage_job()'s subprocess-driven coverage script execution and its error mapping."""
+
     def setUp(self):
         _reset_coverage_job()
         self._tmp = tempfile.mkdtemp()
@@ -339,18 +486,21 @@ class TestRunCoverageJob(unittest.TestCase):
         shutil.rmtree(self._tmp, ignore_errors=True)
 
     def test_missing_script_fails_job(self):
+        """A missing run_coverage_host.py script fails the job with a "not found" message."""
         with patch("control_center.main._workspace_root", return_value=Path("/nonexistent")):
             main_module._run_coverage_job()
         self.assertEqual(main_module._coverage_job.as_dict()["status"], "error")
         self.assertIn("not found", main_module._coverage_job.as_dict()["message"])
 
     def test_success_sets_done(self):
+        """A zero-exit subprocess result marks the job "done"."""
         result = MagicMock(returncode=0, stdout="Done — 1 ok, 0 with issues, 0 skipped\n", stderr="")
         with patch("control_center.main.subprocess.run", return_value=result):
             main_module._run_coverage_job()
         self.assertEqual(main_module._coverage_job.as_dict()["status"], "done")
 
     def test_nonzero_returncode_fails_job(self):
+        """A non-zero exit code fails the job, with stderr surfaced in the message."""
         result = MagicMock(returncode=1, stdout="", stderr="boom")
         with patch("control_center.main.subprocess.run", return_value=result):
             main_module._run_coverage_job()
@@ -359,11 +509,13 @@ class TestRunCoverageJob(unittest.TestCase):
         self.assertIn("boom", state["message"])
 
     def test_timeout_fails_job(self):
+        """A subprocess timeout fails the job."""
         with patch("control_center.main.subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 600)):
             main_module._run_coverage_job()
         self.assertEqual(main_module._coverage_job.as_dict()["status"], "error")
 
     def test_unexpected_exception_fails_job(self):
+        """An unexpected exception from subprocess.run() fails the job, naming the exception type in the message."""
         with patch("control_center.main.subprocess.run", side_effect=RuntimeError("boom")):
             main_module._run_coverage_job()
         state = main_module._coverage_job.as_dict()
@@ -371,31 +523,40 @@ class TestRunCoverageJob(unittest.TestCase):
         self.assertIn("RuntimeError", state["message"])
 
 class TestResetJobToIdle(unittest.TestCase):
+    """_reset_job_to_idle()'s selective auto-clear of a finished/failed job, leaving a running or already-idle job untouched."""
+
     def setUp(self): _reset_job()
 
     def test_resets_done_to_idle(self):
+        """A "done" job is reset back to "idle"."""
         main_module._job.start(); main_module._job.finish("ok")
         main_module._reset_job_to_idle(delay_s=0)
         self.assertEqual(main_module._job.as_dict()["status"], "idle")
 
     def test_resets_error_to_idle(self):
+        """An "error" job is reset back to "idle"."""
         main_module._job.start(); main_module._job.fail("bad")
         main_module._reset_job_to_idle(delay_s=0)
         self.assertEqual(main_module._job.as_dict()["status"], "idle")
 
     def test_does_not_reset_running(self):
+        """A "running" job is left untouched, not reset to "idle"."""
         main_module._job.start()
         main_module._reset_job_to_idle(delay_s=0)
         self.assertEqual(main_module._job.as_dict()["status"], "running")
 
     def test_does_not_reset_idle(self):
+        """An already-idle job stays idle (a no-op)."""
         main_module._reset_job_to_idle(delay_s=0)
         self.assertEqual(main_module._job.as_dict()["status"], "idle")
 
 
 class TestRunReportJob(unittest.TestCase):
+    """_run_report_job()'s subprocess-driven report script execution, its stdout/stderr message mapping, and its error handling."""
+
     def setUp(self): _reset_job(); main_module._job.start()
     def test_fails_script_not_found(self):
+        """A missing generate_report.py script fails the job with a "not found" message."""
         os.environ["WORKSPACE_ROOT"] = "/nonexistent"
         try:
             main_module._run_report_job()
@@ -403,6 +564,7 @@ class TestRunReportJob(unittest.TestCase):
             self.assertIn("not found", main_module._job.as_dict()["message"])
         finally: del os.environ["WORKSPACE_ROOT"]
     def test_succeeds_exit_zero(self):
+        """A zero-exit script run marks the job "done"."""
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)/"omnibioai-control-center"/"scripts"; d.mkdir(parents=True)
             (d/"generate_report.py").write_text('print("done")')
@@ -410,6 +572,7 @@ class TestRunReportJob(unittest.TestCase):
             try: main_module._run_report_job(); self.assertEqual(main_module._job.as_dict()["status"], "done")
             finally: del os.environ["WORKSPACE_ROOT"]
     def test_last_stdout_line_as_message(self):
+        """A successful run's job message is the script's last stdout line."""
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)/"omnibioai-control-center"/"scripts"; d.mkdir(parents=True)
             (d/"generate_report.py").write_text('print("line1")\nprint("✓ Report written")')
@@ -417,6 +580,7 @@ class TestRunReportJob(unittest.TestCase):
             try: main_module._run_report_job(); self.assertIn("✓ Report written", main_module._job.as_dict()["message"])
             finally: del os.environ["WORKSPACE_ROOT"]
     def test_fails_exit_nonzero(self):
+        """A non-zero exit code from the script fails the job."""
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)/"omnibioai-control-center"/"scripts"; d.mkdir(parents=True)
             (d/"generate_report.py").write_text('import sys; sys.exit(1)')
@@ -424,6 +588,7 @@ class TestRunReportJob(unittest.TestCase):
             try: main_module._run_report_job(); self.assertEqual(main_module._job.as_dict()["status"], "error")
             finally: del os.environ["WORKSPACE_ROOT"]
     def test_stderr_as_error_message(self):
+        """A failed run's job message surfaces the script's stderr output."""
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)/"omnibioai-control-center"/"scripts"; d.mkdir(parents=True)
             (d/"generate_report.py").write_text('import sys; sys.stderr.write("cloc not found"); sys.exit(1)')
@@ -431,6 +596,7 @@ class TestRunReportJob(unittest.TestCase):
             try: main_module._run_report_job(); self.assertIn("cloc not found", main_module._job.as_dict()["message"])
             finally: del os.environ["WORKSPACE_ROOT"]
     def test_timeout_sets_error(self):
+        """A subprocess timeout fails the job with a "timed out" message."""
         with patch("control_center.main.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="p", timeout=600)):
             with tempfile.TemporaryDirectory() as tmp:
                 d = Path(tmp)/"omnibioai-control-center"/"scripts"; d.mkdir(parents=True)
@@ -439,6 +605,7 @@ class TestRunReportJob(unittest.TestCase):
                 try: main_module._run_report_job(); self.assertIn("timed out", main_module._job.as_dict()["message"])
                 finally: del os.environ["WORKSPACE_ROOT"]
     def test_oserror_sets_error(self):
+        """An OSError from subprocess.run() (e.g. disk full) fails the job, surfacing that message."""
         with patch("control_center.main.subprocess.run", side_effect=OSError("disk full")):
             with tempfile.TemporaryDirectory() as tmp:
                 d = Path(tmp)/"omnibioai-control-center"/"scripts"; d.mkdir(parents=True)
@@ -447,6 +614,7 @@ class TestRunReportJob(unittest.TestCase):
                 try: main_module._run_report_job(); self.assertIn("disk full", main_module._job.as_dict()["message"])
                 finally: del os.environ["WORKSPACE_ROOT"]
     def test_done_message_generic_when_no_stdout(self):
+        """A successful run with no stdout output falls back to the generic message "Done"."""
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)/"omnibioai-control-center"/"scripts"; d.mkdir(parents=True)
             (d/"generate_report.py").write_text("")
@@ -468,6 +636,7 @@ class TestReportData(unittest.TestCase):
     logic (missing file, present file, malformed file)."""
 
     def test_200_when_no_token(self):
+        """An unauthenticated request succeeds with 200 and returns the parsed report_data.json -- proving this route requires no auth."""
         with tempfile.TemporaryDirectory() as tmp:
             reports_dir = Path(tmp) / "work" / "out" / "reports"
             reports_dir.mkdir(parents=True)
@@ -481,6 +650,7 @@ class TestReportData(unittest.TestCase):
         self.assertEqual(resp.json(), {"projects": 3, "languages": ["python"]})
 
     def test_200_with_token_too(self):
+        """An authenticated request also succeeds with 200 -- a token doesn't change this route's public behavior."""
         with tempfile.TemporaryDirectory() as tmp:
             reports_dir = Path(tmp) / "work" / "out" / "reports"
             reports_dir.mkdir(parents=True)
@@ -493,6 +663,7 @@ class TestReportData(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
 
     def test_404_when_no_report_data(self):
+        """With no report_data.json file present, the route returns 404 with an "error" key."""
         with tempfile.TemporaryDirectory() as tmp:
             os.environ["WORKSPACE_ROOT"] = tmp
             try:
@@ -503,6 +674,7 @@ class TestReportData(unittest.TestCase):
         self.assertIn("error", resp.json())
 
     def test_returns_parsed_json_when_present(self):
+        """The route returns the report_data.json file's parsed JSON contents verbatim."""
         with tempfile.TemporaryDirectory() as tmp:
             reports_dir = Path(tmp) / "work" / "out" / "reports"
             reports_dir.mkdir(parents=True)
@@ -516,6 +688,7 @@ class TestReportData(unittest.TestCase):
         self.assertEqual(resp.json(), {"projects": 3, "languages": ["python"]})
 
     def test_500_on_malformed_json(self):
+        """A report_data.json file that isn't valid JSON returns 500 with an "error" key."""
         with tempfile.TemporaryDirectory() as tmp:
             reports_dir = Path(tmp) / "work" / "out" / "reports"
             reports_dir.mkdir(parents=True)
@@ -530,10 +703,13 @@ class TestReportData(unittest.TestCase):
 
 
 class TestSchedulerLoop(unittest.TestCase):
+    """_scheduler_loop()'s idle-triggering of a background report job, its running-job skip, and its exception resilience."""
+
     def setUp(self):
         _reset_job()
 
     def test_triggers_report_job_when_idle(self):
+        """With the job idle, the loop starts a background Thread targeting _run_report_job."""
         # Break out of the infinite loop after the first triggering pass by
         # raising from the second `sleep` call.
         sleep_calls = {"n": 0}
@@ -552,6 +728,7 @@ class TestSchedulerLoop(unittest.TestCase):
         self.assertEqual(mock_thread.call_args.kwargs.get("target"), main_module._run_report_job)
 
     def test_skips_when_job_already_running(self):
+        """With the job already running, the loop never starts another Thread."""
         main_module._job.start()
         sleep_calls = {"n": 0}
 
@@ -568,6 +745,7 @@ class TestSchedulerLoop(unittest.TestCase):
         mock_thread.assert_not_called()
 
     def test_exception_in_loop_body_is_caught(self):
+        """An exception raised inside the loop body (e.g. from as_dict()) is caught, letting the loop continue rather than crash."""
         sleep_calls = {"n": 0}
 
         def fake_sleep(_seconds):
@@ -584,7 +762,10 @@ class TestSchedulerLoop(unittest.TestCase):
 
 
 class TestOnStartup(unittest.TestCase):
+    """on_startup()'s launch of the background _scheduler_loop thread."""
+
     def test_starts_scheduler_thread(self):
+        """on_startup() creates and starts a daemon Thread targeting _scheduler_loop."""
         with patch("control_center.main.threading.Thread") as mock_thread:
             asyncio_run = __import__("asyncio").run
             asyncio_run(main_module.on_startup())
@@ -633,6 +814,7 @@ class TestPlatformManageInfraAuth(unittest.TestCase):
     this decision must not weaken."""
 
     def _cases(self):
+        """The (method, path) pairs gated behind the router-inclusion-time platform.manage_infra check."""
         return (
             ("GET", "/docker/containers"),
             ("GET", "/services"),
@@ -647,6 +829,7 @@ class TestPlatformManageInfraAuth(unittest.TestCase):
         )
 
     def test_401_when_no_token(self):
+        """Every case in _cases() rejects an unauthenticated request with 401."""
         for method, path in self._cases():
             with self.subTest(path=path):
                 resp = client.request(method, path)
@@ -661,6 +844,7 @@ class TestPlatformManageInfraAuth(unittest.TestCase):
                 self.assertEqual(resp.status_code, 403)
 
     def test_not_401_or_403_with_infra_permission(self):
+        """Every case in _cases() clears the auth gate with a manage_infra token (its own route logic may still return other statuses)."""
         for method, path in self._cases():
             with self.subTest(path=path):
                 resp = client.request(method, path, headers=_admin_headers())
@@ -723,6 +907,7 @@ class TestReportPublicStats(unittest.TestCase):
     appear in it under any code path."""
 
     def _get_with_data(self, data, *, headers=None):
+        """GET /report/public-stats with a report_data.json fixture containing `data`, and optional headers."""
         with tempfile.TemporaryDirectory() as tmp:
             reports_dir = Path(tmp) / "work" / "out" / "reports"
             reports_dir.mkdir(parents=True)
@@ -732,11 +917,13 @@ class TestReportPublicStats(unittest.TestCase):
                 return client.get("/report/public-stats", headers=headers or {})
 
     def test_200_no_token_exact_keys(self):
+        """An unauthenticated request succeeds with 200 and returns exactly the five public aggregate keys."""
         resp = self._get_with_data(_FULL_REPORT_DATA)
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(set(resp.json().keys()), _PUBLIC_STATS_KEYS)
 
     def test_values_from_fixture(self):
+        """The aggregate values are correctly derived from report_data.json, using statement-weighted (not unweighted-mean) coverage."""
         body = self._get_with_data(_FULL_REPORT_DATA).json()
         self.assertEqual(body["generated_at"], "2026-09-02T04:00:00+00:00")
         self.assertEqual(body["total_lines"], 1863200)
@@ -771,6 +958,7 @@ class TestReportPublicStats(unittest.TestCase):
         self.assertEqual(anon, authed)
 
     def test_no_report_data_returns_200_null_shape_not_404(self):
+        """With no report_data.json at all, the route returns 200 with an all-null/zero shape, not a 404."""
         with tempfile.TemporaryDirectory() as tmp:
             with patch("control_center.main._workspace_root", return_value=Path(tmp)):
                 resp = client.get("/report/public-stats")
@@ -784,6 +972,7 @@ class TestReportPublicStats(unittest.TestCase):
         })
 
     def test_malformed_report_data_returns_200_null_shape(self):
+        """A report_data.json that isn't valid JSON still returns 200 with the null/zero shape, not a 500."""
         with tempfile.TemporaryDirectory() as tmp:
             reports_dir = Path(tmp) / "work" / "out" / "reports"
             reports_dir.mkdir(parents=True)
@@ -795,6 +984,7 @@ class TestReportPublicStats(unittest.TestCase):
         self.assertIsNone(resp.json()["ecosystem_coverage_percent"])
 
     def test_no_coverage_rows_with_data_gives_null_percent(self):
+        """When every coverage row has pct=None (no_total_found), ecosystem_coverage_percent is None and repos_measured is 0."""
         data = dict(_FULL_REPORT_DATA)
         data["coverage"] = [
             {"repo": "x", "status": "no_total_found", "pct": None,
@@ -805,6 +995,7 @@ class TestReportPublicStats(unittest.TestCase):
         self.assertEqual(body["repos_measured"], 0)
 
     def test_non_dict_top_level_json_returns_null_shape(self):
+        """A top-level JSON value that isn't an object (a bare list) is treated the same as absent/malformed data."""
         # report_data.json is valid JSON but not an object (e.g. a bare
         # list) -- treated the same as absent/malformed.
         body = self._get_with_data([1, 2, 3]).json()
@@ -812,6 +1003,7 @@ class TestReportPublicStats(unittest.TestCase):
         self.assertIsNone(body["total_lines"])
 
     def test_non_dict_coverage_row_is_skipped(self):
+        """A non-dict entry in the coverage array (e.g. a stray string) is skipped rather than crashing the aggregation."""
         data = dict(_FULL_REPORT_DATA)
         data["coverage"] = [
             "junk",
@@ -822,6 +1014,7 @@ class TestReportPublicStats(unittest.TestCase):
         self.assertEqual(body["ecosystem_coverage_percent"], 90.0)
 
     def test_grand_missing_gives_null_totals_but_still_computes_coverage(self):
+        """With no "grand" totals key, total_lines/total_files are None, but ecosystem_coverage_percent is still computed from the coverage rows."""
         data = {k: v for k, v in _FULL_REPORT_DATA.items() if k != "grand"}
         body = self._get_with_data(data).json()
         self.assertIsNone(body["total_lines"])
@@ -847,6 +1040,7 @@ class TestLlmsPublicAccess(unittest.TestCase):
     stay gated, unlike /llms which has nothing gated left in it."""
 
     def test_200_when_no_token(self):
+        """An unauthenticated request succeeds with 200, and api_keys exposes only a boolean "configured" flag per provider, never the key value itself."""
         resp = client.get("/llms")
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
@@ -858,6 +1052,7 @@ class TestLlmsPublicAccess(unittest.TestCase):
             self.assertIsInstance(provider["configured"], bool)
 
     def test_200_with_token_too(self):
+        """An authenticated request also succeeds with 200."""
         self.assertEqual(client.get("/llms", headers=_admin_headers()).status_code, 200)
 
 
@@ -875,6 +1070,7 @@ class TestKnowledgeBasePublicFields(unittest.TestCase):
     routes_dashboard.py's /dashboard/summary."""
 
     def test_200_when_no_token_with_aggregate_fields(self):
+        """An unauthenticated request succeeds with 200 and includes the public aggregate fields (rag_status, abstract/domain counts, index size/domain list)."""
         resp = client.get("/knowledge-base")
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
@@ -886,16 +1082,19 @@ class TestKnowledgeBasePublicFields(unittest.TestCase):
         self.assertIn("domain_list", body["faiss_index"])
 
     def test_paths_null_when_no_token(self):
+        """Without a token, pubmed_root/index_root are nulled out rather than exposing internal filesystem paths."""
         body = client.get("/knowledge-base").json()
         self.assertIsNone(body["pubmed_root"])
         self.assertIsNone(body["index_root"])
 
     def test_paths_null_with_insufficient_permission(self):
+        """A token lacking manage_infra also gets pubmed_root/index_root nulled out."""
         body = client.get("/knowledge-base", headers=_cron_only_headers()).json()
         self.assertIsNone(body["pubmed_root"])
         self.assertIsNone(body["index_root"])
 
     def test_200_with_token_too(self):
+        """An authorized (manage_infra) request also succeeds with 200 (and, implicitly, gets the real path values)."""
         self.assertEqual(client.get("/knowledge-base", headers=_admin_headers()).status_code, 200)
 
 
@@ -921,6 +1120,7 @@ class TestOverGateRegressionGuard(unittest.TestCase):
     )
 
     def test_still_401_without_token(self):
+        """Every route in STILL_GATED still rejects an unauthenticated request with 401, unaffected by the public-access reverts above."""
         for path in self.STILL_GATED:
             with self.subTest(path=path):
                 self.assertEqual(client.get(path).status_code, 401)

@@ -2,7 +2,11 @@
 for control_center.hipaa_compliance.service, against a real isolated
 in-memory SQLite DB (not mocked) -- mirrors this ecosystem's own
 audit_query_service test split (SQL correctness here, HTTP-level auth/
-wiring in test_routes_hipaa_compliance.py)."""
+wiring in test_routes_hipaa_compliance.py).
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
+"""
 from __future__ import annotations
 
 import unittest
@@ -23,6 +27,9 @@ from control_center.hipaa_compliance.schemas import (
 
 
 class ServiceTestCase(unittest.TestCase):
+    """Base fixture: a real, isolated in-memory SQLite session with all
+    schema tables created, plus a _row() helper for seeding rows."""
+
     def setUp(self):
         engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
         Base.metadata.create_all(bind=engine)
@@ -31,6 +38,8 @@ class ServiceTestCase(unittest.TestCase):
         self.addCleanup(self.db.close)
 
     def _row(self, **overrides):
+        """Insert and commit a HipaaComplianceChange row with sensible
+        defaults, any field overridden by keyword; returns the row."""
         defaults = {
             "change_id": "X-1",
             "title": "Test change",
@@ -48,7 +57,10 @@ class ServiceTestCase(unittest.TestCase):
 
 
 class ListChangesTests(ServiceTestCase):
+    """service.list_changes()'s ordering, filtering, and pagination."""
+
     def test_orders_newest_first(self):
+        """Rows are returned ordered by change_date descending."""
         self._row(change_id="A", change_date=date(2026, 1, 1))
         self._row(change_id="B", change_date=date(2026, 3, 1))
         self._row(change_id="C", change_date=date(2026, 2, 1))
@@ -59,6 +71,7 @@ class ListChangesTests(ServiceTestCase):
         self.assertEqual([r.change_id for r in rows], ["B", "C", "A"])
 
     def test_filters_by_status(self):
+        """A status filter returns only matching rows."""
         self._row(change_id="A", status="verified")
         self._row(change_id="B", status="planned")
 
@@ -68,6 +81,7 @@ class ListChangesTests(ServiceTestCase):
         self.assertEqual(rows[0].change_id, "B")
 
     def test_filters_by_control_category(self):
+        """A control_category filter returns only matching rows."""
         self._row(change_id="A", control_category="audit_event_signing")
         self._row(change_id="B", control_category="access_control")
 
@@ -79,6 +93,7 @@ class ListChangesTests(ServiceTestCase):
         self.assertEqual(rows[0].change_id, "B")
 
     def test_filters_by_repository(self):
+        """A repository filter returns only matching rows."""
         self._row(change_id="A", repository="omnibioai-security-audit")
         self._row(change_id="B", repository="omnibioai-control-center")
 
@@ -90,6 +105,7 @@ class ListChangesTests(ServiceTestCase):
         self.assertEqual(rows[0].change_id, "B")
 
     def test_pagination(self):
+        """Two pages of page_size=2 over 5 rows split into non-overlapping sets."""
         for i in range(5):
             self._row(change_id=f"C{i}", change_date=date(2026, 1, i + 1))
 
@@ -103,7 +119,12 @@ class ListChangesTests(ServiceTestCase):
 
 
 class CreateGetChangeTests(ServiceTestCase):
+    """service.create_change()/get_change()'s persistence and lookup."""
+
     def test_create_persists_all_fields(self):
+        """Every field of a full HipaaComplianceChangeCreate payload,
+        including its evidence list, is persisted and re-readable via
+        get_change()."""
         payload = HipaaComplianceChangeCreate(
             change_id="NEW-1",
             title="New change",
@@ -136,6 +157,8 @@ class CreateGetChangeTests(ServiceTestCase):
         self.assertEqual(fetched.pr_number, 42)
 
     def test_create_duplicate_id_raises(self):
+        """Creating a change with a change_id that already exists
+        raises ChangeAlreadyExistsError."""
         self._row(change_id="DUP-1")
         payload = HipaaComplianceChangeCreate(
             change_id="DUP-1",
@@ -150,12 +173,17 @@ class CreateGetChangeTests(ServiceTestCase):
             service.create_change(self.db, payload)
 
     def test_get_missing_raises(self):
+        """get_change() on a nonexistent change_id raises ChangeNotFoundError."""
         with self.assertRaises(service.ChangeNotFoundError):
             service.get_change(self.db, "does-not-exist")
 
 
 class UpdateChangeTests(ServiceTestCase):
+    """service.update_change()'s partial-update semantics."""
+
     def test_partial_update(self):
+        """Updating only status leaves every other field (title)
+        unchanged."""
         self._row(change_id="U-1", status="planned", title="Original title")
 
         updated = service.update_change(
@@ -166,6 +194,7 @@ class UpdateChangeTests(ServiceTestCase):
         self.assertEqual(updated.title, "Original title")
 
     def test_update_control_category(self):
+        """Updating control_category persists the new enum value."""
         self._row(change_id="U-2", control_category="other")
 
         updated = service.update_change(
@@ -176,12 +205,18 @@ class UpdateChangeTests(ServiceTestCase):
         self.assertEqual(updated.control_category, "access_control")
 
     def test_missing_raises(self):
+        """Updating a nonexistent change_id raises ChangeNotFoundError."""
         with self.assertRaises(service.ChangeNotFoundError):
             service.update_change(self.db, "nope", HipaaComplianceChangeUpdate(status="verified"))
 
 
 class SummaryTests(ServiceTestCase):
+    """service.build_summary()'s overall-status derivation and per-
+    category counts."""
+
     def test_empty_table(self):
+        """An empty table summarizes as overall_status="no_data" with
+        every count at 0, but still lists every ComplianceControlCategory."""
         summary = service.build_summary(self.db)
 
         self.assertEqual(summary.overall_status, "no_data")
@@ -194,6 +229,9 @@ class SummaryTests(ServiceTestCase):
         self.assertTrue(all(c.total == 0 for c in summary.controls))
 
     def test_counts_and_latest(self):
+        """verified/pending/exception counts, total_controls_tracked
+        (distinct categories, not rows), overall_status, and the
+        latest_change_id/title (by change_date) are all computed correctly."""
         self._row(change_id="A", status="verified", control_category="audit_integrity",
                    change_date=date(2026, 1, 1))
         self._row(change_id="B", status="released", control_category="access_control",
@@ -214,6 +252,7 @@ class SummaryTests(ServiceTestCase):
         self.assertEqual(summary.latest_change_title, "Latest one")
 
     def test_on_track_when_all_verified_no_exceptions(self):
+        """All rows verified/released with no exceptions -> overall_status="on_track"."""
         self._row(change_id="A", status="verified")
         self._row(change_id="B", status="released")
 
@@ -222,6 +261,7 @@ class SummaryTests(ServiceTestCase):
         self.assertEqual(summary.overall_status, "on_track")
 
     def test_in_progress_when_pending_present_no_exceptions(self):
+        """A pending (planned) row with no exceptions -> overall_status="in_progress"."""
         self._row(change_id="A", status="verified")
         self._row(change_id="B", status="planned")
 
@@ -230,6 +270,8 @@ class SummaryTests(ServiceTestCase):
         self.assertEqual(summary.overall_status, "in_progress")
 
     def test_control_summary_counts_per_category(self):
+        """Per-category totals/verified/pending/exceptions are computed
+        independently for each control_category."""
         self._row(change_id="A", control_category="audit_event_signing", status="verified")
         self._row(change_id="B", control_category="audit_event_signing", status="planned")
 

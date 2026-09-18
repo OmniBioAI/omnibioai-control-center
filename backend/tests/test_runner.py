@@ -6,6 +6,16 @@ Unit tests for:
   - control_center.core.settings.load_settings
   - control_center.api.routes_services  (GET /services)
   - control_center.api.routes_summary   (GET /summary)
+
+Covers run_all_checks()'s dispatch by service type (mysql/redis/http,
+unknown/missing type -> WARN), load_settings()'s YAML parsing (services
++ system.disk_checks, missing/empty config handling), and the /services
+and /summary routes' end-to-end wiring against a real temp config file,
+including /summary's overall_status derivation (DOWN if any service is
+down, WARN if a disk check warns with no service down).
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -38,6 +48,7 @@ client = TestClient(app, headers={"Authorization": f"Bearer {_INFRA_TOKEN}"})
 # ==============================================================================
 
 def _write_config(content: str) -> str:
+    """Write `content` (dedented) to a fresh temp YAML file and return its path."""
     tf = tempfile.NamedTemporaryFile(
         mode="w", suffix=".yaml", delete=False, encoding="utf-8"
     )
@@ -66,6 +77,7 @@ def _minimal_config() -> str:
 # ==============================================================================
 
 class TestRunAllChecks(unittest.TestCase):
+    """run_all_checks()'s dispatch by configured service type."""
 
     def setUp(self) -> None:
         # This host may have a real GPU; run_all_checks always appends
@@ -76,11 +88,14 @@ class TestRunAllChecks(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def test_empty_services_returns_empty(self) -> None:
+        """No configured services returns an empty result list."""
         settings = Settings(services={}, system={})
         results = run_all_checks(settings)
         self.assertEqual(results, [])
 
     def test_unknown_type_returns_warn(self) -> None:
+        """A service with an unrecognized "type" returns a WARN result
+        naming the unknown check type."""
         settings = Settings(
             services={"weird": {"type": "ftp", "host": "localhost", "port": 21}},
             system={},
@@ -91,11 +106,13 @@ class TestRunAllChecks(unittest.TestCase):
         self.assertIn("Unknown check type", results[0]["message"])
 
     def test_missing_type_returns_warn(self) -> None:
+        """A service with no "type" key at all returns a WARN result."""
         settings = Settings(services={"no-type": {}}, system={})
         results = run_all_checks(settings)
         self.assertEqual(results[0]["status"], "WARN")
 
     def test_mysql_type_runs_tcp(self) -> None:
+        """A "mysql" type service dispatches to a real TCP-connect check."""
         settings = Settings(
             services={"mysql": {"type": "mysql", "host": "127.0.0.1", "port": 19996}},
             system={},
@@ -106,6 +123,7 @@ class TestRunAllChecks(unittest.TestCase):
         self.assertIn(results[0]["status"], ("UP", "DOWN", "WARN"))
 
     def test_redis_type_runs_tcp(self) -> None:
+        """A "redis" type service dispatches to a real TCP-connect check."""
         settings = Settings(
             services={"redis": {"type": "redis", "host": "127.0.0.1", "port": 19995}},
             system={},
@@ -115,6 +133,7 @@ class TestRunAllChecks(unittest.TestCase):
         self.assertIn(results[0]["status"], ("UP", "DOWN", "WARN"))
 
     def test_http_type_routes_to_http_check(self) -> None:
+        """A "http" type service dispatches to the HTTP health check."""
         settings = Settings(
             services={"web": {"type": "http", "url": "http://127.0.0.1:19994/health", "timeout_s": 1}},
             system={},
@@ -124,6 +143,8 @@ class TestRunAllChecks(unittest.TestCase):
         self.assertEqual(results[0]["name"], "web")
 
     def test_multiple_services_all_returned(self) -> None:
+        """Every configured service, regardless of type, produces its
+        own result."""
         settings = Settings(
             services={
                 "svc-a": {"type": "http", "url": "http://127.0.0.1:19993/", "timeout_s": 1},
@@ -138,6 +159,7 @@ class TestRunAllChecks(unittest.TestCase):
         self.assertEqual(names, {"svc-a", "svc-b", "svc-c"})
 
     def test_result_has_required_keys(self) -> None:
+        """Every result dict includes the full documented key set."""
         settings = Settings(
             services={"svc": {"type": "mysql", "host": "127.0.0.1", "port": 19990}},
             system={},
@@ -152,8 +174,11 @@ class TestRunAllChecks(unittest.TestCase):
 # ==============================================================================
 
 class TestLoadSettings(unittest.TestCase):
+    """load_settings()'s YAML parsing of a real config file on disk."""
 
     def test_loads_services(self) -> None:
+        """A configured service is parsed into settings.services with
+        its "type" field intact."""
         path = _write_config("""
             services:
               mysql:
@@ -171,6 +196,8 @@ class TestLoadSettings(unittest.TestCase):
             os.unlink(path)
 
     def test_loads_disk_checks(self) -> None:
+        """A configured disk check under system.disk_checks is parsed
+        with its path/threshold."""
         path = _write_config("""
             services: {}
             system:
@@ -189,6 +216,8 @@ class TestLoadSettings(unittest.TestCase):
             os.unlink(path)
 
     def test_raises_when_config_missing(self) -> None:
+        """A CONTROL_CENTER_CONFIG pointing at a nonexistent file
+        raises FileNotFoundError."""
         os.environ["CONTROL_CENTER_CONFIG"] = "/nonexistent/config.yaml"
         try:
             with self.assertRaises(FileNotFoundError):
@@ -197,6 +226,8 @@ class TestLoadSettings(unittest.TestCase):
             del os.environ["CONTROL_CENTER_CONFIG"]
 
     def test_empty_config_returns_empty_settings(self) -> None:
+        """An empty config file loads to empty services/system dicts,
+        not an error."""
         path = _write_config("")
         os.environ["CONTROL_CENTER_CONFIG"] = path
         try:
@@ -208,6 +239,7 @@ class TestLoadSettings(unittest.TestCase):
             os.unlink(path)
 
     def test_multiple_services_loaded(self) -> None:
+        """Multiple configured services are all present in settings.services."""
         path = _write_config("""
             services:
               tes:
@@ -233,8 +265,10 @@ class TestLoadSettings(unittest.TestCase):
 # ==============================================================================
 
 class TestRoutesServices(unittest.TestCase):
+    """GET /services against a real temp config file."""
 
     def test_services_returns_200(self) -> None:
+        """A valid config returns 200."""
         path = _minimal_config()
         os.environ["CONTROL_CENTER_CONFIG"] = path
         try:
@@ -245,6 +279,7 @@ class TestRoutesServices(unittest.TestCase):
             os.unlink(path)
 
     def test_services_returns_list(self) -> None:
+        """The response has a "services" key holding a list."""
         path = _minimal_config()
         os.environ["CONTROL_CENTER_CONFIG"] = path
         try:
@@ -257,6 +292,7 @@ class TestRoutesServices(unittest.TestCase):
             os.unlink(path)
 
     def test_services_each_has_required_keys(self) -> None:
+        """Every entry in the services list has name/status/type."""
         path = _minimal_config()
         os.environ["CONTROL_CENTER_CONFIG"] = path
         try:
@@ -270,6 +306,7 @@ class TestRoutesServices(unittest.TestCase):
             os.unlink(path)
 
     def test_services_raises_on_missing_config(self) -> None:
+        """A missing config file returns 500 rather than crashing unhandled."""
         os.environ["CONTROL_CENTER_CONFIG"] = "/nonexistent/config.yaml"
         try:
             response = client.get("/services")
@@ -283,8 +320,10 @@ class TestRoutesServices(unittest.TestCase):
 # ==============================================================================
 
 class TestRoutesSummary(unittest.TestCase):
+    """GET /summary against a real temp config file."""
 
     def test_summary_returns_200(self) -> None:
+        """A valid config returns 200."""
         path = _minimal_config()
         os.environ["CONTROL_CENTER_CONFIG"] = path
         try:
@@ -295,6 +334,7 @@ class TestRoutesSummary(unittest.TestCase):
             os.unlink(path)
 
     def test_summary_has_overall_status(self) -> None:
+        """The response includes a valid overall_status value."""
         path = _minimal_config()
         os.environ["CONTROL_CENTER_CONFIG"] = path
         try:
@@ -306,6 +346,7 @@ class TestRoutesSummary(unittest.TestCase):
             os.unlink(path)
 
     def test_summary_has_generated_at(self) -> None:
+        """The response includes a non-empty generated_at timestamp string."""
         path = _minimal_config()
         os.environ["CONTROL_CENTER_CONFIG"] = path
         try:
@@ -318,6 +359,7 @@ class TestRoutesSummary(unittest.TestCase):
             os.unlink(path)
 
     def test_summary_has_services_list(self) -> None:
+        """The response includes a "services" list."""
         path = _minimal_config()
         os.environ["CONTROL_CENTER_CONFIG"] = path
         try:
@@ -329,6 +371,7 @@ class TestRoutesSummary(unittest.TestCase):
             os.unlink(path)
 
     def test_summary_has_system_disk(self) -> None:
+        """The response includes a "system.disk" list."""
         path = _minimal_config()
         os.environ["CONTROL_CENTER_CONFIG"] = path
         try:
@@ -341,6 +384,7 @@ class TestRoutesSummary(unittest.TestCase):
             os.unlink(path)
 
     def test_summary_overall_down_when_service_down(self) -> None:
+        """With every configured service unreachable, overall_status is "DOWN"."""
         path = _write_config("""
             services:
               broken:
@@ -359,6 +403,7 @@ class TestRoutesSummary(unittest.TestCase):
             os.unlink(path)
 
     def test_summary_raises_on_missing_config(self) -> None:
+        """A missing config file returns 500."""
         os.environ["CONTROL_CENTER_CONFIG"] = "/nonexistent/config.yaml"
         try:
             response = client.get("/summary")
@@ -367,6 +412,8 @@ class TestRoutesSummary(unittest.TestCase):
             del os.environ["CONTROL_CENTER_CONFIG"]
 
     def test_summary_overall_warn_when_disk_warns_but_no_down(self) -> None:
+        """A disk check that warns (with no service down) makes
+        overall_status "WARN", not "DOWN" or "UP"."""
         # A config with no services and a disk path that triggers WARN (100% threshold)
         # causes overall_status=WARN (routes_summary.py lines 45-46)
         import tempfile

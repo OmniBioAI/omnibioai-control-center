@@ -1,6 +1,9 @@
 """Tests for control_center.compliance.pdf -- the Jinja2/WeasyPrint render
 layer. No FastAPI/HTTP involved (that's test_compliance_router.py, a later
 step); this file only proves the template renders and produces a real PDF.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 from control_center.compliance.pdf import render_report_html, render_report_pdf
 
@@ -43,6 +46,8 @@ _EMPTY_CONTEXT = {
 
 
 def test_render_report_html_includes_org_and_period():
+    """The rendered HTML includes the organization name, the reporting
+    period's dates, and at least one user activity row."""
     html = render_report_html(_MINIMAL_CONTEXT)
     assert "KUMC Research" in html
     assert "2026-08-01" in html
@@ -51,6 +56,8 @@ def test_render_report_html_includes_org_and_period():
 
 
 def test_render_report_html_includes_omnibioai_logo_mark():
+    """The rendered HTML includes the inline SVG hexagon logo mark
+    shared with main.py's own header/AdminLogo.tsx."""
     html = render_report_html(_MINIMAL_CONTEXT)
     # The inline SVG hexagon mark shared with main.py's own header/AdminLogo.tsx.
     assert "<svg" in html
@@ -58,6 +65,8 @@ def test_render_report_html_includes_omnibioai_logo_mark():
 
 
 def test_render_report_html_escapes_user_supplied_values():
+    """A user-supplied organization_name containing a script tag is
+    HTML-escaped, not rendered as live markup."""
     context = {**_MINIMAL_CONTEXT, "organization_name": "<script>alert(1)</script>"}
     html = render_report_html(context)
     assert "<script>alert(1)</script>" not in html
@@ -82,6 +91,9 @@ def test_render_report_html_escapes_malicious_organization_name():
 
 
 def test_render_report_html_shows_empty_state_notes():
+    """With no login/RAG-query/security-event rows, the template shows an
+    explicit "No ... recorded in this period" note for each section
+    rather than an empty table."""
     html = render_report_html(_EMPTY_CONTEXT)
     assert "No login activity recorded in this period." in html
     assert "No RAG queries recorded in this period." in html
@@ -89,12 +101,18 @@ def test_render_report_html_shows_empty_state_notes():
 
 
 def test_render_report_html_shows_not_tracked_notes():
+    """The report discloses the two categories of activity it does not
+    track at all (session duration; dataset views/uploads), rather than
+    silently omitting them."""
     html = render_report_html(_MINIMAL_CONTEXT)
     assert "Session duration is not included in this report" in html
     assert "Dataset views/downloads and data uploads are not tracked" in html
 
 
 def test_render_report_html_shows_renamed_summary_labels():
+    """The summary uses the renamed, more precise labels ("Failed Login
+    Attempts", "Security Events Requiring Review") rather than the old,
+    more alarming "Security Incidents" label."""
     html = render_report_html(_MINIMAL_CONTEXT)
     assert "Failed Login Attempts" in html
     assert "Security Events Requiring Review" in html
@@ -102,6 +120,8 @@ def test_render_report_html_shows_renamed_summary_labels():
 
 
 def test_render_report_html_shows_sources_unavailable_warning():
+    """A non-empty sources_unavailable list renders a warning banner
+    naming which data source was unavailable."""
     context = {**_MINIMAL_CONTEXT, "sources_unavailable": ["RAG query events (omnibioai-billing)"]}
     html = render_report_html(context)
     assert "one or more data sources were unavailable" in html
@@ -109,11 +129,15 @@ def test_render_report_html_shows_sources_unavailable_warning():
 
 
 def test_render_report_html_omits_warning_when_all_sources_available():
+    """With an empty sources_unavailable list, no unavailability warning
+    is rendered at all."""
     html = render_report_html(_MINIMAL_CONTEXT)
     assert "one or more data sources were unavailable" not in html
 
 
 def test_render_report_pdf_produces_valid_pdf_bytes():
+    """render_report_pdf() returns real, non-trivial PDF bytes (a valid
+    %PDF- header, well over 1KB)."""
     pdf_bytes = render_report_pdf(_MINIMAL_CONTEXT)
     assert isinstance(pdf_bytes, bytes)
     assert pdf_bytes.startswith(b"%PDF-")
@@ -121,5 +145,7 @@ def test_render_report_pdf_produces_valid_pdf_bytes():
 
 
 def test_render_report_pdf_handles_empty_sections():
+    """render_report_pdf() still produces a valid PDF when every section
+    is empty."""
     pdf_bytes = render_report_pdf(_EMPTY_CONTEXT)
     assert pdf_bytes.startswith(b"%PDF-")

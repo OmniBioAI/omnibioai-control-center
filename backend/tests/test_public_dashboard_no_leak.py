@@ -10,6 +10,9 @@ modules already have their own full unit-test coverage elsewhere
 (test_check_*.py); this file only guards the cross-cutting "never leaks
 a real identifier" property a future edit to any of them could
 otherwise silently reintroduce.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 from __future__ import annotations
 
@@ -39,6 +42,9 @@ _FORBIDDEN_KEYS = {
 
 
 def _find_forbidden_keys(obj: object, path: str = "$") -> list[str]:
+    """Recursively scan a decoded JSON value for any key (at any depth)
+    whose lowercased name contains a forbidden substring; returns the
+    dotted/indexed paths of every hit found."""
     hits: list[str] = []
     if isinstance(obj, dict):
         for k, v in obj.items():
@@ -60,9 +66,13 @@ class TestGatewayTrafficIsAggregateOnly(unittest.TestCase):
     which is exactly why that route is gated and this one isn't)."""
 
     def _entry(self, eid: str, **fields: object) -> tuple[str, dict]:
+        """A fake Redis XRANGE entry (event_id, {"data": <json fields>})."""
         return (eid, {"data": json.dumps(fields)})
 
     def test_real_user_ids_in_the_stream_never_reach_the_response(self) -> None:
+        """Even with real user_id values present in the underlying
+        audit:events stream, GET /gateway-traffic's response never
+        contains them, or any "events"/"user_id" key at all."""
         entries = [
             self._entry(
                 "1-0", event_type="request", action="/compliance/hipaa-report",
@@ -84,6 +94,8 @@ class TestGatewayTrafficIsAggregateOnly(unittest.TestCase):
         self.assertNotIn("events", resp.json())
 
     def test_response_shape_has_no_raw_event_list(self) -> None:
+        """Even in the Redis-unreachable fallback path, the result dict
+        itself contains no "events" or "user_id" key."""
         with patch("redis.Redis.from_url", side_effect=ConnectionError("down")):
             result = gateway_traffic.get_gateway_traffic()
         self.assertNotIn("events", result)
@@ -99,6 +111,8 @@ class TestPublicInfraEndpointsCarryNoForbiddenKeys(unittest.TestCase):
     unsafe to leave anonymous."""
 
     def test_gpu(self) -> None:
+        """GET /gpu's response, scanned recursively, contains no
+        forbidden key."""
         with patch.object(
             routes_infra, "get_gpu_status",
             return_value={"reachable": True, "utilization_pct": 12, "memory_used_mb": 1024},
@@ -107,6 +121,8 @@ class TestPublicInfraEndpointsCarryNoForbiddenKeys(unittest.TestCase):
         self.assertEqual(_find_forbidden_keys(data), [])
 
     def test_celery(self) -> None:
+        """GET /celery's response, scanned recursively, contains no
+        forbidden key."""
         with patch.object(
             routes_infra, "get_celery_status",
             return_value={"workers": [{"name": "worker1", "active": 2}], "recent_tasks": []},
@@ -115,6 +131,8 @@ class TestPublicInfraEndpointsCarryNoForbiddenKeys(unittest.TestCase):
         self.assertEqual(_find_forbidden_keys(data), [])
 
     def test_database(self) -> None:
+        """GET /database's response, scanned recursively, contains no
+        forbidden key."""
         with patch.object(
             routes_infra, "get_database_status",
             return_value={"mysql": {"status": "UP"}, "redis": {"status": "UP"}},
@@ -123,6 +141,8 @@ class TestPublicInfraEndpointsCarryNoForbiddenKeys(unittest.TestCase):
         self.assertEqual(_find_forbidden_keys(data), [])
 
     def test_image_freshness(self) -> None:
+        """GET /image-freshness's response, scanned recursively,
+        contains no forbidden key."""
         with patch.object(
             routes_infra, "get_image_freshness",
             return_value={"images": [{"name": "bwa", "built_days_ago": 3}]},
@@ -131,6 +151,8 @@ class TestPublicInfraEndpointsCarryNoForbiddenKeys(unittest.TestCase):
         self.assertEqual(_find_forbidden_keys(data), [])
 
     def test_usage(self) -> None:
+        """GET /usage's response, scanned recursively, contains no
+        forbidden key."""
         with patch.object(
             routes_infra, "get_usage_status",
             return_value={"active_7d": 5, "active_30d": 20, "total": 30},
@@ -139,6 +161,8 @@ class TestPublicInfraEndpointsCarryNoForbiddenKeys(unittest.TestCase):
         self.assertEqual(_find_forbidden_keys(data), [])
 
     def test_activity(self) -> None:
+        """GET /activity's response, scanned recursively, contains no
+        forbidden key."""
         with patch.object(
             routes_infra, "get_activity_status",
             return_value={"containers": [], "reachable": True},
@@ -147,6 +171,8 @@ class TestPublicInfraEndpointsCarryNoForbiddenKeys(unittest.TestCase):
         self.assertEqual(_find_forbidden_keys(data), [])
 
     def test_integrity(self) -> None:
+        """GET /integrity's response, scanned recursively, contains no
+        forbidden key."""
         with patch("control_center.api.routes_infra.load_settings", return_value=object()):
             with patch(
                 "control_center.api.routes_infra.run_integrity_checks",
@@ -177,6 +203,8 @@ class TestReportPublicStatsCarriesNoForbiddenKeys(unittest.TestCase):
     }
 
     def _get(self):
+        """Call GET /report/public-stats with a fully-populated
+        report_data.json fixture in place."""
         with tempfile.TemporaryDirectory() as tmp:
             reports_dir = Path(tmp) / "work" / "out" / "reports"
             reports_dir.mkdir(parents=True)
@@ -185,9 +213,15 @@ class TestReportPublicStatsCarriesNoForbiddenKeys(unittest.TestCase):
                 return client.get("/report/public-stats")
 
     def test_no_forbidden_keys(self) -> None:
+        """GET /report/public-stats's response, scanned recursively,
+        contains no forbidden key."""
         self.assertEqual(_find_forbidden_keys(self._get().json()), [])
 
     def test_no_per_repo_arrays_or_repo_names(self) -> None:
+        """The response contains only the 5 documented aggregate-scalar
+        keys, and none of the per-repo arrays or repo/branch names from
+        the underlying report_data.json ever appear in the raw response
+        text."""
         resp = self._get()
         body = resp.json()
         self.assertEqual(

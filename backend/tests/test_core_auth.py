@@ -9,6 +9,9 @@ parameterized permission check against the JWT's `permissions` claim.
 These tests cover authentication (unchanged, still delegated to
 core.jwt_verify), authorization against a specific permission, and
 isolation between the three permissions this PR introduces.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ PLATFORM_MANAGE_CONTENT = "platform.manage_content"
 
 
 def _token(**claims) -> str:
+    """A JWT signed with the test SECRET, carrying the given claims."""
     return jwt.encode(claims, SECRET, algorithm="HS256")
 
 
@@ -45,21 +49,25 @@ class TestRequirePermissionAuthentication(unittest.TestCase):
         self.check = auth_module.require_permission(PLATFORM_MANAGE_INFRA)
 
     def test_missing_header_raises_401(self) -> None:
+        """No Authorization header at all raises 401."""
         with self.assertRaises(HTTPException) as ctx:
             self.check(None)
         self.assertEqual(ctx.exception.status_code, 401)
 
     def test_non_bearer_header_raises_401(self) -> None:
+        """A non-Bearer auth scheme raises 401."""
         with self.assertRaises(HTTPException) as ctx:
             self.check("Basic abc123")
         self.assertEqual(ctx.exception.status_code, 401)
 
     def test_malformed_token_raises_401(self) -> None:
+        """A Bearer token that isn't a valid JWT raises 401."""
         with self.assertRaises(HTTPException) as ctx:
             self.check("Bearer not-a-real-token")
         self.assertEqual(ctx.exception.status_code, 401)
 
     def test_invalid_signature_raises_401(self) -> None:
+        """A token signed with the wrong secret raises 401."""
         token = jwt.encode(
             {"sub": "1", "permissions": [PLATFORM_MANAGE_INFRA]},
             "wrong-secret", algorithm="HS256",
@@ -69,6 +77,7 @@ class TestRequirePermissionAuthentication(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 401)
 
     def test_expired_token_raises_401(self) -> None:
+        """A token with a past `exp` claim raises 401."""
         import datetime
         token = jwt.encode(
             {
@@ -83,12 +92,15 @@ class TestRequirePermissionAuthentication(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 401)
 
     def test_bearer_prefix_case_insensitive(self) -> None:
+        """A lowercase "bearer" prefix is accepted the same as "Bearer"."""
         token = _token(sub="1", permissions=[PLATFORM_MANAGE_INFRA])
         payload = self.check(f"bearer {token}")
         self.assertIn(PLATFORM_MANAGE_INFRA, payload["permissions"])
 
 
 class TestRequirePermissionAuthorization(unittest.TestCase):
+    """require_permission()'s per-permission authorization check against
+    a validly-authenticated token."""
 
     def setUp(self) -> None:
         patcher = patch.object(jwt_verify_module, "JWT_SECRET", SECRET)
@@ -96,6 +108,7 @@ class TestRequirePermissionAuthorization(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def test_valid_token_without_permission_raises_403(self) -> None:
+        """A valid token with an empty permissions list raises 403."""
         check = auth_module.require_permission(PLATFORM_MANAGE_INFRA)
         token = _token(sub="1", permissions=[])
         with self.assertRaises(HTTPException) as ctx:
@@ -103,6 +116,7 @@ class TestRequirePermissionAuthorization(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 403)
 
     def test_valid_token_missing_permissions_claim_raises_403(self) -> None:
+        """A valid token with no permissions claim at all raises 403."""
         check = auth_module.require_permission(PLATFORM_MANAGE_INFRA)
         token = _token(sub="1")
         with self.assertRaises(HTTPException) as ctx:
@@ -110,6 +124,8 @@ class TestRequirePermissionAuthorization(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 403)
 
     def test_valid_token_with_permission_returns_payload(self) -> None:
+        """A token carrying the required permission returns the decoded
+        payload, including the permissions list."""
         check = auth_module.require_permission(PLATFORM_MANAGE_INFRA)
         token = _token(sub="1", email="admin@omnibioai", permissions=[PLATFORM_MANAGE_INFRA])
         payload = check(f"Bearer {token}")
@@ -128,6 +144,8 @@ class TestRequirePermissionAuthorization(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 403)
 
     def test_unrelated_permission_raises_403(self) -> None:
+        """A token with a real but unrelated permission raises 403 for
+        the required permission."""
         check = auth_module.require_permission(PLATFORM_MANAGE_INFRA)
         token = _token(sub="1", permissions=["manage_licenses"])
         with self.assertRaises(HTTPException) as ctx:
@@ -156,6 +174,8 @@ class TestRequirePermissionIsolation(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def test_cron_permission_does_not_satisfy_content_check(self) -> None:
+        """A token holding only platform.manage_cron is denied with 403 by a
+        platform.manage_content check."""
         content_check = auth_module.require_permission(PLATFORM_MANAGE_CONTENT)
         token = _token(sub="1", permissions=[PLATFORM_MANAGE_CRON])
         with self.assertRaises(HTTPException) as ctx:
@@ -163,6 +183,8 @@ class TestRequirePermissionIsolation(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 403)
 
     def test_content_permission_does_not_satisfy_infra_check(self) -> None:
+        """A token holding only platform.manage_content is denied with 403 by a
+        platform.manage_infra check."""
         infra_check = auth_module.require_permission(PLATFORM_MANAGE_INFRA)
         token = _token(sub="1", permissions=[PLATFORM_MANAGE_CONTENT])
         with self.assertRaises(HTTPException) as ctx:
@@ -170,6 +192,8 @@ class TestRequirePermissionIsolation(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 403)
 
     def test_infra_permission_does_not_satisfy_cron_check(self) -> None:
+        """A token holding only platform.manage_infra is denied with 403 by a
+        platform.manage_cron check."""
         cron_check = auth_module.require_permission(PLATFORM_MANAGE_CRON)
         token = _token(sub="1", permissions=[PLATFORM_MANAGE_INFRA])
         with self.assertRaises(HTTPException) as ctx:
@@ -177,6 +201,8 @@ class TestRequirePermissionIsolation(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 403)
 
     def test_all_three_permissions_together_satisfy_every_check(self) -> None:
+        """A token holding all three platform permissions satisfies each of the three
+        checks and returns a payload containing the checked permission."""
         token = _token(
             sub="1",
             roles=["admin"],

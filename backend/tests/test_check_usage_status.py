@@ -3,6 +3,17 @@ tests/test_check_usage_status.py
 
 Unit tests for:
   - control_center.checks.usage_status
+
+Covers timestamp parsing (_parse_dt: naive timestamps assumed UTC, aware
+ones preserved), MySQL-backed user-activity/session-count queries
+(fail-safe to empty/zero on a connect or query error), the on-disk run
+scanner (_scan_runs: aggregation by plugin/day, the rolling window
+exclusion, and skipping every malformed/missing/non-run filesystem
+entry without raising), and get_usage_status()'s combination of all
+three into one report.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -16,6 +27,7 @@ from control_center.checks import usage_status
 
 
 def _cursor_ctx(cursor: MagicMock) -> MagicMock:
+    """A context-manager mock wrapping a fake DB-API cursor."""
     ctx = MagicMock()
     ctx.__enter__ = MagicMock(return_value=cursor)
     ctx.__exit__ = MagicMock(return_value=False)
@@ -23,33 +35,47 @@ def _cursor_ctx(cursor: MagicMock) -> MagicMock:
 
 
 class TestParseDt(unittest.TestCase):
+    """_parse_dt()'s ISO-datetime parsing, failing safe to None, and
+    treating a naive timestamp as UTC while preserving an aware one's
+    own offset."""
 
     def test_none_returns_none(self) -> None:
+        """A None input returns None."""
         self.assertIsNone(usage_status._parse_dt(None))
 
     def test_empty_string_returns_none(self) -> None:
+        """An empty string returns None."""
         self.assertIsNone(usage_status._parse_dt(""))
 
     def test_malformed_returns_none(self) -> None:
+        """An unparseable string returns None rather than raising."""
         self.assertIsNone(usage_status._parse_dt("not-a-date"))
 
     def test_naive_datetime_gets_utc(self) -> None:
+        """A timestamp with no timezone offset is assumed to be UTC."""
         dt = usage_status._parse_dt("2026-01-01T00:00:00")
         self.assertEqual(dt.tzinfo, datetime.timezone.utc)
 
     def test_aware_datetime_preserved(self) -> None:
+        """A timestamp with an explicit offset keeps that offset, not
+        forced to UTC."""
         dt = usage_status._parse_dt("2026-01-01T00:00:00+05:00")
         self.assertEqual(dt.utcoffset(), datetime.timedelta(hours=5))
 
 
 class TestUserActivity(unittest.TestCase):
+    """_user_activity()'s MySQL-backed active-user counting, failing
+    safe on any connection/query error."""
 
     def test_connect_failure_returns_empty(self) -> None:
+        """A MySQL connection failure returns the documented all-zero shape."""
         with patch("pymysql.connect", side_effect=ConnectionError("down")):
             result = usage_status._user_activity()
         self.assertEqual(result, {"active_7d": 0, "active_30d": 0, "total": 0, "test_count": 0})
 
     def test_query_failure_returns_empty_and_closes(self) -> None:
+        """A query execution failure returns the all-zero shape and
+        still closes the connection."""
         cursor = MagicMock()
         cursor.execute.side_effect = RuntimeError("bad query")
         conn = MagicMock()
@@ -60,6 +86,9 @@ class TestUserActivity(unittest.TestCase):
         conn.close.assert_called_once()
 
     def test_classifies_recency_and_test_users(self) -> None:
+        """Users are correctly bucketed into active_7d/active_30d by
+        last_login recency, a null last_login is excluded from both, and
+        a "testuser"-prefixed name is counted under test_count."""
         now = datetime.datetime.now(datetime.timezone.utc)
         cursor = MagicMock()
         cursor.fetchall.return_value = [
@@ -80,6 +109,9 @@ class TestUserActivity(unittest.TestCase):
         self.assertEqual(result["test_count"], 1)
 
     def test_naive_last_login_treated_as_utc(self) -> None:
+        """A naive (no-tzinfo) last_login value from the DB is treated
+        as UTC when computing recency, not compared incorrectly against
+        an aware "now"."""
         naive_recent = datetime.datetime.now() - datetime.timedelta(hours=1)
         cursor = MagicMock()
         cursor.fetchall.return_value = [("alice", naive_recent)]
@@ -91,12 +123,16 @@ class TestUserActivity(unittest.TestCase):
 
 
 class TestSessionCount(unittest.TestCase):
+    """_session_count()'s MySQL-backed 30-day session count, failing
+    safe to 0 on any error or empty result."""
 
     def test_connect_failure_returns_zero(self) -> None:
+        """A MySQL connection failure returns 0."""
         with patch("pymysql.connect", side_effect=ConnectionError("down")):
             self.assertEqual(usage_status._session_count(), 0)
 
     def test_query_failure_returns_zero_and_closes(self) -> None:
+        """A query execution failure returns 0 and still closes the connection."""
         cursor = MagicMock()
         cursor.execute.side_effect = RuntimeError("boom")
         conn = MagicMock()
@@ -107,6 +143,7 @@ class TestSessionCount(unittest.TestCase):
         conn.close.assert_called_once()
 
     def test_returns_count_from_row(self) -> None:
+        """A successful query returns the count from the result row."""
         cursor = MagicMock()
         cursor.fetchone.return_value = (42,)
         conn = MagicMock()
@@ -116,6 +153,7 @@ class TestSessionCount(unittest.TestCase):
         self.assertEqual(result, 42)
 
     def test_no_row_returns_zero(self) -> None:
+        """A query returning no row at all yields 0 rather than raising."""
         cursor = MagicMock()
         cursor.fetchone.return_value = None
         conn = MagicMock()
@@ -126,18 +164,25 @@ class TestSessionCount(unittest.TestCase):
 
 
 class TestScanRuns(unittest.TestCase):
+    """_scan_runs()'s on-disk run-directory scan: per-plugin/per-day
+    aggregation within the rolling window, and skipping every malformed,
+    missing, or non-run filesystem entry without raising."""
 
     def _write_status(self, run_dir, **fields) -> None:
+        """Create `run_dir` and write a status.json with the given fields."""
         run_dir.mkdir(parents=True)
         (run_dir / "status.json").write_text(json.dumps(fields))
 
     def test_missing_runs_root_returns_empty(self, ) -> None:
+        """A nonexistent RUNS_ROOT returns the documented empty shape."""
         import pathlib
         with patch.object(usage_status, "RUNS_ROOT", pathlib.Path("/nonexistent/runs")):
             result = usage_status._scan_runs()
         self.assertEqual(result, {"top_plugins": [], "runs_by_day": [], "success_rate_pct": 0.0})
 
     def test_aggregates_completed_and_failed_runs(self, tmp_path=None) -> None:
+        """Runs are aggregated per-plugin (runs_30d), the success rate
+        reflects completed vs. total, and runs_by_day groups them by date."""
         import tempfile, pathlib
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
@@ -158,6 +203,7 @@ class TestScanRuns(unittest.TestCase):
         self.assertEqual(len(result["runs_by_day"]), 1)
 
     def test_old_runs_excluded_by_window(self) -> None:
+        """A run older than _WINDOW_DAYS is excluded from the aggregate entirely."""
         import tempfile, pathlib
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
@@ -171,6 +217,7 @@ class TestScanRuns(unittest.TestCase):
         self.assertEqual(result["success_rate_pct"], 0.0)
 
     def test_missing_status_file_skipped(self) -> None:
+        """A run directory with no status.json at all is skipped."""
         import tempfile, pathlib
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
@@ -182,6 +229,7 @@ class TestScanRuns(unittest.TestCase):
         self.assertEqual(result["top_plugins"], [])
 
     def test_malformed_status_json_skipped(self) -> None:
+        """A status.json that isn't valid JSON is skipped rather than raising."""
         import tempfile, pathlib
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
@@ -195,6 +243,7 @@ class TestScanRuns(unittest.TestCase):
         self.assertEqual(result["top_plugins"], [])
 
     def test_missing_created_at_skipped(self) -> None:
+        """A status.json missing "created_at" is skipped rather than raising."""
         import tempfile, pathlib
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
@@ -206,6 +255,8 @@ class TestScanRuns(unittest.TestCase):
         self.assertEqual(result["top_plugins"], [])
 
     def test_non_directory_entries_in_root_and_plugin_dir_skipped(self) -> None:
+        """A stray file directly under RUNS_ROOT or under a plugin's
+        directory is skipped rather than treated as a run/plugin entry."""
         import tempfile, pathlib
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
@@ -221,6 +272,9 @@ class TestScanRuns(unittest.TestCase):
         self.assertEqual(result["top_plugins"], [])
 
     def test_unknown_state_not_counted_as_completed_or_failed(self) -> None:
+        """A run whose state isn't COMPLETED/FAILED (e.g. RUNNING) is
+        still counted toward the plugin's runs_30d total, but not
+        toward the success-rate's completed count."""
         import tempfile, pathlib
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
@@ -236,8 +290,11 @@ class TestScanRuns(unittest.TestCase):
 
 
 class TestGetUsageStatus(unittest.TestCase):
+    """get_usage_status()'s combination of all three underlying sources."""
 
     def test_combines_all_sources(self) -> None:
+        """User activity, session count, and run-scan results are
+        combined into one report, with the documented caveat fields present."""
         with patch.object(usage_status, "_user_activity",
                            return_value={"active_7d": 1, "active_30d": 2, "total": 3, "test_count": 0}):
             with patch.object(usage_status, "_session_count", return_value=7):

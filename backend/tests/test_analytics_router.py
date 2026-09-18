@@ -7,6 +7,9 @@ brief's own API test list (Section 12): date filtering, org filtering,
 team filtering, grouping, empty results, cache behavior, Prometheus
 unavailable, billing unavailable -- plus RBAC-through-HTTP for the full
 platform_admin/org_admin/team_admin/regular-user matrix.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 from __future__ import annotations
 
@@ -28,14 +31,18 @@ SECRET = "test-secret"
 
 
 def _token(**claims) -> str:
+    """A JWT signed with the module's own SECRET, carrying the given claims."""
     return jwt.encode(claims, SECRET, algorithm="HS256")
 
 
 def _auth(**claims) -> dict:
+    """A bearer-token Authorization header for a JWT carrying the given claims."""
     return {"Authorization": f"Bearer {_token(**claims)}"}
 
 
 class AnalyticsRouterTestCase(unittest.TestCase):
+    """Base fixture: JWT_SECRET pinned to SECRET, aggregator/cache Redis swapped for FakeRedis, and tes_client.get_runs stubbed to return None."""
+
     def setUp(self) -> None:
         jwt_patcher = patch.object(jwt_verify_module, "JWT_SECRET", SECRET)
         jwt_patcher.start()
@@ -57,50 +64,65 @@ class AnalyticsRouterTestCase(unittest.TestCase):
 
 
 class AuthenticationTestCase(AnalyticsRouterTestCase):
+    """Missing or invalid bearer tokens are rejected before any analytics logic runs."""
+
     def test_missing_token_returns_401(self) -> None:
+        """A request with no Authorization header is rejected with 401."""
         r = client.get("/analytics/overview")
         self.assertEqual(r.status_code, 401)
 
     def test_invalid_token_returns_401(self) -> None:
+        """A request with an unparseable bearer token is rejected with 401."""
         r = client.get("/analytics/overview", headers={"Authorization": "Bearer garbage"})
         self.assertEqual(r.status_code, 401)
 
 
 class RbacMatrixTestCase(AnalyticsRouterTestCase):
+    """The platform_admin/org_admin/team_admin/regular-user permission matrix for scoped analytics access."""
+
     def test_platform_admin_allowed(self) -> None:
+        """A MANAGE_ALL_ORGS token can view analytics with no org/team scoping."""
         r = client.get("/analytics/overview", headers=_auth(sub="1", permissions=[MANAGE_ALL_ORGS]))
         self.assertEqual(r.status_code, 200)
 
     def test_org_admin_own_org_allowed(self) -> None:
+        """An org_admin can view analytics scoped to their own org_id."""
         headers = _auth(sub="1", permissions=[], org_id=5, org_role=["org_admin"])
         r = client.get("/analytics/overview", params={"org_id": 5}, headers=headers)
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["org_id"], 5)
 
     def test_org_admin_other_org_denied(self) -> None:
+        """An org_admin is denied with 403 when requesting a different org's org_id."""
         headers = _auth(sub="1", permissions=[], org_id=5, org_role=["org_admin"])
         r = client.get("/analytics/overview", params={"org_id": 6}, headers=headers)
         self.assertEqual(r.status_code, 403)
 
     def test_team_admin_permitted_team_allowed(self) -> None:
+        """A team_admin can view analytics scoped to their own team_id."""
         headers = _auth(sub="1", permissions=[], org_id=5, org_role=[], team_id=10, team_role="admin")
         r = client.get("/analytics/overview", params={"org_id": 5, "team_id": 10}, headers=headers)
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["team_id"], 10)
 
     def test_team_admin_unauthorized_team_denied(self) -> None:
+        """A team_admin is denied with 403 when requesting a different team's team_id."""
         headers = _auth(sub="1", permissions=[], org_id=5, org_role=[], team_id=10, team_role="admin")
         r = client.get("/analytics/overview", params={"org_id": 5, "team_id": 11}, headers=headers)
         self.assertEqual(r.status_code, 403)
 
     def test_regular_user_denied(self) -> None:
+        """A plain org member with no admin role is denied with 403."""
         headers = _auth(sub="1", permissions=[], org_id=5, org_role=["member"])
         r = client.get("/analytics/overview", headers=headers)
         self.assertEqual(r.status_code, 403)
 
 
 class OverviewEndpointTestCase(AnalyticsRouterTestCase):
+    """GET /analytics/overview's empty-result shape, date filtering, and caching."""
+
     def test_empty_result_shape(self) -> None:
+        """With no events recorded, the overview reports zeroed totals and a 0.0 error rate."""
         headers = _auth(sub="1", permissions=[MANAGE_ALL_ORGS])
         r = client.get("/analytics/overview", params={"org_id": 1}, headers=headers)
         self.assertEqual(r.status_code, 200)
@@ -110,6 +132,7 @@ class OverviewEndpointTestCase(AnalyticsRouterTestCase):
         self.assertEqual(body["error_rate"], 0.0)
 
     def test_date_filtering(self) -> None:
+        """The from_date/to_date query params are echoed back in the response."""
         headers = _auth(sub="1", permissions=[MANAGE_ALL_ORGS])
         r = client.get(
             "/analytics/overview",
@@ -121,6 +144,7 @@ class OverviewEndpointTestCase(AnalyticsRouterTestCase):
         self.assertEqual(r.json()["to_date"], "2026-01-05")
 
     def test_cache_hit_skips_recomputation(self) -> None:
+        """A second identical request is served from cache: get_overview() is not called again, and the response is identical."""
         headers = _auth(sub="1", permissions=[MANAGE_ALL_ORGS])
         params = {"org_id": 1, "from_date": "2026-01-01", "to_date": "2026-01-01"}
         r1 = client.get("/analytics/overview", params=params, headers=headers)
@@ -132,7 +156,10 @@ class OverviewEndpointTestCase(AnalyticsRouterTestCase):
 
 
 class RunHelperTestCase(AnalyticsRouterTestCase):
+    """The route's internal compute-and-cache helper propagates upstream failures rather than swallowing them."""
+
     def test_compute_failure_increments_error_metric_and_propagates(self) -> None:
+        """A get_overview() failure propagates through as a 500 rather than being cached or masked."""
         headers = _auth(sub="1", permissions=[MANAGE_ALL_ORGS])
         with patch("control_center.analytics.service.get_overview", AsyncMock(side_effect=RuntimeError("boom"))):
             r = _no_raise_client.get("/analytics/overview", params={"org_id": 1}, headers=headers)
@@ -140,7 +167,10 @@ class RunHelperTestCase(AnalyticsRouterTestCase):
 
 
 class QueriesEndpointTestCase(AnalyticsRouterTestCase):
+    """GET /analytics/queries's per-day trend breakdown."""
+
     def test_returns_daily_trend(self) -> None:
+        """A 2-day date range returns exactly 2 daily entries, with zero total_queries when no events were recorded."""
         headers = _auth(sub="1", permissions=[MANAGE_ALL_ORGS])
         r = client.get(
             "/analytics/queries",
@@ -154,7 +184,10 @@ class QueriesEndpointTestCase(AnalyticsRouterTestCase):
 
 
 class WorkflowsEndpointTestCase(AnalyticsRouterTestCase):
+    """GET /analytics/workflows's platform-wide null-with-note fallback versus an org's counted TES run total."""
+
     def test_platform_admin_gets_null_with_note(self) -> None:
+        """With no org_id scoping (a platform admin's view), workflows_run is null and a "note" explains why."""
         headers = _auth(sub="1", permissions=[MANAGE_ALL_ORGS])
         r = client.get("/analytics/workflows", headers=headers)
         self.assertEqual(r.status_code, 200)
@@ -163,6 +196,7 @@ class WorkflowsEndpointTestCase(AnalyticsRouterTestCase):
         self.assertIn("note", body)
 
     def test_org_admin_gets_counted_runs(self) -> None:
+        """With an org_id, workflows_run is the count of TES runs returned by tes_client.get_runs() within the date range."""
         runs = [{"created_epoch": 1768000000, "state": "COMPLETED"}]
         headers = _auth(sub="1", permissions=[], org_id=5, org_role=["org_admin"])
         with patch.object(tes_client, "get_runs", AsyncMock(return_value=runs)):
@@ -176,7 +210,10 @@ class WorkflowsEndpointTestCase(AnalyticsRouterTestCase):
 
 
 class UsersEndpointTestCase(AnalyticsRouterTestCase):
+    """GET /analytics/users's aggregate-only response shape."""
+
     def test_never_exposes_raw_user_ids(self) -> None:
+        """The response includes dau/wau/mau/daily aggregates but never a raw user_ids or users list."""
         headers = _auth(sub="1", permissions=[MANAGE_ALL_ORGS])
         r = client.get("/analytics/users", params={"org_id": 1}, headers=headers)
         self.assertEqual(r.status_code, 200)
@@ -190,7 +227,10 @@ class UsersEndpointTestCase(AnalyticsRouterTestCase):
 
 
 class PerformanceEndpointTestCase(AnalyticsRouterTestCase):
+    """GET /analytics/performance's Prometheus-unavailable fallback and its RBAC gate."""
+
     def test_prometheus_unavailable_still_returns_200(self) -> None:
+        """With Prometheus unreachable, the platform-scoped view still returns 200, falling back to the "events" latency source."""
         headers = _auth(sub="1", permissions=[MANAGE_ALL_ORGS])
         r = client.get("/analytics/performance", headers=headers)
         self.assertEqual(r.status_code, 200)
@@ -201,13 +241,17 @@ class PerformanceEndpointTestCase(AnalyticsRouterTestCase):
         self.assertEqual(body["latency_source"], "events")
 
     def test_regular_user_still_denied(self) -> None:
+        """A plain org member is denied with 403, same as the other analytics endpoints."""
         headers = _auth(sub="1", permissions=[], org_id=5, org_role=["member"])
         r = client.get("/analytics/performance", headers=headers)
         self.assertEqual(r.status_code, 403)
 
 
 class UsageEndpointTestCase(AnalyticsRouterTestCase):
+    """GET /analytics/usage's graceful degradation when the billing service is unavailable."""
+
     def test_billing_unavailable_degrades_gracefully(self) -> None:
+        """A billing_client (False, None) unreachable-upstream result surfaces as 200 with billing_available=False, not a 5xx."""
         # billing_client.get_usage/get_usage_limits already have their own
         # dedicated unreachable-upstream tests (test_analytics_billing_client.py);
         # this proves the router surfaces that (False, None) contract as a
@@ -224,6 +268,7 @@ class UsageEndpointTestCase(AnalyticsRouterTestCase):
         self.assertFalse(r.json()["billing_available"])
 
     def test_no_org_id_for_platform_admin_returns_unavailable(self) -> None:
+        """With no org_id (a platform admin's unscoped view), billing_available is False since usage is org-scoped."""
         headers = _auth(sub="1", permissions=[MANAGE_ALL_ORGS])
         r = client.get("/analytics/usage", headers=headers)
         self.assertEqual(r.status_code, 200)
@@ -231,7 +276,10 @@ class UsageEndpointTestCase(AnalyticsRouterTestCase):
 
 
 class ServicesEndpointTestCase(AnalyticsRouterTestCase):
+    """GET /analytics/services's per-service call breakdown."""
+
     def test_grouping_by_service(self) -> None:
+        """A recorded event for the "rag" service is grouped under that service's entry in the response."""
         from datetime import datetime
         from control_center.analytics.schemas import AnalyticsEvent
         aggregator.apply_interaction_event(AnalyticsEvent(
@@ -247,7 +295,10 @@ class ServicesEndpointTestCase(AnalyticsRouterTestCase):
 
 
 class ExportEndpointTestCase(AnalyticsRouterTestCase):
+    """GET /analytics/export's CSV rendering per export type, and its own auth/validation gates."""
+
     def test_export_overview_returns_csv(self) -> None:
+        """type=overview returns a text/csv response whose body includes the total_queries column."""
         headers = _auth(sub="1", permissions=[MANAGE_ALL_ORGS])
         r = client.get("/analytics/export", params={"type": "overview", "org_id": 1}, headers=headers)
         self.assertEqual(r.status_code, 200)
@@ -255,6 +306,7 @@ class ExportEndpointTestCase(AnalyticsRouterTestCase):
         self.assertIn("total_queries", r.text)
 
     def test_export_queries_returns_daily_rows(self) -> None:
+        """type=queries returns a date,count CSV with one row per day in range plus a header."""
         headers = _auth(sub="1", permissions=[MANAGE_ALL_ORGS])
         r = client.get(
             "/analytics/export",
@@ -267,6 +319,7 @@ class ExportEndpointTestCase(AnalyticsRouterTestCase):
         self.assertEqual(len(lines), 3)  # header + 2 days
 
     def test_export_services_returns_service_rows(self) -> None:
+        """type=services returns a service,total_calls,errors,error_rate,avg_latency_ms CSV including the recorded "rag" service."""
         from datetime import datetime
         from control_center.analytics.schemas import AnalyticsEvent
         aggregator.apply_interaction_event(AnalyticsEvent(
@@ -285,11 +338,13 @@ class ExportEndpointTestCase(AnalyticsRouterTestCase):
         self.assertIn("rag", lines[1])
 
     def test_unknown_export_type_returns_400(self) -> None:
+        """An unrecognized "type" query param is rejected with 400."""
         headers = _auth(sub="1", permissions=[MANAGE_ALL_ORGS])
         r = client.get("/analytics/export", params={"type": "bogus"}, headers=headers)
         self.assertEqual(r.status_code, 400)
 
     def test_export_requires_auth(self) -> None:
+        """A request with no Authorization header is rejected with 401 before the export type is even considered."""
         r = client.get("/analytics/export", params={"type": "overview"})
         self.assertEqual(r.status_code, 401)
 

@@ -4,6 +4,9 @@ Covers the lazy-init/memoization behavior directly (the real module-level
 `engine`/`SessionLocal` is never exercised by test_routes_hipaa_compliance.py,
 which overrides `get_db` outright) -- see db.py's own module docstring for
 why that split exists.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 from __future__ import annotations
 
@@ -17,7 +20,12 @@ from control_center.hipaa_compliance import db as db_module
 
 
 class InitDbTests(unittest.TestCase):
+    """init_db() creates the hipaa_compliance_changes table and is safe
+    to call more than once against the same engine."""
+
     def test_init_db_creates_table_on_given_engine(self):
+        """init_db() creates the hipaa_compliance_changes table on the
+        engine it's given."""
         engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
         with patch.object(db_module, "engine", engine):
             db_module.init_db()
@@ -25,6 +33,8 @@ class InitDbTests(unittest.TestCase):
         self.assertIn("hipaa_compliance_changes", inspector.get_table_names())
 
     def test_init_db_is_idempotent(self):
+        """Calling init_db() twice against the same engine does not raise
+        (CREATE TABLE IF NOT EXISTS semantics)."""
         engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
         with patch.object(db_module, "engine", engine):
             db_module.init_db()
@@ -34,6 +44,9 @@ class InitDbTests(unittest.TestCase):
 
 
 class EnsureInitializedTests(unittest.TestCase):
+    """_ensure_initialized()'s memoized create-and-seed-once behavior, and
+    get_db()'s session lifecycle."""
+
     def setUp(self):
         # Isolate the module-level `_initialized` flag per test -- other
         # test modules in this file/suite must not see it as already
@@ -52,6 +65,8 @@ class EnsureInitializedTests(unittest.TestCase):
         self.addCleanup(self.session_patcher.stop)
 
     def test_ensure_initialized_creates_table_and_seeds_once(self):
+        """A fresh call to _ensure_initialized() creates the table, sets
+        the memoization flag, and leaves the seed data present."""
         from control_center.hipaa_compliance.models import HipaaComplianceChange
 
         db_module._ensure_initialized()
@@ -65,6 +80,8 @@ class EnsureInitializedTests(unittest.TestCase):
         self.assertGreater(count, 0)  # seed.py's SEED_CHANGES landed
 
     def test_ensure_initialized_second_call_is_a_no_op(self):
+        """A second _ensure_initialized() call does not call init_db()
+        again -- the memoization flag short-circuits it."""
         # wraps=... -- init_db's real body still runs (the table must
         # actually exist for _ensure_initialized's own seed_initial_data
         # call not to blow up on the second, memoization-only check
@@ -75,6 +92,8 @@ class EnsureInitializedTests(unittest.TestCase):
         mock_init.assert_called_once()
 
     def test_get_db_yields_a_working_session_and_closes_it(self):
+        """get_db() is a single-value generator: it yields one usable
+        session and then raises StopIteration on the next advance."""
         gen = db_module.get_db()
         session = next(gen)
         self.assertIsNotNone(session)

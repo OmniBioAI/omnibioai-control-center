@@ -10,6 +10,9 @@ exact conventions -- this route is a thin relay, no authorization
 decision is made here (that's entirely omnibioai-auth's job:
 GET /platform/interactions is platform-admin-only,
 require_permission(manage_all_orgs), PR-B5-A).
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -26,6 +29,8 @@ client = TestClient(app)
 
 
 def _mock_response(status_code: int, json_body=None, raise_json_error: bool = False, content: bytes = b"x") -> MagicMock:
+    """A MagicMock httpx.Response stand-in; raise_json_error makes
+    .json() raise ValueError instead of returning json_body."""
     resp = MagicMock()
     resp.status_code = status_code
     resp.content = content
@@ -37,6 +42,8 @@ def _mock_response(status_code: int, json_body=None, raise_json_error: bool = Fa
 
 
 def _mock_async_client(response: MagicMock = None, side_effect=None):
+    """An async-context-manager mock of httpx.AsyncClient whose
+    .request() returns `response`, or raises `side_effect` if given."""
     mock_client = MagicMock()
     mock_request = AsyncMock()
     if side_effect is not None:
@@ -79,7 +86,13 @@ _LIST_RESPONSE = {
 
 
 class TestListInteractionsProxy(unittest.TestCase):
+    """GET /platform/interactions's thin-relay behavior: success
+    passthrough (never leaking a token/secret-shaped field), the exact
+    pagination envelope, query forwarding, and fail-safe error mapping."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged,
+        and no token/secret-shaped substring appears in the response text."""
         upstream = _mock_response(200, _LIST_RESPONSE)
         with patch(
             "control_center.api.routes_platform_interactions_proxy.httpx.AsyncClient",
@@ -95,6 +108,8 @@ class TestListInteractionsProxy(unittest.TestCase):
             self.assertNotIn(forbidden, body_text.lower())
 
     def test_envelope_preserved_exactly(self) -> None:
+        """The response has exactly the documented pagination envelope
+        keys with their upstream values unchanged."""
         upstream = _mock_response(200, _LIST_RESPONSE)
         with patch(
             "control_center.api.routes_platform_interactions_proxy.httpx.AsyncClient",
@@ -109,6 +124,8 @@ class TestListInteractionsProxy(unittest.TestCase):
         self.assertEqual(body["total_pages"], 1)
 
     def test_forwards_authorization_header(self) -> None:
+        """The caller's Authorization header is forwarded to the
+        upstream call unchanged."""
         upstream = _mock_response(200, _LIST_RESPONSE)
         mock_ctx = _mock_async_client(upstream)
         with patch(
@@ -120,6 +137,8 @@ class TestListInteractionsProxy(unittest.TestCase):
         self.assertEqual(call_kwargs["headers"]["Authorization"], "Bearer my-token-123")
 
     def test_missing_authorization_header_is_not_forged(self) -> None:
+        """No Authorization header on the incoming request means none
+        is forwarded upstream -- the proxy never invents one."""
         # No Authorization header on the incoming request -- the proxy
         # must not invent one; omnibioai-auth's own get_current_user is
         # what actually rejects the request (mocked here as a 401, same
@@ -135,6 +154,8 @@ class TestListInteractionsProxy(unittest.TestCase):
         self.assertNotIn("Authorization", call_kwargs["headers"])
 
     def test_query_parameters_forwarded_unchanged(self) -> None:
+        """Every documented filter/pagination query param is forwarded
+        to the upstream request unchanged."""
         upstream = _mock_response(200, _LIST_RESPONSE)
         mock_ctx = _mock_async_client(upstream)
         with patch(
@@ -163,6 +184,7 @@ class TestListInteractionsProxy(unittest.TestCase):
         self.assertEqual(forwarded_params["end_date"], "2026-12-31T00:00:00")
 
     def test_upstream_401_is_forwarded(self) -> None:
+        """A 401 for a missing/invalid token is relayed as a 401."""
         upstream = _mock_response(401, {"detail": "Not authenticated"})
         with patch(
             "control_center.api.routes_platform_interactions_proxy.httpx.AsyncClient",
@@ -172,6 +194,9 @@ class TestListInteractionsProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 401)
 
     def test_upstream_403_is_forwarded(self) -> None:
+        """A 403 for a valid token lacking manage_all_orgs is relayed
+        as a 403 -- omnibioai-auth's own require_permission is the only
+        authority here; this proxy makes no RBAC decision."""
         # A valid token lacking manage_all_orgs -- omnibioai-auth's own
         # require_permission is the only authority here; this proxy makes
         # no RBAC decision and must not turn a 403 into anything else.
@@ -184,6 +209,8 @@ class TestListInteractionsProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 403)
 
     def test_auth_service_unreachable_returns_503(self) -> None:
+        """A connection failure to the auth-service returns 503 with an
+        "auth-service unreachable" message."""
         with patch(
             "control_center.api.routes_platform_interactions_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
@@ -193,6 +220,7 @@ class TestListInteractionsProxy(unittest.TestCase):
         self.assertIn("auth-service unreachable", resp.json()["error"])
 
     def test_network_timeout_returns_503(self) -> None:
+        """A request timeout to the auth-service also returns 503."""
         with patch(
             "control_center.api.routes_platform_interactions_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.TimeoutException("timed out")),
@@ -201,6 +229,8 @@ class TestListInteractionsProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 503)
 
     def test_non_json_upstream_response_handled(self) -> None:
+        """A non-JSON upstream response body maps to a 500 error naming
+        "non-JSON" rather than propagating the parse exception."""
         upstream = _mock_response(500, raise_json_error=True)
         with patch(
             "control_center.api.routes_platform_interactions_proxy.httpx.AsyncClient",
@@ -211,6 +241,7 @@ class TestListInteractionsProxy(unittest.TestCase):
         self.assertIn("non-JSON", resp.json()["error"])
 
     def test_upstream_5xx_is_forwarded(self) -> None:
+        """A 500 from the upstream auth-service is relayed as a 500."""
         upstream = _mock_response(500, {"detail": "Internal Server Error"})
         with patch(
             "control_center.api.routes_platform_interactions_proxy.httpx.AsyncClient",
@@ -220,6 +251,8 @@ class TestListInteractionsProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 500)
 
     def test_empty_upstream_body_preserved(self) -> None:
+        """An empty (b"") upstream body with no content to parse passes
+        through as an empty body."""
         upstream = MagicMock()
         upstream.status_code = 200
         upstream.content = b""
@@ -235,7 +268,11 @@ class TestListInteractionsProxy(unittest.TestCase):
 
 
 class TestGetInteractionProxy(unittest.TestCase):
+    """GET /platform/interactions/{interaction_id}'s thin-relay behavior."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged,
+        and the path's interaction_id reaches the upstream URL."""
         upstream = _mock_response(200, _INTERACTION)
         mock_ctx = _mock_async_client(upstream)
         with patch(
@@ -252,6 +289,7 @@ class TestGetInteractionProxy(unittest.TestCase):
         self.assertTrue(forwarded_path.endswith(f"/platform/interactions/{_INTERACTION['interaction_id']}"))
 
     def test_upstream_404_for_unknown_interaction_id(self) -> None:
+        """A 404 for an unknown interaction_id is relayed as a 404."""
         upstream = _mock_response(404, {"detail": "Interaction not found"})
         with patch(
             "control_center.api.routes_platform_interactions_proxy.httpx.AsyncClient",
@@ -263,6 +301,7 @@ class TestGetInteractionProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 404)
 
     def test_upstream_403_is_forwarded(self) -> None:
+        """A 403 from the upstream auth-service is relayed as a 403."""
         upstream = _mock_response(403, {"detail": "Forbidden"})
         with patch(
             "control_center.api.routes_platform_interactions_proxy.httpx.AsyncClient",
@@ -275,6 +314,8 @@ class TestGetInteractionProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 403)
 
     def test_forwards_authorization_header(self) -> None:
+        """The caller's Authorization header is forwarded to the
+        upstream call unchanged."""
         upstream = _mock_response(200, _INTERACTION)
         mock_ctx = _mock_async_client(upstream)
         with patch(
@@ -289,6 +330,7 @@ class TestGetInteractionProxy(unittest.TestCase):
         self.assertEqual(call_kwargs["headers"]["Authorization"], "Bearer owner-token")
 
     def test_auth_service_unreachable_returns_503(self) -> None:
+        """A connection failure to the auth-service returns 503."""
         with patch(
             "control_center.api.routes_platform_interactions_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),

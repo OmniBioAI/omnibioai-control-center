@@ -12,6 +12,9 @@ are a thin relay, no authorization decision is made here (that's
 entirely omnibioai-auth's job, via require_org_permission_or_platform_
 admin(manage_api_keys / manage_oauth_clients) and require_permission
 (manage_all_orgs), all pre-existing and unmodified).
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 
 from __future__ import annotations
@@ -28,6 +31,8 @@ client = TestClient(app)
 
 
 def _mock_response(status_code: int, json_body=None, raise_json_error: bool = False, content: bytes = b"x") -> MagicMock:
+    """A MagicMock httpx.Response stand-in; raise_json_error makes
+    .json() raise ValueError instead of returning json_body."""
     resp = MagicMock()
     resp.status_code = status_code
     resp.content = content
@@ -39,6 +44,8 @@ def _mock_response(status_code: int, json_body=None, raise_json_error: bool = Fa
 
 
 def _mock_no_content_response(status_code: int = 204) -> MagicMock:
+    """A MagicMock httpx.Response stand-in with an empty body and no
+    content to parse as JSON."""
     resp = MagicMock()
     resp.status_code = status_code
     resp.content = b""
@@ -47,6 +54,8 @@ def _mock_no_content_response(status_code: int = 204) -> MagicMock:
 
 
 def _mock_async_client(response: MagicMock = None, side_effect=None):
+    """An async-context-manager mock of httpx.AsyncClient whose
+    .request() returns `response`, or raises `side_effect` if given."""
     mock_client = MagicMock()
     mock_request = AsyncMock()
     if side_effect is not None:
@@ -82,7 +91,12 @@ _OAUTH_CLIENT_CREATED = {
 
 
 class TestListApiKeysProxy(unittest.TestCase):
+    """GET /orgs/{org_id}/api-keys's thin-relay behavior (never leaking
+    the raw key or its hash)."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed, but only
+        the key_prefix -- never the raw key or key_hash -- is present."""
         upstream = _mock_response(200, [_API_KEY_OUT])
         with patch("control_center.api.routes_service_accounts_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/orgs/7/api-keys", headers={"Authorization": "Bearer tok"})
@@ -92,6 +106,7 @@ class TestListApiKeysProxy(unittest.TestCase):
         self.assertNotIn("key_hash", resp.json()[0])
 
     def test_forwards_authorization_header(self) -> None:
+        """The caller's Authorization header is forwarded unchanged."""
         upstream = _mock_response(200, [])
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_service_accounts_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -100,6 +115,7 @@ class TestListApiKeysProxy(unittest.TestCase):
         self.assertEqual(call_kwargs["headers"]["Authorization"], "Bearer my-token-123")
 
     def test_forwards_org_id_in_path(self) -> None:
+        """The path's org_id is forwarded into the upstream URL."""
         upstream = _mock_response(200, [])
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_service_accounts_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -108,18 +124,21 @@ class TestListApiKeysProxy(unittest.TestCase):
         self.assertTrue(call_args.args[1].endswith("/orgs/42/api-keys"))
 
     def test_forwards_404_for_non_member(self) -> None:
+        """A 404 for a nonexistent/non-member org is relayed as a 404."""
         upstream = _mock_response(404, {"detail": "Organization not found"})
         with patch("control_center.api.routes_service_accounts_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/orgs/999999/api-keys", headers={"Authorization": "Bearer tok"})
         self.assertEqual(resp.status_code, 404)
 
     def test_forwards_403_for_member_without_permission(self) -> None:
+        """A 403 from the upstream auth-service is relayed as a 403."""
         upstream = _mock_response(403, {"detail": "Forbidden"})
         with patch("control_center.api.routes_service_accounts_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/orgs/7/api-keys", headers={"Authorization": "Bearer tok"})
         self.assertEqual(resp.status_code, 403)
 
     def test_auth_service_unreachable_returns_503(self) -> None:
+        """A connection failure to the auth-service returns 503."""
         with patch(
             "control_center.api.routes_service_accounts_proxy.httpx.AsyncClient",
             return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
@@ -129,6 +148,8 @@ class TestListApiKeysProxy(unittest.TestCase):
         self.assertIn("auth-service unreachable", resp.json()["error"])
 
     def test_non_json_upstream_response_handled(self) -> None:
+        """A non-JSON upstream response body maps to a 500 error
+        naming "non-JSON"."""
         upstream = _mock_response(500, raise_json_error=True)
         with patch("control_center.api.routes_service_accounts_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/orgs/7/api-keys", headers={"Authorization": "Bearer tok"})
@@ -137,7 +158,12 @@ class TestListApiKeysProxy(unittest.TestCase):
 
 
 class TestCreateApiKeyProxy(unittest.TestCase):
+    """POST /orgs/{org_id}/api-keys's thin-relay behavior, including
+    the one-time raw-key-in-response case on creation."""
+
     def test_forwards_post_body_and_status(self) -> None:
+        """The POST body/method reach the upstream call, and the
+        created response's one-time raw "key" is relayed unchanged."""
         upstream = _mock_response(201, _API_KEY_CREATED)
         mock_ctx = _mock_async_client(upstream)
         body = {"name": "CI pipeline", "scopes": ["dataset.read"]}
@@ -150,6 +176,7 @@ class TestCreateApiKeyProxy(unittest.TestCase):
         self.assertIn(b"CI pipeline", call_args.kwargs["content"])
 
     def test_forwards_400_for_scope_not_held(self) -> None:
+        """A 400 for requesting a scope the caller doesn't hold is relayed as a 400."""
         upstream = _mock_response(400, {"detail": "Cannot grant scopes you don't hold: ['manage_org']"})
         with patch("control_center.api.routes_service_accounts_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post(
@@ -158,6 +185,7 @@ class TestCreateApiKeyProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
 
     def test_forwards_403_for_member_without_permission(self) -> None:
+        """A 403 from the upstream auth-service is relayed as a 403."""
         upstream = _mock_response(403, {"detail": "Forbidden"})
         with patch("control_center.api.routes_service_accounts_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post("/orgs/7/api-keys", json={"name": "x"}, headers={"Authorization": "Bearer tok"})
@@ -165,7 +193,11 @@ class TestCreateApiKeyProxy(unittest.TestCase):
 
 
 class TestRevokeApiKeyProxy(unittest.TestCase):
+    """DELETE /orgs/{org_id}/api-keys/{id}'s thin-relay behavior."""
+
     def test_forwards_method_and_preserves_204_empty_body(self) -> None:
+        """The DELETE method reaches the upstream call, and the 204
+        empty body is preserved."""
         upstream = _mock_no_content_response(204)
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_service_accounts_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -177,6 +209,7 @@ class TestRevokeApiKeyProxy(unittest.TestCase):
         self.assertTrue(call_args.args[1].endswith("/orgs/7/api-keys/1"))
 
     def test_forwards_404_for_unknown_key(self) -> None:
+        """A 404 for an unknown api-key id is relayed as a 404."""
         upstream = _mock_response(404, {"detail": "API key not found"})
         with patch("control_center.api.routes_service_accounts_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.delete("/orgs/7/api-keys/999999", headers={"Authorization": "Bearer tok"})
@@ -184,7 +217,12 @@ class TestRevokeApiKeyProxy(unittest.TestCase):
 
 
 class TestListOAuthClientsProxy(unittest.TestCase):
+    """GET /orgs/{org_id}/oauth-clients's thin-relay behavior (never
+    leaking the client secret or its hash)."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed, but only
+        client_id -- never client_secret or its hash -- is present."""
         upstream = _mock_response(200, [_OAUTH_CLIENT_OUT])
         with patch("control_center.api.routes_service_accounts_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/orgs/7/oauth-clients", headers={"Authorization": "Bearer tok"})
@@ -194,6 +232,7 @@ class TestListOAuthClientsProxy(unittest.TestCase):
         self.assertNotIn("client_secret_hash", resp.json()[0])
 
     def test_forwards_org_id_in_path(self) -> None:
+        """The path's org_id is forwarded into the upstream URL."""
         upstream = _mock_response(200, [])
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_service_accounts_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -202,12 +241,14 @@ class TestListOAuthClientsProxy(unittest.TestCase):
         self.assertTrue(call_args.args[1].endswith("/orgs/42/oauth-clients"))
 
     def test_forwards_404_for_non_member(self) -> None:
+        """A 404 for a nonexistent/non-member org is relayed as a 404."""
         upstream = _mock_response(404, {"detail": "Organization not found"})
         with patch("control_center.api.routes_service_accounts_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/orgs/999999/oauth-clients", headers={"Authorization": "Bearer tok"})
         self.assertEqual(resp.status_code, 404)
 
     def test_forwards_403_for_member_without_permission(self) -> None:
+        """A 403 from the upstream auth-service is relayed as a 403."""
         upstream = _mock_response(403, {"detail": "Forbidden"})
         with patch("control_center.api.routes_service_accounts_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/orgs/7/oauth-clients", headers={"Authorization": "Bearer tok"})
@@ -215,7 +256,12 @@ class TestListOAuthClientsProxy(unittest.TestCase):
 
 
 class TestCreateOAuthClientProxy(unittest.TestCase):
+    """POST /orgs/{org_id}/oauth-clients's thin-relay behavior,
+    including the one-time raw-secret-in-response case on creation."""
+
     def test_forwards_post_body_and_status(self) -> None:
+        """The POST body/method reach the upstream call, and the
+        created response's one-time client_secret is relayed unchanged."""
         upstream = _mock_response(201, _OAUTH_CLIENT_CREATED)
         mock_ctx = _mock_async_client(upstream)
         body = {"name": "ETL worker", "scopes": ["dataset.read"]}
@@ -228,6 +274,8 @@ class TestCreateOAuthClientProxy(unittest.TestCase):
         self.assertIn(b"ETL worker", call_args.kwargs["content"])
 
     def test_forwards_400_for_unknown_permission_scope(self) -> None:
+        """A 400 for an unrecognized scope (with upstream's own
+        "did you mean" suggestion) is relayed unchanged."""
         upstream = _mock_response(400, {"detail": "Unknown service permission: dataset.reed. Did you mean: dataset.read?"})
         with patch("control_center.api.routes_service_accounts_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post(
@@ -237,6 +285,7 @@ class TestCreateOAuthClientProxy(unittest.TestCase):
         self.assertIn("Did you mean", resp.json()["detail"])
 
     def test_forwards_403_for_member_without_permission(self) -> None:
+        """A 403 from the upstream auth-service is relayed as a 403."""
         upstream = _mock_response(403, {"detail": "Forbidden"})
         with patch("control_center.api.routes_service_accounts_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post("/orgs/7/oauth-clients", json={"name": "x"}, headers={"Authorization": "Bearer tok"})
@@ -244,7 +293,11 @@ class TestCreateOAuthClientProxy(unittest.TestCase):
 
 
 class TestRevokeOAuthClientProxy(unittest.TestCase):
+    """DELETE /orgs/{org_id}/oauth-clients/{id}'s thin-relay behavior."""
+
     def test_forwards_method_and_preserves_204_empty_body(self) -> None:
+        """The DELETE method reaches the upstream call, and the 204
+        empty body is preserved."""
         upstream = _mock_no_content_response(204)
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_service_accounts_proxy.httpx.AsyncClient", return_value=mock_ctx):
@@ -256,6 +309,7 @@ class TestRevokeOAuthClientProxy(unittest.TestCase):
         self.assertTrue(call_args.args[1].endswith("/orgs/7/oauth-clients/1"))
 
     def test_forwards_404_for_unknown_client(self) -> None:
+        """A 404 for an unknown oauth-client id is relayed as a 404."""
         upstream = _mock_response(404, {"detail": "OAuth client not found"})
         with patch("control_center.api.routes_service_accounts_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.delete("/orgs/7/oauth-clients/999999", headers={"Authorization": "Bearer tok"})
@@ -263,7 +317,11 @@ class TestRevokeOAuthClientProxy(unittest.TestCase):
 
 
 class TestListPermissionsProxy(unittest.TestCase):
+    """GET /platform/permissions's thin-relay behavior, gated on the
+    platform-admin-only manage_all_orgs permission."""
+
     def test_forwards_success_response(self) -> None:
+        """A successful upstream response's body is relayed unchanged."""
         upstream = _mock_response(200, [{"name": "dataset.read", "resource": "dataset", "action": "read", "scope": "org", "category": "data", "description": "x", "legacy": False, "deprecated": False}])
         with patch("control_center.api.routes_service_accounts_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.get("/platform/permissions", headers={"Authorization": "Bearer tok"})
@@ -271,6 +329,9 @@ class TestListPermissionsProxy(unittest.TestCase):
         self.assertEqual(resp.json()[0]["name"], "dataset.read")
 
     def test_forwards_403_for_non_platform_admin(self) -> None:
+        """A regular org admin (even with manage_api_keys/manage_
+        oauth_clients) gets 403 here, by design -- manage_all_orgs is
+        platform-admin-only."""
         # manage_all_orgs is platform-admin-only -- a regular org admin
         # (even with manage_api_keys/manage_oauth_clients) gets 403 here,
         # by design. See discovery doc §6.
@@ -280,6 +341,7 @@ class TestListPermissionsProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 403)
 
     def test_forwards_query_params(self) -> None:
+        """A `search` query param is forwarded to the upstream request."""
         upstream = _mock_response(200, [])
         mock_ctx = _mock_async_client(upstream)
         with patch("control_center.api.routes_service_accounts_proxy.httpx.AsyncClient", return_value=mock_ctx):

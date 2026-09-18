@@ -10,6 +10,9 @@ require_admin now delegates to.
 
 SSO Phase 2 PR16: adds coverage for the RS256/JWKS verification path
 added alongside the existing HS256 path.
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 from __future__ import annotations
 
@@ -37,20 +40,27 @@ _OTHER_PUBLIC_KEY = _OTHER_PRIVATE_KEY.public_key()
 
 
 def _token(**claims) -> str:
+    """A JWT signed with the test SECRET (HS256), carrying the given claims."""
     return jwt.encode(claims, SECRET, algorithm="HS256")
 
 
 def _rs256_token(private_key, kid, **claims) -> str:
+    """A JWT signed with `private_key` (RS256), carrying the given kid
+    header and claims."""
     return jwt.encode(claims, private_key, algorithm="RS256", headers={"kid": kid})
 
 
 def _jwk(public_key, kid: str) -> dict:
+    """A JWKS "keys" entry for `public_key` under the given kid."""
     jwk = RSAAlgorithm.to_jwk(public_key, as_dict=True)
     jwk.update({"kid": kid, "use": "sig", "alg": "RS256"})
     return jwk
 
 
 class TestVerifyToken(unittest.TestCase):
+    """verify_token()'s HS256 and RS256/JWKS verification paths:
+    signature/expiry/claim checks, Redis jti-blacklist revocation, and
+    the PR12 iss/aud checks -- all fail closed, never silently accepting."""
 
     def setUp(self) -> None:
         secret_patcher = patch.object(jwt_verify_module, "JWT_SECRET", SECRET)
@@ -86,6 +96,8 @@ class TestVerifyToken(unittest.TestCase):
     # -- success path ------------------------------------------------
 
     def test_valid_token_succeeds(self) -> None:
+        """A well-formed, correctly-signed access token verifies and
+        returns its claims."""
         token = _token(sub="1", roles=["admin"], type="access")
         payload = verify_token(token)
         self.assertEqual(payload["sub"], "1")
@@ -101,21 +113,25 @@ class TestVerifyToken(unittest.TestCase):
     # -- failure paths -------------------------------------------------
 
     def test_missing_token_raises(self) -> None:
+        """None or an empty string both raise TokenInvalid."""
         with self.assertRaises(TokenInvalid):
             verify_token(None)
         with self.assertRaises(TokenInvalid):
             verify_token("")
 
     def test_invalid_signature_raises(self) -> None:
+        """A token signed with the wrong secret raises TokenInvalid."""
         token = jwt.encode({"sub": "1"}, "wrong-secret", algorithm="HS256")
         with self.assertRaises(TokenInvalid):
             verify_token(token)
 
     def test_malformed_token_raises(self) -> None:
+        """A non-JWT string raises TokenInvalid."""
         with self.assertRaises(TokenInvalid):
             verify_token("not-a-real-token")
 
     def test_expired_token_raises(self) -> None:
+        """A token with a past `exp` claim raises TokenInvalid."""
         token = jwt.encode(
             {
                 "sub": "1",
@@ -129,6 +145,7 @@ class TestVerifyToken(unittest.TestCase):
             verify_token(token)
 
     def test_missing_sub_claim_raises(self) -> None:
+        """A token missing the required "sub" claim raises TokenInvalid."""
         token = _token(email="x@y.com")
         with self.assertRaises(TokenInvalid):
             verify_token(token)
@@ -144,6 +161,8 @@ class TestVerifyToken(unittest.TestCase):
             verify_token(token)
 
     def test_other_token_types_also_rejected(self) -> None:
+        """Every other non-access token type (oauth_state, sso_state,
+        oauth_link) is also rejected."""
         for bad_type in ("oauth_state", "sso_state", "oauth_link"):
             token = _token(sub="1", type=bad_type)
             with self.assertRaises(TokenInvalid):
@@ -152,6 +171,8 @@ class TestVerifyToken(unittest.TestCase):
     # -- revocation (Redis jti blacklist) -------------------------------
 
     def test_blacklisted_jti_raises(self) -> None:
+        """A token whose jti is present in the Redis blacklist raises
+        TokenInvalid, and the correct blacklist key is checked."""
         self.mock_blacklist.exists.return_value = True
         token = _token(sub="1", jti="revoked-jti-123")
         with self.assertRaises(TokenInvalid):
@@ -161,12 +182,15 @@ class TestVerifyToken(unittest.TestCase):
         )
 
     def test_non_blacklisted_jti_succeeds(self) -> None:
+        """A jti that is not blacklisted still verifies normally."""
         self.mock_blacklist.exists.return_value = False
         token = _token(sub="1", jti="fine-jti-456")
         payload = verify_token(token)
         self.assertEqual(payload["sub"], "1")
 
     def test_token_without_jti_skips_blacklist_check(self) -> None:
+        """A token with no jti claim at all never calls the blacklist
+        check -- there's nothing to check against."""
         token = _token(sub="1")  # no jti claim at all
         payload = verify_token(token)
         self.assertEqual(payload["sub"], "1")
@@ -184,6 +208,8 @@ class TestVerifyToken(unittest.TestCase):
     # -- RS256 / JWKS (PR16) -------------------------------------------
 
     def test_valid_rs256_token_succeeds(self) -> None:
+        """A well-formed, correctly-signed RS256 token with a matching
+        kid verifies via JWKS lookup."""
         self._install_jwks({"keys": [_jwk(_PUBLIC_KEY, KID)]})
         token = _rs256_token(_PRIVATE_KEY, KID, sub="1", roles=["admin"], type="access")
         payload = verify_token(token)
@@ -243,11 +269,14 @@ class TestVerifyToken(unittest.TestCase):
             verify_token(token)
 
     def test_rs256_token_missing_kid_raises(self) -> None:
+        """An RS256 token with no "kid" header at all raises TokenInvalid."""
         token = jwt.encode({"sub": "1"}, _PRIVATE_KEY, algorithm="RS256")
         with self.assertRaises(TokenInvalid):
             verify_token(token)
 
     def test_expired_rs256_token_raises(self) -> None:
+        """An expired RS256 token raises TokenInvalid even with a
+        matching, valid JWKS key."""
         self._install_jwks({"keys": [_jwk(_PUBLIC_KEY, KID)]})
         token = _rs256_token(
             _PRIVATE_KEY,
@@ -280,6 +309,7 @@ class TestVerifyToken(unittest.TestCase):
     # -- PR12: iss/aud -------------------------------------------------
 
     def test_token_with_matching_iss_and_aud_succeeds(self) -> None:
+        """A token whose iss/aud claims match the configured values verifies."""
         token = _token(
             sub="1",
             iss=jwt_verify_module.JWT_ISSUER,
@@ -297,16 +327,20 @@ class TestVerifyToken(unittest.TestCase):
         self.assertEqual(payload["sub"], "1")
 
     def test_token_with_wrong_audience_raises(self) -> None:
+        """A token with a mismatched aud claim (when an iss/aud check
+        is triggered) raises TokenInvalid."""
         token = _token(sub="1", aud="some-other-service")
         with self.assertRaises(TokenInvalid):
             verify_token(token)
 
     def test_token_with_wrong_issuer_raises(self) -> None:
+        """A token with a mismatched iss claim raises TokenInvalid."""
         token = _token(sub="1", iss="some-other-service")
         with self.assertRaises(TokenInvalid):
             verify_token(token)
 
     def test_rs256_token_with_matching_iss_and_aud_succeeds(self) -> None:
+        """The iss/aud check applies equally on the RS256 path."""
         self._install_jwks({"keys": [_jwk(_PUBLIC_KEY, KID)]})
         token = _rs256_token(
             _PRIVATE_KEY,
@@ -319,6 +353,7 @@ class TestVerifyToken(unittest.TestCase):
         self.assertEqual(payload["sub"], "1")
 
     def test_rs256_token_with_wrong_audience_raises(self) -> None:
+        """The audience check also rejects a mismatched aud on the RS256 path."""
         self._install_jwks({"keys": [_jwk(_PUBLIC_KEY, KID)]})
         token = _rs256_token(_PRIVATE_KEY, KID, sub="1", aud="some-other-service")
         with self.assertRaises(TokenInvalid):

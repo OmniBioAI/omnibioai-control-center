@@ -1,6 +1,9 @@
 """Unit tests for control_center.compliance.auth_client. Mocking shape
 mirrors tests/test_analytics_billing_client.py exactly (this codebase's
 established convention for testing a thin httpx client module).
+
+Developer:
+    Manish Kumar <manish@omnibioai.org>
 """
 from __future__ import annotations
 
@@ -14,6 +17,7 @@ from control_center.compliance import auth_client
 
 
 def _resp(status_code: int, json_body=None) -> MagicMock:
+    """A MagicMock httpx.Response stand-in with a fixed status/JSON body."""
     r = MagicMock()
     r.status_code = status_code
     r.json.return_value = json_body
@@ -21,6 +25,9 @@ def _resp(status_code: int, json_body=None) -> MagicMock:
 
 
 def _mock_client(*responses: MagicMock):
+    """An async-context-manager mock of httpx.AsyncClient whose .get()
+    returns each of `responses` in order (a single response is returned
+    every call; multiple are consumed one per call, for pagination)."""
     mock_client = MagicMock()
     if len(responses) > 1:
         mock_client.get = AsyncMock(side_effect=list(responses))
@@ -33,7 +40,11 @@ def _mock_client(*responses: MagicMock):
 
 
 class GetOrganizationTestCase(unittest.IsolatedAsyncioTestCase):
+    """get_organization()'s (body, status) contract, distinguishing a
+    confirmed 404 ("not_found") from a network/5xx failure ("unavailable")."""
+
     async def test_returns_body_and_ok_on_success(self) -> None:
+        """A 200 response returns (body, "ok")."""
         ctx, _ = _mock_client(_resp(200, {"id": 1, "name": "KUMC Research"}))
         with patch("control_center.compliance.auth_client.httpx.AsyncClient", return_value=ctx):
             body, status = await auth_client.get_organization(1, "Bearer tok")
@@ -46,6 +57,8 @@ class GetOrganizationTestCase(unittest.IsolatedAsyncioTestCase):
     # tests immediately below.
 
     async def test_404_returns_not_found_status(self) -> None:
+        """A confirmed 404 (org genuinely doesn't exist) returns
+        (None, "not_found")."""
         ctx, _ = _mock_client(_resp(404))
         with patch("control_center.compliance.auth_client.httpx.AsyncClient", return_value=ctx):
             body, status = await auth_client.get_organization(1, "Bearer tok")
@@ -53,6 +66,8 @@ class GetOrganizationTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, "not_found")
 
     async def test_500_returns_unavailable_status(self) -> None:
+        """A 500 response returns (None, "unavailable") -- distinct from
+        a confirmed 404."""
         ctx, _ = _mock_client(_resp(500))
         with patch("control_center.compliance.auth_client.httpx.AsyncClient", return_value=ctx):
             body, status = await auth_client.get_organization(1, "Bearer tok")
@@ -60,6 +75,7 @@ class GetOrganizationTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, "unavailable")
 
     async def test_unreachable_returns_unavailable_status(self) -> None:
+        """A connection failure returns (None, "unavailable")."""
         mock_client = MagicMock()
         mock_client.get = AsyncMock(side_effect=httpx.ConnectError("refused"))
         mock_ctx = MagicMock()
@@ -72,7 +88,11 @@ class GetOrganizationTestCase(unittest.IsolatedAsyncioTestCase):
 
 
 class GetOrgMembersTestCase(unittest.IsolatedAsyncioTestCase):
+    """get_org_members()'s (members, status) contract, always returning
+    an empty list (never None) alongside the right status on failure."""
+
     async def test_returns_member_list_and_ok(self) -> None:
+        """A 200 response returns (member_list, "ok")."""
         ctx, _ = _mock_client(_resp(200, [{"user_id": 1, "email": "a@kumc.edu", "status": "active", "roles": ["member"]}]))
         with patch("control_center.compliance.auth_client.httpx.AsyncClient", return_value=ctx):
             members, status = await auth_client.get_org_members(1, "Bearer tok")
@@ -80,6 +100,7 @@ class GetOrgMembersTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, "ok")
 
     async def test_empty_list_and_not_found_on_404(self) -> None:
+        """A 404 returns ([], "not_found")."""
         ctx, _ = _mock_client(_resp(404))
         with patch("control_center.compliance.auth_client.httpx.AsyncClient", return_value=ctx):
             members, status = await auth_client.get_org_members(1, "Bearer tok")
@@ -87,6 +108,7 @@ class GetOrgMembersTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, "not_found")
 
     async def test_empty_list_and_unavailable_on_failure(self) -> None:
+        """A 403 (or any other non-2xx, non-404) returns ([], "unavailable")."""
         ctx, _ = _mock_client(_resp(403))
         with patch("control_center.compliance.auth_client.httpx.AsyncClient", return_value=ctx):
             members, status = await auth_client.get_org_members(1, "Bearer tok")
@@ -94,6 +116,8 @@ class GetOrgMembersTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, "unavailable")
 
     async def test_non_list_body_returns_unavailable(self) -> None:
+        """A 200 response with a non-list body returns ([], "unavailable")
+        -- never silently treated as "zero members"."""
         # A malformed/unexpected 200 body must not be silently treated as
         # "zero members" -- that's indistinguishable from a real empty
         # org otherwise.
@@ -105,7 +129,12 @@ class GetOrgMembersTestCase(unittest.IsolatedAsyncioTestCase):
 
 
 class ListAllAuditEventsTestCase(unittest.IsolatedAsyncioTestCase):
+    """list_all_audit_events()'s pagination loop, its (items, truncated,
+    unavailable) return contract, and the page-count cap."""
+
     async def test_single_page_stops_after_total_pages(self) -> None:
+        """A single page reporting total_pages=1 makes exactly one
+        request and returns not truncated/unavailable."""
         ctx, mock_client = _mock_client(_resp(200, {"items": [{"id": 1}], "total_pages": 1}))
         with patch("control_center.compliance.auth_client.httpx.AsyncClient", return_value=ctx):
             items, truncated, unavailable = await auth_client.list_all_audit_events(
@@ -118,6 +147,8 @@ class ListAllAuditEventsTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_client.get.call_count, 1)
 
     async def test_follows_pagination_across_multiple_pages(self) -> None:
+        """total_pages=2 fetches both pages and concatenates their
+        items in order."""
         ctx, mock_client = _mock_client(
             _resp(200, {"items": [{"id": 1}], "total_pages": 2}),
             _resp(200, {"items": [{"id": 2}], "total_pages": 2}),
@@ -132,6 +163,8 @@ class ListAllAuditEventsTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(unavailable)
 
     async def test_organization_id_none_omits_param(self) -> None:
+        """organization_id=None omits that key from the query params
+        entirely, rather than sending it as a literal "None"."""
         ctx, mock_client = _mock_client(_resp(200, {"items": [], "total_pages": 0}))
         with patch("control_center.compliance.auth_client.httpx.AsyncClient", return_value=ctx):
             await auth_client.list_all_audit_events(
@@ -142,6 +175,8 @@ class ListAllAuditEventsTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("organization_id", kwargs["params"])
 
     async def test_event_type_filter_is_forwarded(self) -> None:
+        """An `event_type` argument is forwarded as an "event_type"
+        query param."""
         ctx, mock_client = _mock_client(_resp(200, {"items": [], "total_pages": 0}))
         with patch("control_center.compliance.auth_client.httpx.AsyncClient", return_value=ctx):
             await auth_client.list_all_audit_events(
@@ -152,6 +187,8 @@ class ListAllAuditEventsTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["params"]["event_type"], "login_success")
 
     async def test_unreachable_returns_unavailable_true_not_truncated(self) -> None:
+        """A connection failure on the first request returns an empty
+        item list with unavailable=True and truncated=False."""
         mock_client = MagicMock()
         mock_client.get = AsyncMock(side_effect=httpx.ConnectError("refused"))
         mock_ctx = MagicMock()
@@ -167,6 +204,8 @@ class ListAllAuditEventsTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(unavailable)
 
     async def test_failure_mid_pagination_keeps_earlier_pages_but_flags_unavailable(self) -> None:
+        """A failure on the second page keeps the first page's already-
+        fetched items and still flags unavailable=True."""
         ctx, mock_client = _mock_client(
             _resp(200, {"items": [{"id": 1}], "total_pages": 3}),
             _resp(500),
@@ -183,6 +222,10 @@ class ListAllAuditEventsTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(unavailable)
 
     async def test_pagination_cap_boundary_sets_truncated_and_stops_fetching(self) -> None:
+        """With total_pages always claiming far more pages remain than
+        _MAX_PAGES (100) allows, exactly 100 requests are made, page 101
+        is never requested, and the result is truncated=True,
+        unavailable=False."""
         # Exactly _MAX_PAGES (100) pages, each claiming more pages exist
         # than the cap allows -- the 101st page must never be requested.
         responses = [_resp(200, {"items": [{"id": i}], "total_pages": 200}) for i in range(100)]
