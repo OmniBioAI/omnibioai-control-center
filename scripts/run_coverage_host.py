@@ -33,6 +33,7 @@ After running, click Regenerate in the Control Center UI to rebuild the report.
 from __future__ import annotations
 
 import argparse
+import configparser
 import json
 import os
 import re
@@ -291,6 +292,15 @@ def _pytest_cwd(repo: Path) -> Path:
     return repo
 
 
+def _normalize_coverage_sources(value: str) -> List[str]:
+    return [
+        source.strip()
+        for line in value.splitlines()
+        for source in line.split(",")
+        if source.strip()
+    ]
+
+
 def _cov_source_args(cwd: Path) -> List[str]:
     # tool-images tests exercise the registry API; its previous scripts-only
     # target produced "No data to report" even with all tests passing.
@@ -309,13 +319,15 @@ def _cov_source_args(cwd: Path) -> List[str]:
 
     text = _read_text(cwd / ".coveragerc")
     if text:
-        m = re.search(r'\[run\](.*?)(?=\n\[|\Z)', text, re.DOTALL)
-        if m:
-            sm = re.search(r'^source\s*=\s*(.+?)$', m.group(1), re.MULTILINE)
-            if sm:
-                sources = [s.strip() for s in sm.group(1).split(',') if s.strip()]
+        parser = configparser.ConfigParser()
+        try:
+            parser.read_string(text)
+            if parser.has_option("run", "source"):
+                sources = _normalize_coverage_sources(parser.get("run", "source"))
                 if sources:
                     return [f"--cov={s}" for s in sources]
+        except configparser.Error:
+            pass
 
     if (cwd / "src").is_dir():
         return ["--cov=src"]
