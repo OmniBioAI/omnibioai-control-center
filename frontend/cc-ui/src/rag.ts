@@ -22,17 +22,38 @@
 // studies(), redis_cache_stats() -> RAGCache.stats(), health()) -- read
 // directly from ragbio/api/server.py and ragbio/cache/redis_cache.py,
 // not guessed.
-import { authHeaders, reportUnauthorized } from './auth'
+import { authHeaders } from './auth'
 
+// BUG FIX (Admin Console nav: RAG/PubMed forcing an authenticated admin
+// back to the login screen): unlike every other domain file's apiFetch
+// in this app, this one deliberately does NOT call reportUnauthorized()
+// on a 401. Every other file's 401 genuinely means control-center
+// rejected the *caller's own* bearer token (either its own
+// require_permission dependency, or a proxy that forwards the caller's
+// Authorization header upstream) -- a real session problem, correctly
+// worth a forced logout.
+//
+// /rag/studies and /rag/cache-stats are the one exception in this app
+// (see this file's own module comment above): routes_rag_proxy.py
+// authenticates them upstream with a control-center-held RAGBIO_API_KEY
+// service credential, never the calling admin's own token, and relays
+// whatever status RAG's own service-credential check returns unchanged.
+// A 401 (or 403) from these two paths reflects that shared secret being
+// missing/misconfigured/rejected -- it says nothing about whether the
+// viewing admin's own control-center session is still valid. Treating
+// it as a session problem cleared a perfectly valid admin token and
+// fired UNAUTHORIZED_EVENT, dropping the whole console back to
+// LoginScreen the instant the RAG page saw a 401 -- unreachable by
+// RAGPage.tsx's own classify()/ServiceCredentialState handling below,
+// which already expected a 401 here to be a "denied" state, not a
+// logout. If the admin's own control-center session genuinely does
+// expire, AdminApp's own 15s fetchSummary() poll (api.ts) still reports
+// that and forces the logout, independent of this file.
 async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  const r = await fetch(path, {
+  return fetch(path, {
     ...init,
     headers: { ...authHeaders(), ...(init.headers ?? {}) },
   })
-  if (r.status === 401) {
-    reportUnauthorized()
-  }
-  return r
 }
 
 // ── Shapes ──────────────────────────────────────────────────────────────

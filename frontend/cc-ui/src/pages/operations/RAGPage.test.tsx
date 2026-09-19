@@ -59,6 +59,23 @@ describe('RAGPage', () => {
     expect(screen.queryByText('No indexed collections yet.')).not.toBeInTheDocument()
   })
 
+  // Regression test for the Admin Console nav bug: an authenticated
+  // admin clicking RAG/PubMed was bounced straight to the login screen
+  // whenever routes_rag_proxy.py relayed a 401 from omnibioai-rag's own
+  // RAGBIO_API_KEY service-credential check -- rag.ts's apiFetch used to
+  // treat ANY 401 as evidence the *admin's own* session was invalid and
+  // force-logged them out before this "denied" state ever had a chance
+  // to render (see rag.ts's own comment on why it no longer does that).
+  // This test proves the classify()/ServiceCredentialState path handles
+  // a 401 exactly like a 403 -- a service-credential problem, not a
+  // reason to leave this page at all.
+  it('shows the RAG service credential state when the backend 401s, not a forced logout', async () => {
+    vi.mocked(rag.fetchStudies).mockRejectedValue(new Error('/rag/studies 401'))
+    render(<RAGPage />)
+    expect(await screen.findByText('RAG service credential unavailable')).toBeInTheDocument()
+    expect(screen.queryByText('No indexed collections yet.')).not.toBeInTheDocument()
+  })
+
   it('shows a generic error with retry on other failures', async () => {
     vi.mocked(rag.fetchStudies).mockRejectedValueOnce(new Error('/rag/studies 503'))
     vi.mocked(rag.fetchStudies).mockResolvedValueOnce(studies)
