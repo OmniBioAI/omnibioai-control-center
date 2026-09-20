@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
-    "build:admin": "tsc -b && VITE_APP_MODE=admin vite build",
-    "build:control": "tsc -b && VITE_APP_MODE=control vite build",
+    "build": "node scripts/check-build-env.cjs && tsc -b && vite build",
+    "build:admin": "node scripts/check-build-env.cjs && tsc -b && VITE_APP_MODE=admin vite build",
+    "build:control": "node scripts/check-build-env.cjs && tsc -b && VITE_APP_MODE=control vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e:admin": "playwright test --config=e2e/playwright.config.ts",
