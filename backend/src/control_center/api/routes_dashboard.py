@@ -27,11 +27,16 @@ under-restrict. Instead:
     both upstream APIs are unauthenticated today (confirmed by reading
     their source, not assumed) -- called with no header. These sections'
     fields are intentionally public: see PUBLIC_FIELDS below.
-  - Knowledge (RAG): RAGBIO_API_KEY is a service-held secret (like
-    ANTHROPIC_API_KEY/OPENAI_API_KEY in routes_llm.py), not the caller's
-    own token -- forwarded only if control-center itself has it
-    configured. This section's fields are intentionally public too: see
-    PUBLIC_FIELDS below.
+  - Knowledge (RAG): the caller's own Authorization header is forwarded
+    to omnibioai-rag's GET /v1/studies, which (HIPAA-V2-001 R4) requires
+    an IAM-verified dataset.read and returns only the studies that
+    caller's organization may see. No shared/service credential is used
+    or accepted as a fallback, so a caller with no Authorization header
+    gets no RAG data at all (this section is NOT public -- see
+    PUBLIC_FIELDS below), and the counts a signed-in caller sees are
+    scoped to what RAG lets them see. The section's `access` field says
+    why the counts are null rather than leaving that ambiguous -- see
+    _knowledge_section().
   - Infrastructure / Operations: this is the one section computed
     in-process (containers/gpu/storage/health/known-issues) rather than
     over HTTP, so there is no upstream service to delegate the
@@ -101,7 +106,6 @@ router = APIRouter()
 IAM_URL = os.environ.get("IAM_URL", "http://auth-service:8001")
 MODEL_REGISTRY_URL = os.environ.get("MODEL_REGISTRY_URL", "http://model-registry:8095")
 RAG_URL = os.environ.get("RAG_URL", "http://rag:8096")
-RAGBIO_API_KEY = os.environ.get("RAGBIO_API_KEY", "")
 WORKFLOW_BUNDLES_URL = os.environ.get("WORKFLOW_BUNDLES_URL", "http://workflow-bundles:8098")
 TES_URL = os.environ.get("TES_URL", "http://tes:8081")
 BILLING_URL = os.environ.get("BILLING_URL", "http://billing-service:8005")
@@ -115,7 +119,11 @@ _TIMEOUT = 5.0
 # for anonymous exposure -- default is gated, not public.
 PUBLIC_FIELDS: dict[str, frozenset[str]] = {
     "ai_platform": frozenset({"registered_models", "active_models", "embedding_models", "llm_providers"}),
-    "knowledge": frozenset({"rag_collections", "indexed_documents", "indexed_publications", "knowledge_bases"}),
+    # Deliberately empty: RAG data requires a verified caller identity (see
+    # _knowledge_section), so nothing in this section is meant for an
+    # anonymous caller. Kept as an explicit empty entry, not removed, so
+    # the fail-closed default is stated rather than implied.
+    "knowledge": frozenset(),
     "workflow": frozenset({"workflow_bundles"}),
 }
 
@@ -339,14 +347,52 @@ async def _ai_platform_section(client: httpx.AsyncClient, authorization: Optiona
     return _apply_public_contract("ai_platform", data, bool(authorization))
 
 
-async def _knowledge_section(client: httpx.AsyncClient, authorization: Optional[str]) -> dict:
-    if not RAGBIO_API_KEY:
-        return {"rag_collections": None, "indexed_documents": None, "indexed_publications": None, "knowledge_bases": None}
+_KNOWLEDGE_FIELDS = ("rag_collections", "indexed_documents", "indexed_publications", "knowledge_bases")
 
-    data = await _get_json(client, f"{RAG_URL}/v1/studies", headers={"Authorization": f"Bearer {RAGBIO_API_KEY}"})
+
+def _knowledge_unavailable(access: str, caller_supplied_token: bool) -> dict:
+    data: dict = {k: None for k in _KNOWLEDGE_FIELDS}
+    data["access"] = access
+    return _apply_public_contract("knowledge", data, caller_supplied_token)
+
+
+async def _knowledge_section(client: httpx.AsyncClient, authorization: Optional[str]) -> dict:
+    """RAG collection/document counts, read with the CALLER's own token.
+
+    `access` distinguishes why the counts are null instead of collapsing
+    every failure into the same "--": "ok", "unauthenticated" (no token,
+    or RAG rejected it), "forbidden" (RAG refused: the caller lacks
+    dataset.read), or "unavailable" (RAG unreachable, erroring, or
+    returned an unexpected shape). It is null for a caller with no
+    Authorization header (see PUBLIC_FIELDS), who never reaches RAG.
+
+    Counts are whatever RAG returns for this caller -- filtered to their
+    organization's studies plus GLOBAL ones -- not a platform-wide total.
+    """
+    if not authorization:
+        return _knowledge_unavailable("unauthenticated", False)
+
+    try:
+        r = await client.get(
+            f"{RAG_URL}/v1/studies", headers={"Authorization": authorization}, timeout=_TIMEOUT,
+        )
+    except httpx.HTTPError:
+        return _knowledge_unavailable("unavailable", True)
+
+    if r.status_code == 401:
+        return _knowledge_unavailable("unauthenticated", True)
+    if r.status_code == 403:
+        return _knowledge_unavailable("forbidden", True)
+    if r.status_code >= 400:
+        return _knowledge_unavailable("unavailable", True)
+
+    try:
+        data = r.json()
+    except ValueError:
+        return _knowledge_unavailable("unavailable", True)
     studies = data.get("studies") if isinstance(data, dict) else None
     if not isinstance(studies, list):
-        return {"rag_collections": None, "indexed_documents": None, "indexed_publications": None, "knowledge_bases": None}
+        return _knowledge_unavailable("unavailable", True)
 
     collections = len(studies)
     documents = sum(s.get("abstract_count", 0) for s in studies)
@@ -360,8 +406,9 @@ async def _knowledge_section(client: httpx.AsyncClient, authorization: Optional[
         # ("study"), no separate knowledge-base concept.
         "indexed_publications": documents,
         "knowledge_bases": collections,
+        "access": "ok",
     }
-    return _apply_public_contract("knowledge", result, bool(authorization))
+    return _apply_public_contract("knowledge", result, True)
 
 
 async def _workflow_section(client: httpx.AsyncClient, authorization: Optional[str]) -> dict:

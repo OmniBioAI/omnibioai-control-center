@@ -40,6 +40,9 @@ export interface KnowledgeSummary {
   indexed_documents: number | null
   indexed_publications: number | null
   knowledge_bases: number | null
+  /** Why the counts are null, when they are: RAG decides access for the
+   * caller itself. Null for a caller with no token, absent from older backends. */
+  access?: 'ok' | 'unauthenticated' | 'forbidden' | 'unavailable' | null
 }
 
 export interface WorkflowSummary {

@@ -8,93 +8,45 @@ from fastapi.responses import JSONResponse
 
 from control_center.core.auth import require_permission
 
-# SECURITY FIX (post-PR-A4 audit): /rag/studies and /rag/cache-stats were
-# reachable with NO caller authentication at all -- this router had no
-# router-inclusion-level dependency in main.py (unlike services_router/
-# docker_router/config_router/summary_router, all gated there behind
-# platform.manage_infra) and, because these two routes inject the
-# RAGBIO_API_KEY service credential instead of forwarding the caller's own
-# token (see _proxy below), there was also no upstream per-caller check to
-# fall back on the way routes_org_proxy.py/routes_workflow_bundles_proxy.py
-# get for free by forwarding the caller's Authorization header. Net effect,
-# confirmed live via TestClient with no Authorization header sent at all:
-# any unauthenticated caller who could reach this backend got a 200 with
-# real RAG/PubMed data. hasAdminAccess() in navigation.ts (frontend/cc-ui/
-# src/navigation.ts's 'rag'/'pubmed' nav items) was the only thing that
-# looked like a gate, and it's a client-side, locally-decoded-JWT check
-# that never reaches this backend -- trivially bypassed by calling the
-# route directly.
+# PR A4 (Admin Console Capability Parity -- RAG/PubMed), reworked for
+# omnibioai-rag's HIPAA-V2-001 R4/R6 authorization model.
 #
-# Fixed by requiring platform.manage_infra directly on the two data-bearing
-# routes below (not at router-inclusion time in main.py, since that would
-# also gate /rag/health, which must stay open -- see its own route for
-# why). platform.manage_infra is the same permission every other
-# hasAdminAccess()-gated Infra/Operations-tier page already requires
-# server-side (services_router/docker_router/config_router/summary_router
-# in main.py), and every account holding the "admin" role hasAdminAccess()
-# checks is seeded with platform.manage_infra (omnibioai-auth's
-# app/db/init_admin.py) -- so the frontend nav gate and this backend gate
-# agree on the same audience, same invariant auth.ts's own ADMIN_PERMISSIONS
-# comment already documents for the sibling Infra pages.
+# Every route here forwards the *caller's own* Authorization header to
+# omnibioai-rag, unchanged. No shared/service credential is injected.
+# omnibioai-rag no longer accepts one on any route: GET /v1/studies
+# requires an IAM-verified JWT carrying dataset.read (and returns only the
+# studies that caller's organization may see), and GET /v1/cache/stats
+# requires an IAM-verified JWT carrying manage_all_orgs. RAG verifies the
+# token itself (signature, expiry, revocation) and remains the sole
+# authority on those two permissions -- this proxy makes no authorization
+# decision about RAG data and never turns a RAG 401/403 into a success.
 #
-# PR A4 (Admin Console Capability Parity -- RAG/PubMed). Same reasoning
-# as every other *_proxy.py: no authorization decision is made here.
+# Control Center's own gate is unchanged and still runs first:
+# /rag/studies and /rag/cache-stats require platform.manage_infra (the same
+# permission every hasAdminAccess()-gated Infra page requires) before any
+# upstream call is made, so an unauthenticated or wrongly-permissioned
+# caller never reaches RAG at all. That gate is control-center's own
+# concern; a caller who passes it can still be refused by RAG (403 for a
+# missing dataset.read / manage_all_orgs), and that refusal is relayed.
 #
-# RAG corpus metadata endpoints currently authenticate through the
-# RAGBIO_API_KEY service credential. Admin Console visibility is
-# controlled by control-center admin authorization. This PR does not
-# introduce per-user RAG authorization.
+# GET /health has no auth requirement upstream and no control-center gate
+# (a liveness probe, not RAG data); the caller's header is forwarded there
+# too if present, which RAG ignores.
 #
-# Verified directly from omnibioai-rag/ragbio/api/server.py + api/iam.py
-# (not assumed): this service runs TWO independent auth models on
-# different endpoints, not one --
-#   - GET /v1/studies, GET /v1/cache/stats (and /v1/cache, /v1/ingest,
-#     /v1/embed, /v1/kg/build, /v1/benchmark -- none of those last five
-#     used here) are gated by `_verify`: the bearer token must literally
-#     equal the RAGBIO_API_KEY env var (`creds.credentials != api_key`
-#     -> 403). A static shared service secret, not a per-user check --
-#     the identical convention routes_dashboard.py's own
-#     _knowledge_section() already uses for this same upstream
-#     ("RAGBIO_API_KEY is a service-held secret... not the caller's own
-#     token", same category as ANTHROPIC_API_KEY/OPENAI_API_KEY in
-#     routes_llm.py).
-#   - POST /v1/query and GET /v1/kg/stats|entity|drug-disease are gated
-#     by Depends(require_permission("dataset.read")) -- real per-user
-#     JWT, independently verified via the shared iam_client package.
-#     None of those are used by this proxy; deliberately deferred to a
-#     future "RAG Knowledge Graph Admin Integration" PR that can forward
-#     the caller's own Authorization header properly, the way
-#     routes_tes_proxy.py/routes_workflow_bundles_proxy.py already do
-#     for their own permission-gated routes. Mixing both auth models
-#     behind one Admin Console page in one PR would blur which trust
-#     model actually applies to which tab.
-#
-# Because /v1/studies and /v1/cache/stats need the shared secret, not
-# the admin's own token, this proxy injects RAGBIO_API_KEY itself --
-# server-side, control-center-held, identical to how routes_dashboard.py
-# already calls this same upstream -- rather than forwarding the
-# caller's Authorization header (which would never equal RAGBIO_API_KEY
-# and would always 403). If RAGBIO_API_KEY isn't configured on
-# control-center's side, no Authorization header is sent at all and
-# whatever RAG's own HTTPBearer/`_verify` responds with (a 403 "Not
-# authenticated", or a 503 "RAGBIO_API_KEY not configured on server" if
-# RAG's own key is also unset) is relayed unchanged -- this file makes
-# no authorization decision of its own, it only decides which secret,
-# if any, to attach.
-#
-# GET /health has no auth on the RAG side at all -- this proxy never
-# injects RAGBIO_API_KEY for it, but does still forward the caller's own
-# Authorization header if one was sent (harmless, since RAG's /health
-# ignores it either way), same "forward whatever's present, fabricate
-# nothing" behavior every other proxy in this app already has for its
-# own unauthenticated routes (e.g. routes_tes_proxy.py's /tools).
-# Deliberately left without the platform.manage_infra dependency the two
-# routes below now carry -- it's a liveness probe, not RAG data, matching
-# every other unauthenticated health-style route in this app.
+# Origin marker: a 401 relayed from RAG is indistinguishable, by status
+# code and body shape, from control-center's own 401 for an invalid admin
+# session -- but the two mean different things to the browser (only the
+# latter should end the Admin Console session). Every response relayed from
+# RAG therefore carries UPSTREAM_SERVICE_HEADER so the frontend can decide
+# from structured data instead of matching error wording. A response
+# generated by control-center itself (its own require_permission 401/403,
+# or the 503 for an unreachable RAG) never carries it.
 router = APIRouter()
 
 RAG_URL = os.environ.get("RAG_URL", "http://rag:8096")
-RAGBIO_API_KEY = os.environ.get("RAGBIO_API_KEY", "")
+
+UPSTREAM_SERVICE_HEADER = "X-Upstream-Service"
+UPSTREAM_SERVICE_NAME = "rag"
 
 # Module-level singleton, not inlined into the route signatures below --
 # ruff's B008 (this file is in ci.yml's scoped "Admin Console milestone"
@@ -109,18 +61,14 @@ RAGBIO_API_KEY = os.environ.get("RAGBIO_API_KEY", "")
 _require_platform_manage_infra = Depends(require_permission("platform.manage_infra"))
 
 
-async def _proxy(path: str, request: Request, *, use_service_key: bool) -> JSONResponse:
+async def _proxy(path: str, request: Request) -> JSONResponse:
     headers = {"Content-Type": "application/json"}
-    if use_service_key:
-        if RAGBIO_API_KEY:
-            headers["Authorization"] = f"Bearer {RAGBIO_API_KEY}"
-    else:
-        auth_header = request.headers.get("authorization")
-        if auth_header:
-            headers["Authorization"] = auth_header
+    auth_header = request.headers.get("authorization")
+    if auth_header:
+        headers["Authorization"] = auth_header
 
     try:
-        # /rag/studies specifically: RAG now caches this response (see
+        # /rag/studies specifically: RAG caches this response (see
         # ragbio/cache/redis_cache.py's get_studies/set_studies), but a
         # cache miss (first call, or once per RAG_CACHE_TTL/1h window)
         # still takes RAG's own observed ~11s to scan its abstract
@@ -143,7 +91,11 @@ async def _proxy(path: str, request: Request, *, use_service_key: bool) -> JSONR
         payload = r.json()
     except ValueError:
         payload = {"error": "rag-service returned a non-JSON response"}
-    return JSONResponse(payload, status_code=r.status_code)
+    return JSONResponse(
+        payload,
+        status_code=r.status_code,
+        headers={UPSTREAM_SERVICE_HEADER: UPSTREAM_SERVICE_NAME},
+    )
 
 
 @router.get("/rag/studies")
@@ -151,7 +103,7 @@ async def list_studies_proxy(
     request: Request,
     _admin: dict = _require_platform_manage_infra,
 ) -> JSONResponse:
-    return await _proxy("/v1/studies", request, use_service_key=True)
+    return await _proxy("/v1/studies", request)
 
 
 @router.get("/rag/cache-stats")
@@ -159,9 +111,9 @@ async def cache_stats_proxy(
     request: Request,
     _admin: dict = _require_platform_manage_infra,
 ) -> JSONResponse:
-    return await _proxy("/v1/cache/stats", request, use_service_key=True)
+    return await _proxy("/v1/cache/stats", request)
 
 
 @router.get("/rag/health")
 async def health_proxy(request: Request) -> JSONResponse:
-    return await _proxy("/health", request, use_service_key=False)
+    return await _proxy("/health", request)

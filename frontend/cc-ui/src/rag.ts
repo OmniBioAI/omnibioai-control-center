@@ -3,57 +3,55 @@
 // control-center's own backend at a relative path (routes_rag_proxy.py
 // proxies the /rag/* surface to omnibioai-rag).
 //
-// IMPORTANT, unlike every other domain file in this app: the functions
-// here do NOT carry per-user RAG authorization. fetchStudies() and
-// fetchCacheStats() are answered upstream using a control-center-held
-// RAGBIO_API_KEY service credential, not the calling admin's own token
-// -- omnibioai-rag's own `_verify` dependency on GET /v1/studies and
-// GET /v1/cache/stats requires the bearer token to literally equal that
-// shared secret (see routes_rag_proxy.py's module comment for the full
-// citation). Admin Console visibility for the page built on this file
-// is controlled entirely by control-center's own nav permission
-// (hasAdminAccess), not a per-admin RAG-side check. This file does not
-// introduce per-user RAG authorization -- RAG's real per-user model
-// (dataset.read, independently JWT-verified) exists on /v1/query and
-// /v1/kg/* only, deliberately not called from here; that's scoped to a
-// future dedicated PR.
+// Auth model: omnibioai-rag's HIPAA-V2-001 R4/R6 model. The backend proxy
+// (routes_rag_proxy.py) forwards the *caller's own* IAM token to RAG, and
+// RAG -- not control-center -- decides access: GET /v1/studies needs
+// dataset.read (and returns only what the caller's organization may
+// see), GET /v1/cache/stats needs manage_all_orgs. There is no shared
+// service credential anywhere in this path. control-center's own
+// platform.manage_infra gate still runs first, and hasAdminAccess() only
+// controls whether the nav entry renders. A caller can therefore pass
+// control-center's gate and still be refused by RAG (403), or -- rarely --
+// have RAG reject the forwarded token (401).
 //
 // Field shapes mirror omnibioai-rag's own literal return dicts (list_
 // studies(), redis_cache_stats() -> RAGCache.stats(), health()) -- read
 // directly from ragbio/api/server.py and ragbio/cache/redis_cache.py,
 // not guessed.
-import { authHeaders } from './auth'
+import { authHeaders, reportUnauthorized } from './auth'
 
-// BUG FIX (Admin Console nav: RAG/PubMed forcing an authenticated admin
-// back to the login screen): unlike every other domain file's apiFetch
-// in this app, this one deliberately does NOT call reportUnauthorized()
-// on a 401. Every other file's 401 genuinely means control-center
-// rejected the *caller's own* bearer token (either its own
-// require_permission dependency, or a proxy that forwards the caller's
-// Authorization header upstream) -- a real session problem, correctly
-// worth a forced logout.
-//
-// /rag/studies and /rag/cache-stats are the one exception in this app
-// (see this file's own module comment above): routes_rag_proxy.py
-// authenticates them upstream with a control-center-held RAGBIO_API_KEY
-// service credential, never the calling admin's own token, and relays
-// whatever status RAG's own service-credential check returns unchanged.
-// A 401 (or 403) from these two paths reflects that shared secret being
-// missing/misconfigured/rejected -- it says nothing about whether the
-// viewing admin's own control-center session is still valid. Treating
-// it as a session problem cleared a perfectly valid admin token and
-// fired UNAUTHORIZED_EVENT, dropping the whole console back to
-// LoginScreen the instant the RAG page saw a 401 -- unreachable by
-// RAGPage.tsx's own classify()/ServiceCredentialState handling below,
-// which already expected a 401 here to be a "denied" state, not a
-// logout. If the admin's own control-center session genuinely does
-// expire, AdminApp's own 15s fetchSummary() poll (api.ts) still reports
-// that and forces the logout, independent of this file.
+// Set by routes_rag_proxy.py on every response it relays from RAG, never on
+// a response control-center generates itself.
+const UPSTREAM_SERVICE_HEADER = 'X-Upstream-Service'
+const UPSTREAM_SERVICE_NAME = 'rag'
+
+/** A non-2xx response from the RAG proxy. Callers decide what to show from
+ * `status` (structured), never from `message` (backend wording). */
+export class RagRequestError extends Error {
+  readonly status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'RagRequestError'
+    this.status = status
+  }
+}
+
+// A 401 from control-center's own require_permission means the admin's own
+// session is invalid: same forced logout as every other domain file. A 401
+// (or 403) that RAG returned after control-center accepted the session says
+// nothing about the admin's session -- clearing a valid token and dropping
+// the console back to the login screen for it was the bug this replaced --
+// so it only ends the session when control-center itself produced it. The
+// two are told apart by the proxy's origin marker, not by status or wording.
 async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  return fetch(path, {
+  const r = await fetch(path, {
     ...init,
     headers: { ...authHeaders(), ...(init.headers ?? {}) },
   })
+  if (r.status === 401 && r.headers.get(UPSTREAM_SERVICE_HEADER) !== UPSTREAM_SERVICE_NAME) {
+    reportUnauthorized()
+  }
+  return r
 }
 
 // ── Shapes ──────────────────────────────────────────────────────────────
@@ -95,21 +93,21 @@ export interface RagHealth {
 export async function fetchStudies(): Promise<StudiesResult> {
   const path = '/rag/studies'
   const r = await apiFetch(path)
-  if (!r.ok) throw new Error(await _errorMessage(r, path))
+  if (!r.ok) throw new RagRequestError(await _errorMessage(r, path), r.status)
   return r.json()
 }
 
 export async function fetchCacheStats(): Promise<CacheStats> {
   const path = '/rag/cache-stats'
   const r = await apiFetch(path)
-  if (!r.ok) throw new Error(await _errorMessage(r, path))
+  if (!r.ok) throw new RagRequestError(await _errorMessage(r, path), r.status)
   return r.json()
 }
 
 export async function fetchRagHealth(): Promise<RagHealth> {
   const path = '/rag/health'
   const r = await apiFetch(path)
-  if (!r.ok) throw new Error(await _errorMessage(r, path))
+  if (!r.ok) throw new RagRequestError(await _errorMessage(r, path), r.status)
   return r.json()
 }
 

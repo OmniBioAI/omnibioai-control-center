@@ -1,20 +1,19 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import {
-  fetchStudies, fetchCacheStats, fetchRagHealth,
+  fetchStudies, fetchCacheStats, fetchRagHealth, RagRequestError,
   type StudySummary, type CacheStats, type RagHealth,
 } from '../../rag'
 import { Card, SectionHeader, StatCard, DataTable, LoadingState, ErrorState, EmptyState } from '../../components/ui'
 
 // PR A4 (Admin Console Capability Parity -- RAG/PubMed). Flat page, no
-// organization picker -- the RAG corpus isn't org-owned, and the two
-// endpoints this page reads (GET /v1/studies, GET /v1/cache/stats) are
-// answered via a control-center-held RAGBIO_API_KEY service credential,
-// not the viewing admin's own token (see rag.ts's module comment for
-// the full citation). Visibility here is controlled entirely by
-// control-center's own hasAdminAccess() nav gate -- this page does not
-// implement, and must not be read as implementing, per-admin RAG
-// authorization.
+// organization picker. Every request carries the viewing admin's own IAM
+// token (see rag.ts's module comment): omnibioai-rag decides access itself
+// -- dataset.read for the collection data (tenant-filtered to what the
+// caller's organization may see), manage_all_orgs for query-cache stats --
+// so a caller who can open this page can still be refused by RAG. What is
+// shown for a refusal is driven by the HTTP status (RagRequestError.status),
+// never by the backend's error wording.
 //
 // Three tabs, all built from real endpoints only (no invented document
 // counts, accuracy metrics, latency, embedding stats, or model info):
@@ -29,36 +28,59 @@ import { Card, SectionHeader, StatCard, DataTable, LoadingState, ErrorState, Emp
 //     source or a fabricated one.
 //   - Query Service Status: GET /health (service status/version, no
 //     auth) + GET /v1/cache/stats (fuller Redis query-cache breakdown,
-//     service-key gated) -- the only two endpoints RAG exposes about
+//     manage_all_orgs-gated by RAG) -- the only two endpoints RAG exposes about
 //     its own operational state; there is no query-latency or
 //     retrieval-accuracy metric anywhere in this service's API to show
 //     here.
 
 type Tab = 'knowledge-base' | 'pubmed' | 'status'
 
-function classify(message: string): 'denied' | 'error' {
-  return message.endsWith(' 401') || message.endsWith(' 403') ? 'denied' : 'error'
+type Failure = 'unauthenticated' | 'forbidden' | 'error'
+
+function classify(error: unknown): Failure {
+  if (error instanceof RagRequestError) {
+    if (error.status === 401) return 'unauthenticated'
+    if (error.status === 403) return 'forbidden'
+  }
+  return 'error'
 }
 
-// Wording deliberately differs from ToolExecutionPage.tsx/WorkflowsPage.tsx's
-// DeniedState: a 401/403 here means the RAGBIO_API_KEY service
-// credential is missing/misconfigured on control-center's side (or RAG
-// itself doesn't have one set) -- it is not a statement about the
-// viewing admin's own permissions, since this page's data was never
-// gated by those in the first place. See rag.ts's module comment.
-function ServiceCredentialState({ message }: { message: string }) {
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+// 403: RAG refused this caller. The message names what RAG requires rather
+// than blaming a credential -- the caller's own permissions are the issue.
+function ForbiddenState({ requires }: { requires: string }) {
   return (
     <EmptyState
       icon={AlertTriangle}
-      title="RAG service credential unavailable"
-      description={`omnibioai-rag rejected this request (${message}). This reflects control-center's RAGBIO_API_KEY configuration, not your own admin permissions.`}
+      title="Insufficient permissions"
+      description={`Your account is not permitted to view this RAG data. The RAG service requires ${requires} for it and decides access itself; your Admin Console session is unaffected.`}
     />
   )
 }
 
+// 401 relayed from RAG: the Admin Console accepted the session, RAG did
+// not accept the forwarded token. The console session is left intact (see
+// rag.ts), so say so instead of implying the user was signed out.
+function UnauthenticatedState() {
+  return (
+    <EmptyState
+      icon={AlertTriangle}
+      title="RAG did not accept your session"
+      description="The RAG service rejected your sign-in token for this request. Your Admin Console session is still active. If this persists, sign out and back in."
+    />
+  )
+}
+
+const STUDIES_REQUIRES = 'the dataset.read permission'
+const CACHE_STATS_REQUIRES = 'platform-admin access (manage_all_orgs)'
+
 type StudiesState =
   | { status: 'loading' }
-  | { status: 'denied'; message: string }
+  | { status: 'unauthenticated'; message: string }
+  | { status: 'forbidden'; message: string }
   | { status: 'error'; message: string }
   | { status: 'ready'; studies: StudySummary[] }
 
@@ -69,10 +91,7 @@ function useStudies() {
     setState({ status: 'loading' })
     fetchStudies()
       .then(r => setState({ status: 'ready', studies: r.studies }))
-      .catch((e: unknown) => {
-        const message = e instanceof Error ? e.message : String(e)
-        setState(classify(message) === 'denied' ? { status: 'denied', message } : { status: 'error', message })
-      })
+      .catch((e: unknown) => setState({ status: classify(e), message: errorMessage(e) } as StudiesState))
   }
 
   useEffect(load, [])
@@ -83,7 +102,8 @@ function KnowledgeBaseTab() {
   const { state, load } = useStudies()
 
   if (state.status === 'loading') return <LoadingState label="Loading knowledge base…" />
-  if (state.status === 'denied') return <ServiceCredentialState message={state.message} />
+  if (state.status === 'forbidden') return <ForbiddenState requires={STUDIES_REQUIRES} />
+  if (state.status === 'unauthenticated') return <UnauthenticatedState />
   if (state.status === 'error') return <ErrorState message={state.message} onRetry={load} />
 
   return (
@@ -103,7 +123,8 @@ function PubMedTab() {
   const { state, load } = useStudies()
 
   if (state.status === 'loading') return <LoadingState label="Loading literature index…" />
-  if (state.status === 'denied') return <ServiceCredentialState message={state.message} />
+  if (state.status === 'forbidden') return <ForbiddenState requires={STUDIES_REQUIRES} />
+  if (state.status === 'unauthenticated') return <UnauthenticatedState />
   if (state.status === 'error') return <ErrorState message={state.message} onRetry={load} />
 
   if (state.studies.length === 0) {
@@ -133,31 +154,41 @@ function PubMedTab() {
 
 type StatusState =
   | { status: 'loading' }
-  | { status: 'denied'; message: string }
   | { status: 'error'; message: string }
-  | { status: 'ready'; health: RagHealth; cache: CacheStats | null }
+  | { status: 'ready'; health: RagHealth; cache: CacheStats | null; cacheIssue: Failure | null }
+
+function CacheUnavailable({ issue }: { issue: Failure }) {
+  const text =
+    issue === 'forbidden'
+      ? `Not available -- query-cache statistics require ${CACHE_STATS_REQUIRES}, which your account does not have. Service health above is unaffected.`
+      : issue === 'unauthenticated'
+        ? "Not available -- the RAG service did not accept your sign-in token for cache statistics. Your Admin Console session is still active; service health above is unaffected."
+        : "Not available -- the cache-stats endpoint didn't respond. Service health above is unaffected."
+  return <div style={{ fontSize: 12, color: 'var(--muted)' }}>{text}</div>
+}
 
 function QueryServiceStatusTab() {
   const [state, setState] = useState<StatusState>({ status: 'loading' })
 
   const load = () => {
     setState({ status: 'loading' })
-    // /rag/health has no auth requirement upstream; /rag/cache-stats is
-    // service-key gated and may fail independently (e.g. RAGBIO_API_KEY
-    // unconfigured) without that being a reason to hide health entirely
-    // -- health is awaited directly, cache stats degrades to null on
-    // its own failure rather than failing the whole tab.
+    // /rag/health has no auth requirement upstream, so a failure there is a
+    // plain service error. /rag/cache-stats is gated by RAG itself
+    // (manage_all_orgs) and may fail independently -- refused for this
+    // caller, say -- without that being a reason to hide health entirely:
+    // health is awaited directly, cache stats degrades to an explained
+    // "not available" on its own failure rather than failing the whole tab.
     Promise.allSettled([fetchRagHealth(), fetchCacheStats()])
       .then(([healthResult, cacheResult]) => {
         if (healthResult.status === 'rejected') {
-          const message = healthResult.reason instanceof Error ? healthResult.reason.message : String(healthResult.reason)
-          setState(classify(message) === 'denied' ? { status: 'denied', message } : { status: 'error', message })
+          setState({ status: 'error', message: errorMessage(healthResult.reason) })
           return
         }
         setState({
           status: 'ready',
           health: healthResult.value,
           cache: cacheResult.status === 'fulfilled' ? cacheResult.value : null,
+          cacheIssue: cacheResult.status === 'rejected' ? classify(cacheResult.reason) : null,
         })
       })
   }
@@ -165,10 +196,9 @@ function QueryServiceStatusTab() {
   useEffect(load, [])
 
   if (state.status === 'loading') return <LoadingState label="Loading service status…" />
-  if (state.status === 'denied') return <ServiceCredentialState message={state.message} />
   if (state.status === 'error') return <ErrorState message={state.message} onRetry={load} />
 
-  const { health, cache } = state
+  const { health, cache, cacheIssue } = state
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
       <Card>
@@ -188,9 +218,7 @@ function QueryServiceStatusTab() {
             {cache.hits != null && cache.misses != null && <Field title="Hits / Misses">{`${cache.hits} / ${cache.misses}`}</Field>}
           </>
         ) : (
-          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-            Not available -- the RAGBIO_API_KEY-gated cache-stats endpoint didn't respond, service health above is unaffected.
-          </div>
+          <CacheUnavailable issue={cacheIssue ?? 'error'} />
         )}
       </Card>
     </div>

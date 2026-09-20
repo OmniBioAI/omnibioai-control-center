@@ -2,6 +2,16 @@
 
 Status: implemented. Backend proxy + frontend page + tests, read-only.
 
+> **Superseded auth model (RAG HIPAA-V2-001 R4/R6):** the `RAGBIO_API_KEY`
+> service-credential description below is historical. `omnibioai-rag` no
+> longer accepts a shared key on any route: `GET /v1/studies` now needs an
+> IAM-verified `dataset.read` (tenant-filtered) and `GET /v1/cache/stats` an
+> IAM-verified `manage_all_orgs`. `routes_rag_proxy.py` now forwards the
+> **caller's own** `Authorization` header and injects no service credential;
+> RAG's 401/403 are relayed unchanged (tagged `X-Upstream-Service: rag`),
+> and the frontend classifies them by HTTP status. Control-center's own
+> `platform.manage_infra` gate is unchanged.
+
 > **Security fix (post-PR-A4 audit):** this doc originally asserted
 > "Admin Console visibility is controlled by control-center admin
 > authorization" without that control actually existing —

@@ -383,9 +383,9 @@ export const NAVIGATION: NavSection[] = [
     items: [
       // PR A4: Admin Console Capability Parity. functional: true because
       // a real page now exists (RAGPage), reusing omnibioai-rag's own
-      // GET /v1/studies and GET /v1/cache/stats (both answered via a
-      // control-center-held RAGBIO_API_KEY service credential, not the
-      // viewing admin's own token -- see rag.ts's module comment) plus
+      // GET /v1/studies and GET /v1/cache/stats (both called with the
+      // viewing admin's own IAM token, which RAG itself authorizes --
+      // dataset.read / manage_all_orgs; see rag.ts's module comment) plus
       // GET /health. Both 'rag' and 'pubmed' point at the same page:
       // RAG's only indexed corpus today is PubMed abstracts (confirmed
       // by reading ragbio/api/server.py directly), there is no separate
@@ -393,17 +393,16 @@ export const NAVIGATION: NavSection[] = [
       // Same hasAdminAccess() gate 'tool-execution'/'ai-models'/
       // 'workflows'/'infrastructure' above already use -- this only
       // decides whether the nav entry renders, same as those three.
-      // SECURITY FIX (post-PR-A4 audit): until this fix, GET /rag/studies
-      // and GET /rag/cache-stats had no backend check at all -- since
-      // this page's data isn't per-admin-authorized upstream the way TES/
-      // Workflows/AI Models are (see rag.ts), this client-side gate was
-      // the *only* thing standing in front of it, and it's trivially
-      // bypassed by calling the route directly with no token. Backend now
+      // SECURITY FIX (post-PR-A4 audit): GET /rag/studies and GET
+      // /rag/cache-stats once had no backend check at all, leaving this
+      // client-side gate as the only thing in front of them (trivially
+      // bypassed by calling the route directly with no token). Backend now
       // requires platform.manage_infra on both routes
       // (routes_rag_proxy.py) -- the same permission every "admin" role
-      // account is seeded with (omnibioai-auth's app/db/init_admin.py),
-      // so this gate agrees with, rather than substitutes for, the real
-      // one.
+      // account is seeded with (omnibioai-auth's app/db/init_admin.py) --
+      // and then forwards the caller's own token so RAG applies its own
+      // permission (dataset.read / manage_all_orgs) on top. This gate
+      // agrees with, rather than substitutes for, those real ones.
       { key: 'rag', label: 'RAG', functional: true, visible: hasAdminAccess },
       { key: 'pubmed', label: 'PubMed', functional: true, visible: hasAdminAccess },
       // PR E2 (re-verified PR D §3.2's finding, unchanged): removed, not

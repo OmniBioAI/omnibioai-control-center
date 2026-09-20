@@ -47,6 +47,44 @@ describe('DashboardPage', () => {
     vi.mocked(dashboard.fetchDashboardSummary).mockReset()
   })
 
+  // RAG authorizes the signed-in caller itself (dataset.read), so null
+  // Knowledge counts can mean "refused" -- the card must say so instead of
+  // showing an unexplained "--".
+  it('explains a RAG permission refusal on the Knowledge card instead of an unexplained "--"', async () => {
+    vi.mocked(dashboard.fetchDashboardSummary).mockResolvedValue({
+      ...FULL_SUMMARY,
+      knowledge: { rag_collections: null, indexed_documents: null, indexed_publications: null, knowledge_bases: null, access: 'forbidden' },
+    })
+    render(<DashboardPage />)
+
+    expect(await screen.findByText(/your account lacks the dataset\.read permission RAG requires/)).toBeInTheDocument()
+    expect(screen.queryByText('23')).not.toBeInTheDocument()
+  })
+
+  it('says so when RAG rejected the token, and when it is unavailable', async () => {
+    vi.mocked(dashboard.fetchDashboardSummary).mockResolvedValue({
+      ...FULL_SUMMARY,
+      knowledge: { rag_collections: null, indexed_documents: null, indexed_publications: null, knowledge_bases: null, access: 'unauthenticated' },
+    })
+    const { unmount } = render(<DashboardPage />)
+    expect(await screen.findByText(/RAG did not accept your sign-in token/)).toBeInTheDocument()
+    unmount()
+
+    vi.mocked(dashboard.fetchDashboardSummary).mockResolvedValue({
+      ...FULL_SUMMARY,
+      knowledge: { rag_collections: null, indexed_documents: null, indexed_publications: null, knowledge_bases: null, access: 'unavailable' },
+    })
+    render(<DashboardPage />)
+    expect(await screen.findByText(/omnibioai-rag -- currently unavailable/)).toBeInTheDocument()
+  })
+
+  it('shows the plain description when access is ok or the backend predates the field', async () => {
+    vi.mocked(dashboard.fetchDashboardSummary).mockResolvedValue(FULL_SUMMARY)
+    render(<DashboardPage />)
+    await screen.findByText('18')
+    expect(screen.getByText('omnibioai-rag')).toBeInTheDocument()
+  })
+
   it('renders live numbers from GET /dashboard/summary across every section', async () => {
     vi.mocked(dashboard.fetchDashboardSummary).mockResolvedValue(FULL_SUMMARY)
     render(<DashboardPage />)

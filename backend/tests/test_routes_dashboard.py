@@ -171,39 +171,80 @@ class TestAiPlatformSection(unittest.TestCase):
 
 class TestKnowledgeSection(unittest.TestCase):
     """The dashboard's knowledge section: RAG collection and document counts from
-    /v1/studies, null when RAG is not configured or its response is malformed."""
-    def test_null_when_ragbio_api_key_not_configured(self) -> None:
-        """With RAGBIO_API_KEY unset, rag_collections is null even though /v1/studies
-        would return studies."""
-        with patch("control_center.api.routes_dashboard.RAGBIO_API_KEY", ""):
-            with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client({"/v1/studies": _resp(200, STUDIES)})):
-                resp = client.get("/dashboard/summary")
-        knowledge = resp.json()["knowledge"]
-        self.assertIsNone(knowledge["rag_collections"])
+    /v1/studies, read with the CALLER's own token (RAG's HIPAA-V2-001 R4 model:
+    dataset.read, tenant-filtered). No shared/service credential exists or is
+    used as a fallback, and every reason the counts are null is stated in
+    `access` instead of being collapsed into the same silent null."""
 
-    def test_malformed_upstream_response_yields_null_not_a_crash(self) -> None:
-        """An unexpected /v1/studies response shape yields null rag_collections and
-        indexed_documents instead of a crash."""
-        with patch("control_center.api.routes_dashboard.RAGBIO_API_KEY", "test-key"):
-            with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client({"/v1/studies": _resp(200, {"detail": "unexpected shape"})})):
-                resp = client.get("/dashboard/summary")
-        knowledge = resp.json()["knowledge"]
-        self.assertIsNone(knowledge["rag_collections"])
-        self.assertIsNone(knowledge["indexed_documents"])
+    def _get(self, upstream: MagicMock | None, *, headers: dict | None = None, side_effect=None):
+        """Runs GET /dashboard/summary with /v1/studies answered by `upstream`
+        (or raising `side_effect`); returns (knowledge section, the mocked
+        client.get so tests can inspect the upstream call)."""
+        mock_ctx = _mock_client({"/v1/studies": upstream} if upstream is not None else {})
+        if side_effect is not None:
+            mock_ctx.__aenter__.return_value.get = AsyncMock(side_effect=side_effect)
+        with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.get("/dashboard/summary", headers=headers or {})
+        return resp.json()["knowledge"], mock_ctx.__aenter__.return_value.get
 
-    def test_sums_abstract_counts_when_configured(self) -> None:
-        """With the API key configured, rag_collections is 2 and indexed_documents is
-        128 (the summed abstract counts), with indexed_publications and knowledge_bases
-        mirroring the same figures."""
-        with patch("control_center.api.routes_dashboard.RAGBIO_API_KEY", "test-key"):
-            with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client({"/v1/studies": _resp(200, STUDIES)})):
-                resp = client.get("/dashboard/summary")
-        knowledge = resp.json()["knowledge"]
+    def test_sums_abstract_counts_for_an_authorized_caller(self) -> None:
+        """With RAG answering 200, rag_collections is 2 and indexed_documents is 128
+        (the summed abstract counts), with indexed_publications and knowledge_bases
+        mirroring the same figures, and access "ok"."""
+        knowledge, _ = self._get(_resp(200, STUDIES), headers={"Authorization": "Bearer caller-tok"})
         self.assertEqual(knowledge["rag_collections"], 2)
         self.assertEqual(knowledge["indexed_documents"], 128)
         # Same underlying figures under two names -- documented, not a bug.
         self.assertEqual(knowledge["indexed_publications"], 128)
         self.assertEqual(knowledge["knowledge_bases"], 2)
+        self.assertEqual(knowledge["access"], "ok")
+
+    def test_forwards_the_callers_own_authorization_to_rag(self) -> None:
+        """RAG is called with the caller's exact Authorization header -- never a
+        service credential, even if RAGBIO_API_KEY is set in the environment."""
+        import os
+        with patch.dict(os.environ, {"RAGBIO_API_KEY": "the-service-secret"}):
+            _, get = self._get(_resp(200, STUDIES), headers={"Authorization": "Bearer caller-tok"})
+        call = next(c for c in get.call_args_list if "/v1/studies" in c.args[0])
+        self.assertEqual(call.kwargs["headers"], {"Authorization": "Bearer caller-tok"})
+        self.assertNotIn("the-service-secret", str(get.call_args_list))
+
+    def test_anonymous_caller_gets_no_rag_data_and_rag_is_never_called(self) -> None:
+        """No Authorization header means no identity, so RAG is not contacted and no
+        privileged fallback fills the gap: every knowledge field is null."""
+        knowledge, get = self._get(_resp(200, STUDIES))
+        self.assertTrue(all(v is None for v in knowledge.values()), knowledge)
+        self.assertFalse(any("/v1/studies" in c.args[0] for c in get.call_args_list))
+
+    def test_rag_403_is_reported_as_forbidden_not_as_healthy_or_bare_null(self) -> None:
+        """A caller RAG refuses (no dataset.read) gets null counts AND access
+        "forbidden" -- the refusal is never turned into zeros or hidden."""
+        knowledge, _ = self._get(_resp(403, {"detail": "Insufficient permissions"}), headers={"Authorization": "Bearer caller-tok"})
+        self.assertEqual(knowledge["access"], "forbidden")
+        self.assertIsNone(knowledge["rag_collections"])
+        self.assertIsNone(knowledge["indexed_documents"])
+
+    def test_rag_401_is_reported_as_unauthenticated(self) -> None:
+        """RAG rejecting the forwarded token yields access "unauthenticated"."""
+        knowledge, _ = self._get(_resp(401, {"detail": "Invalid, expired, or revoked token"}), headers={"Authorization": "Bearer caller-tok"})
+        self.assertEqual(knowledge["access"], "unauthenticated")
+        self.assertIsNone(knowledge["rag_collections"])
+
+    def test_upstream_failures_are_reported_as_unavailable(self) -> None:
+        """A 5xx, an unreachable RAG, and a malformed body are each "unavailable" --
+        distinct from an authorization failure -- with null counts and no crash."""
+        headers = {"Authorization": "Bearer caller-tok"}
+        cases = {
+            "5xx": dict(upstream=_resp(503, {"error": "down"})),
+            "unreachable": dict(upstream=None, side_effect=httpx.ConnectError("refused")),
+            "malformed": dict(upstream=_resp(200, {"detail": "unexpected shape"})),
+        }
+        for name, kwargs in cases.items():
+            with self.subTest(case=name):
+                knowledge, _ = self._get(headers=headers, **kwargs)
+                self.assertEqual(knowledge["access"], "unavailable")
+                self.assertIsNone(knowledge["rag_collections"])
+                self.assertIsNone(knowledge["indexed_documents"])
 
 
 class TestWorkflowSection(unittest.TestCase):
@@ -492,9 +533,8 @@ class TestPublicFieldsContract(unittest.TestCase):
             "/v1/categories": _resp(200, CATEGORIES),
             "/v1/studies": _resp(200, STUDIES),
         }
-        with patch("control_center.api.routes_dashboard.RAGBIO_API_KEY", "test-key"):
-            with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client(routes)):
-                resp = client.get("/dashboard/summary")  # deliberately no Authorization header
+        with patch("control_center.api.routes_dashboard.httpx.AsyncClient", return_value=_mock_client(routes)):
+            resp = client.get("/dashboard/summary")  # deliberately no Authorization header
         self.assertEqual(resp.status_code, 200)
         return resp.json()
 

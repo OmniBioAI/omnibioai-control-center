@@ -6,9 +6,18 @@ import {
   Wallet, Workflow, XCircle,
 } from 'lucide-react'
 import { fetchDashboardSummary } from '../dashboard'
-import type { DashboardSummary } from '../dashboard'
+import type { DashboardSummary, KnowledgeSummary } from '../dashboard'
 import { SectionHeader } from '../components/ui'
 import { AlertCard, DashboardGrid, HealthCard, MetricCard, StatusCard } from '../components/dashboard'
+
+// RAG authorizes the signed-in caller itself, so a null count can mean "not
+// permitted" -- say so rather than leaving an unexplained "--".
+function knowledgeDescription(access: KnowledgeSummary['access']): string {
+  if (access === 'forbidden') return 'omnibioai-rag -- your account lacks the dataset.read permission RAG requires, so counts are not shown'
+  if (access === 'unauthenticated') return 'omnibioai-rag -- RAG did not accept your sign-in token, so counts are not shown'
+  if (access === 'unavailable') return 'omnibioai-rag -- currently unavailable'
+  return 'omnibioai-rag'
+}
 
 function subscriptionTone(status: string | null): 'good' | 'bad' | 'neutral' {
   if (status === 'active' || status === 'trial') return 'good'
@@ -82,7 +91,7 @@ export default function DashboardPage() {
         <MetricCard label="LLM Providers" value={ai?.llm_providers ?? null} icon={BrainCircuit} />
       </DashboardGrid>
 
-      <DashboardGrid title="Knowledge Platform" description="omnibioai-rag">
+      <DashboardGrid title="Knowledge Platform" description={knowledgeDescription(knowledge?.access)}>
         <MetricCard label="RAG Collections" value={knowledge?.rag_collections ?? null} icon={BookOpen} />
         <MetricCard label="Indexed Documents" value={knowledge?.indexed_documents ?? null} icon={FileText} />
         <MetricCard label="Indexed Publications" value={knowledge?.indexed_publications ?? null} icon={FlaskConical} />
