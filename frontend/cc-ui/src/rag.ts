@@ -43,6 +43,10 @@ export class RagRequestError extends Error {
 // the console back to the login screen for it was the bug this replaced --
 // so it only ends the session when control-center itself produced it. The
 // two are told apart by the proxy's origin marker, not by status or wording.
+// The marker is written by the proxy alone (never copied from a request or
+// from RAG's headers -- see test_routes_rag_proxy.py's spoofing tests), and if
+// an intermediary ever stripped it the 401 would be read as control-center's
+// own: the session would end, the fail-safe direction, never be wrongly kept.
 async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const r = await fetch(path, {
     ...init,

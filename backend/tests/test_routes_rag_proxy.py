@@ -201,6 +201,56 @@ class TestUpstreamRefusalsAreRelayed(unittest.TestCase):
         self.assertIn("non-JSON", resp.json()["error"])
 
 
+class TestUpstreamMarkerCannotBeSpoofed(unittest.TestCase):
+    """The origin marker decides whether a 401 ends the Admin Console session, so
+    it must be something only this proxy can attach, to responses it relays.
+
+    Neither a client nor RAG can set it: it is written by the proxy from constants,
+    never copied from a request header or from RAG's own response headers, and a
+    response control-center generates itself (its own auth gate) never carries it.
+    If an intermediary strips it, the 401 is treated as control-center's own -- the
+    fail-safe direction (the session ends, it is never wrongly kept)."""
+
+    def test_client_supplied_request_header_never_marks_a_control_center_401(self) -> None:
+        """A client claiming X-Upstream-Service: rag on its own request gets no marker
+        on control-center's own 401 (missing/invalid token), so the frontend still
+        ends its session -- the header only ever exists on RESPONSES the proxy relays."""
+        for path in ("/rag/studies", "/rag/cache-stats"):
+            for headers in ({}, {"Authorization": "Bearer not-a-real-token"}):
+                with self.subTest(path=path, sent_auth=bool(headers)):
+                    resp = client.get(path, headers={**headers, UPSTREAM_HEADER: "rag"})
+                    self.assertEqual(resp.status_code, 401)
+                    self.assertNotIn(UPSTREAM_HEADER, resp.headers)
+
+    def test_client_supplied_header_is_not_forwarded_to_rag(self) -> None:
+        """Only Authorization (and content type) go upstream; arbitrary client headers do not."""
+        mock_ctx = _mock_async_client(_mock_response(200, _STUDIES_OUT))
+        with patch("control_center.api.routes_rag_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            client.get("/rag/studies", headers={**_admin_headers(), UPSTREAM_HEADER: "spoofed", "X-Other": "1"})
+        sent = _upstream_call_headers(mock_ctx)
+        self.assertEqual(set(sent), {"Content-Type", "Authorization"})
+
+    def test_rag_response_headers_are_never_relayed_or_able_to_change_the_marker(self) -> None:
+        """RAG cannot set, alter or add response headers through the proxy: the marker is
+        exactly the proxy's own constant and no upstream header (cookies included) is copied."""
+        upstream = _mock_response(401, {"detail": "Invalid, expired, or revoked token"})
+        upstream.headers = {UPSTREAM_HEADER: "something-else", "Set-Cookie": "a=b", "X-Injected": "1"}
+        with patch("control_center.api.routes_rag_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.get("/rag/studies", headers=_admin_headers())
+        self.assertEqual(resp.headers.get_list(UPSTREAM_HEADER), ["rag"])
+        self.assertNotIn("set-cookie", resp.headers)
+        self.assertNotIn("x-injected", resp.headers)
+
+    def test_marker_is_only_ever_set_by_the_proxy_relay_path(self) -> None:
+        """Control-center's own error responses from this router (unreachable RAG) carry no marker."""
+        with patch(
+            "control_center.api.routes_rag_proxy.httpx.AsyncClient",
+            return_value=_mock_async_client(side_effect=httpx.ConnectError("refused")),
+        ):
+            resp = client.get("/rag/studies", headers=_admin_headers())
+        self.assertNotIn(UPSTREAM_HEADER, resp.headers)
+
+
 class TestControlCenterGateStillRunsFirst(unittest.TestCase):
     """control-center's own platform.manage_infra gate on /rag/studies and
     /rag/cache-stats is unchanged -- and RAG is never contacted when it refuses."""
