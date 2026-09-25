@@ -15,6 +15,8 @@ from control_center.core import public_cache
 @pytest.fixture(autouse=True)
 def _no_public_cache(monkeypatch):
     monkeypatch.setenv("PUBLIC_CACHE_SECONDS", "0")
+    # No real background knowledge-base scan from on_startup() in tests.
+    monkeypatch.setenv("KNOWLEDGE_BASE_SCAN_ON_STARTUP", "0")
     public_cache.clear()
     yield
     public_cache.clear()

@@ -26,11 +26,17 @@ def knowledge_base_section_html(control_center_url: str) -> str:
     faiss = data.get("faiss_index", {})
     rag_status = data.get("rag_status", "unknown")
 
-    total_abstracts = abstracts.get("total", 0)
-    domains_with_abstracts = abstracts.get("domains_with_abstracts", 0)
-    domains_indexed = faiss.get("domains_indexed", 0)
-    index_size_gb = faiss.get("size_gb", 0)
-    domain_list = faiss.get("domain_list", [])
+    # Counts are None while the control center's first background scan is
+    # still running (scan.status == "pending").
+    counting = (data.get("scan") or {}).get("status") == "pending"
+    total_abstracts = abstracts.get("total")
+    domains_with_abstracts = abstracts.get("domains_with_abstracts")
+    domains_indexed = faiss.get("domains_indexed")
+    index_size_gb = faiss.get("size_gb")
+    domain_list = faiss.get("domain_list") or []
+
+    def shown(value):
+        return "counting…" if counting or value is None else value
 
     rag_color = "#00e5a0" if rag_status == "running" else "#ef4444"
     rag_bg = "rgba(0,229,160,0.15)" if rag_status == "running" else "rgba(239,68,68,0.15)"
@@ -45,7 +51,9 @@ def knowledge_base_section_html(control_center_url: str) -> str:
             text-transform:uppercase;letter-spacing:0.06em">{label}</div>
         </div>"""
 
-    if total_abstracts >= 1_000_000:
+    if total_abstracts is None:
+        abs_display = shown(None)
+    elif total_abstracts >= 1_000_000:
         abs_display = f"{total_abstracts/1_000_000:.1f}M"
     elif total_abstracts >= 1_000:
         abs_display = f"{total_abstracts/1_000:.0f}K"
@@ -77,9 +85,9 @@ def knowledge_base_section_html(control_center_url: str) -> str:
 
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px">
     {stat_card(abs_display, "PubMed Abstracts")}
-    {stat_card(domains_with_abstracts, "Domains Ingested", "#a855f7")}
-    {stat_card(domains_indexed, "FAISS Indexes", "#f59e0b")}
-    {stat_card(f"{index_size_gb} GB", "Index Size", "#06b6d4")}
+    {stat_card(shown(domains_with_abstracts), "Domains Ingested", "#a855f7")}
+    {stat_card(shown(domains_indexed), "FAISS Indexes", "#f59e0b")}
+    {stat_card(shown(index_size_gb if index_size_gb is None else f"{index_size_gb} GB"), "Index Size", "#06b6d4")}
   </div>
 
   <div style="background:var(--color-bg-surface);border:1px solid var(--color-border);
@@ -87,7 +95,7 @@ def knowledge_base_section_html(control_center_url: str) -> str:
     <div style="padding:12px 16px;border-bottom:1px solid var(--color-border);
       display:flex;align-items:center;justify-content:space-between">
       <span style="font-weight:700;font-size:13px">Indexed Domains (showing first 20)</span>
-      <span style="font-size:11px;color:var(--color-text-muted)">{domains_indexed} total</span>
+      <span style="font-size:11px;color:var(--color-text-muted)">{shown(domains_indexed)} total</span>
     </div>
     <div style="padding:14px 16px">
       {domain_tags if domain_tags else

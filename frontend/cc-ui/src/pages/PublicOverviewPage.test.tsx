@@ -137,6 +137,28 @@ describe('PublicOverviewPage', () => {
     expect(screen.queryByText(/rebuilt with/)).not.toBeInTheDocument()
   })
 
+  it('says the knowledge base is being counted while the first scan runs', async () => {
+    const po = await mocks()
+    vi.mocked(po.fetchKnowledgeBase).mockResolvedValue({
+      rag_status: 'running', abstracts: { total: null, domains_with_abstracts: null },
+      faiss_index: { domains_indexed: null, size_gb: null }, readiness: null,
+      scan: { status: 'pending', scanned_at: null },
+    })
+    render(<PublicOverviewPage refreshKey={0} />)
+    expect(await screen.findAllByText('Counting…')).toHaveLength(2)
+    expect(screen.getByText('First count since restart is running')).toBeInTheDocument()
+    expect(screen.queryByRole('progressbar', { name: 'Domains ready to query' })).not.toBeInTheDocument()
+  })
+
+  it('shows when the knowledge base was last counted', async () => {
+    const po = await mocks()
+    const kb = await po.fetchKnowledgeBase()
+    vi.mocked(po.fetchKnowledgeBase).mockResolvedValue({ ...kb, scan: { status: 'ready', scanned_at: new Date().toISOString() } })
+    render(<PublicOverviewPage refreshKey={0} />)
+    expect(await screen.findByText('Counted today')).toBeInTheDocument()
+    expect(screen.queryByText('Counting…')).not.toBeInTheDocument()
+  })
+
   it('does not show a coverage percentage', async () => {
     await mocks()
     render(<PublicOverviewPage refreshKey={0} />)

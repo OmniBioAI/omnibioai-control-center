@@ -59,15 +59,9 @@ def cached(key: str, compute: Callable[[], T]) -> T:
     return value
 
 
-async def cached_async(key: str, compute: Callable[[], Awaitable[T]], ttl: float | None = None) -> T:
-    """Async counterpart of cached() for async route handlers. `ttl`
-    overrides PUBLIC_CACHE_SECONDS for results that are expensive to
-    compute and change slowly; caching stays off whenever
-    PUBLIC_CACHE_SECONDS is 0."""
-    default = ttl_seconds()
-    if default <= 0:
-        return await compute()
-    ttl = default if ttl is None else ttl
+async def cached_async(key: str, compute: Callable[[], Awaitable[T]]) -> T:
+    """Async counterpart of cached() for async route handlers."""
+    ttl = ttl_seconds()
     if ttl <= 0:
         return await compute()
     now = time.monotonic()

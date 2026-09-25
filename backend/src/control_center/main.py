@@ -69,6 +69,7 @@ from control_center.api.routes_health import router as health_router
 from control_center.api.routes_infra import router as infra_router
 from control_center.api.routes_known_issues import router as known_issues_router
 from control_center.api.routes_llm import router as llm_router
+from control_center.api.routes_llm import scanner as knowledge_base_scanner
 from control_center.api.routes_reference import router as reference_router
 from control_center.api.routes_showcase import router as showcase_router
 from control_center.core import public_cache, uptime
@@ -196,7 +197,8 @@ app.include_router(known_issues_router)
 #     the public Overview's Literature AI section reads it -- while the
 #     absolute pubmed_root/index_root paths stay behind
 #     platform.manage_infra (checked in routes_llm.py). Its filesystem
-#     scan is cached (KNOWLEDGE_BASE_CACHE_SECONDS).
+#     scan runs in the background, one at a time, and requests read the
+#     last completed result (KNOWLEDGE_BASE_REFRESH_SECONDS).
 app.include_router(llm_router)
 app.include_router(infra_router)
 app.include_router(cloud_router)
@@ -1151,6 +1153,10 @@ async def on_startup() -> None:
         # Public uptime history (core/uptime.py): samples the configured
         # service checks without sending Down alerts.
         threading.Thread(target=uptime.run_forever, args=(load_settings,), daemon=True).start()
+    if os.environ.get("KNOWLEDGE_BASE_SCAN_ON_STARTUP", "1") != "0":
+        # Warm the Literature AI counts so the first /knowledge-base request
+        # after a restart does not find them pending (routes_llm.py).
+        knowledge_base_scanner.refresh_in_background()
 
 
 # ==============================================================================

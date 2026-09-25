@@ -126,8 +126,10 @@ export const fetchUptime = () => getJson<UptimeSummary>('/uptime')
 
 export interface KnowledgeBase {
   rag_status: 'running' | 'degraded' | 'unreachable' | string
-  abstracts: { total: number; domains_with_abstracts: number }
-  faiss_index: { domains_indexed: number; size_gb: number }
+  // Counts are null until the server's first background scan finishes
+  // (scan.status 'pending'); afterwards they are the last completed scan.
+  abstracts: { total: number | null; domains_with_abstracts: number | null }
+  faiss_index: { domains_indexed: number | null; size_gb: number | null }
   readiness: {
     expected_dimension: number
     domains_total: number
@@ -136,6 +138,7 @@ export interface KnowledgeBase {
     missing_map: number
     unreadable: number
   } | null
+  scan?: { status: 'ready' | 'pending'; scanned_at: string | null }
 }
 
 export const fetchKnowledgeBase = () => getJson<KnowledgeBase>('/knowledge-base')

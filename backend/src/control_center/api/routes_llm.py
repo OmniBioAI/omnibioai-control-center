@@ -1,14 +1,19 @@
 from __future__ import annotations
-import asyncio
+
+import logging
 import os
 import struct
+import threading
+import time
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Optional
+
 import httpx
 from fastapi import APIRouter, Header
 from fastapi.responses import JSONResponse
 
-from control_center.core import public_cache
 from control_center.core.jwt_verify import TokenInvalid, verify_token
 
 router = APIRouter()
@@ -137,10 +142,16 @@ INDEX_SCRATCH_PREFIXES = ("embedding_checkpoint",)
 # (mixedbread-ai/mxbai-embed-large-v1 -> 1024 in the deployment config).
 # An index built at another dimension cannot be queried until re-embedded.
 EXPECTED_EMBEDDING_DIM = int(os.environ.get("RAG_EMBEDDING_DIM", "1024"))
-# Counting tens of millions of abstract files is slow; the counts change
-# slowly, so they are recomputed at most this often (0 disables caching
-# via PUBLIC_CACHE_SECONDS=0, see core/public_cache.py).
-KNOWLEDGE_BASE_CACHE_SECONDS = float(os.environ.get("KNOWLEDGE_BASE_CACHE_SECONDS", "3600"))
+# Counting tens of millions of abstract files takes minutes, so the scan
+# runs in the background (see _KnowledgeBaseScanner) and is refreshed at
+# most this often. KNOWLEDGE_BASE_CACHE_SECONDS is the earlier name.
+KNOWLEDGE_BASE_REFRESH_SECONDS = float(
+    os.environ.get("KNOWLEDGE_BASE_REFRESH_SECONDS")
+    or os.environ.get("KNOWLEDGE_BASE_CACHE_SECONDS")
+    or "3600"
+)
+
+log = logging.getLogger("control_center.knowledge_base")
 
 
 def _faiss_dimension(path: Path) -> Optional[int]:
@@ -241,89 +252,149 @@ async def get_knowledge_base(
     # absent/insufficient token instead of 401ing outright.
     has_infra_permission = _has_permission(authorization, "platform.manage_infra")
 
-    workspace = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+    # The expensive filesystem counts come from the background scanner and
+    # never block a request: callers get the last completed scan (or a
+    # "pending" marker before the first one finishes), and a stale scan is
+    # refreshed in the background, one at a time.
+    scanner.maybe_refresh()
+    counts, scanned_at = scanner.snapshot()
+    rag_status = await _check_rag()
+    pubmed_root, index_root = _resolve_roots()
 
-    pubmed_root = None
-    for candidate in [
+    return JSONResponse({
+        "rag_status": rag_status,
+        **(counts or _PENDING_COUNTS),
+        "scan": {"status": "ready" if counts else "pending", "scanned_at": scanned_at},
+        "pubmed_root": str(pubmed_root) if (pubmed_root and has_infra_permission) else None,
+        "index_root": str(index_root) if (index_root and has_infra_permission) else None,
+    })
+
+
+def _resolve_roots() -> tuple[Path | None, Path | None]:
+    """(pubmed_root, index_root) -- the first candidate of each that exists."""
+    workspace = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+    pubmed_root = next((c for c in (
         workspace / "data" / "PubMed",
         workspace / "omnibioai-data" / "data" / "PubMed",
         workspace / "omnibioai-data" / "PubMed",
-    ]:
-        if candidate.exists():
-            pubmed_root = candidate
-            break
-
-    index_root = None
-    for candidate in [
+    ) if c.exists()), None)
+    index_root = next((c for c in (
         workspace / "data" / "PubMed" / "Index",
         workspace / "data" / "Index",
         workspace / "omnibioai-data" / "data" / "Index",
         workspace / "omnibioai-data" / "Index",
-    ]:
-        if candidate.exists():
-            index_root = candidate
-            break
+    ) if c.exists()), None)
+    return pubmed_root, index_root
 
-    # Run filesystem scans and RAG health check concurrently
-    loop = asyncio.get_event_loop()
 
+async def _check_rag() -> str:
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            r = await client.get("http://rag:8096/health")
+            return "running" if r.status_code == 200 else "degraded"
+    except Exception:  # noqa: BLE001 -- any failure means the RAG service is unreachable
+        return "unreachable"
+
+
+def _scan_knowledge_base() -> dict:
+    """The slow part of GET /knowledge-base: abstract counts, indexed
+    domains, index size and re-indexing readiness. Blocking."""
+    pubmed_root, index_root = _resolve_roots()
     abstracts_dir = (pubmed_root / "Abstracts") if pubmed_root else None
+    if abstracts_dir and abstracts_dir.exists():
+        abstract_count, domains_with_abstracts = _count_json_files(abstracts_dir)
+    else:
+        abstract_count, domains_with_abstracts = 0, []
+    has_index = bool(index_root and index_root.exists())
+    indexed_domains = _list_index_domains(index_root) if has_index else []
+    index_size_bytes = _index_size_bytes(index_root) if has_index else 0
+    return {
+        "abstracts": {
+            "total": abstract_count,
+            "domains_with_abstracts": len(domains_with_abstracts),
+        },
+        "faiss_index": {
+            "domains_indexed": len(indexed_domains),
+            "size_gb": round(index_size_bytes / 1e9, 2),
+            "domain_list": sorted(indexed_domains)[:20],
+        },
+        "readiness": _index_readiness(index_root, EXPECTED_EMBEDDING_DIM) if has_index else None,
+    }
 
-    async def count_abstracts() -> tuple[int, list[str]]:
-        if abstracts_dir and abstracts_dir.exists():
-            return await loop.run_in_executor(None, _count_json_files, abstracts_dir)
-        return 0, []
 
-    async def list_indexed_domains() -> list[str]:
-        if index_root and index_root.exists():
-            return await loop.run_in_executor(None, _list_index_domains, index_root)
-        return []
+# Same keys as a completed scan, with unknown values, so readers that index
+# into the response (scripts/sections/knowledge_base.py) keep working.
+_PENDING_COUNTS: dict = {
+    "abstracts": {"total": None, "domains_with_abstracts": None},
+    "faiss_index": {"domains_indexed": None, "size_gb": None, "domain_list": []},
+    "readiness": None,
+}
 
-    async def get_index_size() -> int:
-        if index_root and index_root.exists():
-            return await loop.run_in_executor(None, _index_size_bytes, index_root)
-        return 0
 
-    async def check_rag() -> str:
+class _KnowledgeBaseScanner:
+    """Runs _scan_knowledge_base off the request path, one scan at a time.
+
+    Without this, the first request after a restart (and one per refresh
+    interval) ran the multi-minute scan inline, and every concurrent
+    request started another identical scan. Per process: each uvicorn
+    worker keeps its own result.
+    """
+
+    def __init__(self, scan: Callable[[], dict] | None = None,
+                 refresh_seconds: float | None = None) -> None:
+        self._scan = scan or (lambda: _scan_knowledge_base())
+        self._refresh_seconds = refresh_seconds
+        self._lock = threading.Lock()
+        self._result: dict | None = None
+        self._scanned_at: float | None = None      # monotonic, for staleness
+        self._scanned_at_iso: str | None = None    # wall clock, for display
+        self._running = False
+
+    @property
+    def refresh_seconds(self) -> float:
+        return KNOWLEDGE_BASE_REFRESH_SECONDS if self._refresh_seconds is None else self._refresh_seconds
+
+    def snapshot(self) -> tuple[dict | None, str | None]:
+        with self._lock:
+            return self._result, self._scanned_at_iso
+
+    def is_stale(self, now: float | None = None) -> bool:
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            return self._scanned_at is None or now - self._scanned_at >= self.refresh_seconds
+
+    def refresh(self) -> bool:
+        """Scan now, blocking. Returns False without scanning if another
+        scan is already running."""
+        with self._lock:
+            if self._running:
+                return False
+            self._running = True
         try:
-            async with httpx.AsyncClient(timeout=3) as client:
-                r = await client.get("http://rag:8096/health")
-                return "running" if r.status_code == 200 else "degraded"
-        except Exception:
-            return "unreachable"
+            result = self._scan()
+        except Exception as exc:  # noqa: BLE001 -- keep serving the last good scan
+            log.warning("knowledge_base_scan_failed", extra={"extra_fields": {"error": type(exc).__name__}})
+            return True
+        else:
+            with self._lock:
+                self._result = result
+                self._scanned_at = time.monotonic()
+                self._scanned_at_iso = datetime.now(UTC).isoformat()
+            return True
+        finally:
+            with self._lock:
+                self._running = False
 
-    async def get_readiness() -> Optional[dict]:
-        if index_root and index_root.exists():
-            return await loop.run_in_executor(None, _index_readiness, index_root, EXPECTED_EMBEDDING_DIM)
-        return None
+    def refresh_in_background(self) -> bool:
+        """Start a scan on a daemon thread unless one is already running."""
+        with self._lock:
+            if self._running:
+                return False
+        threading.Thread(target=self.refresh, name="knowledge-base-scan", daemon=True).start()
+        return True
 
-    async def scan() -> dict:
-        (abstract_count, domains_with_abstracts), indexed_domains, index_size_bytes, readiness = (
-            await asyncio.gather(count_abstracts(), list_indexed_domains(), get_index_size(), get_readiness())
-        )
-        return {
-            "abstracts": {
-                "total": abstract_count,
-                "domains_with_abstracts": len(domains_with_abstracts),
-            },
-            "faiss_index": {
-                "domains_indexed": len(indexed_domains),
-                "size_gb": round(index_size_bytes / 1e9, 2),
-                "domain_list": sorted(indexed_domains)[:20],
-            },
-            "readiness": readiness,
-        }
+    def maybe_refresh(self) -> bool:
+        return self.is_stale() and self.refresh_in_background()
 
-    # The filesystem scan is the same for every caller and expensive, so it
-    # is cached (core/public_cache.py); the RAG health check stays live.
-    counts, rag_status = await asyncio.gather(
-        public_cache.cached_async("knowledge_base_scan", scan, ttl=KNOWLEDGE_BASE_CACHE_SECONDS),
-        check_rag(),
-    )
 
-    return JSONResponse({
-        "rag_status": rag_status,
-        **counts,
-        "pubmed_root": str(pubmed_root) if (pubmed_root and has_infra_permission) else None,
-        "index_root": str(index_root) if (index_root and has_infra_permission) else None,
-    })
+scanner = _KnowledgeBaseScanner()

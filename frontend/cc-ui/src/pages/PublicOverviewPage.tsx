@@ -184,15 +184,18 @@ function LiteratureSection({ kb }: { kb: Load<KnowledgeBase> }) {
   if (kb.state === 'loading') body = <Loading />
   else if (kb.state === 'error') body = <Unavailable what="Literature AI status" />
   else {
-    const { abstracts, faiss_index, readiness, rag_status } = kb.data
+    const { abstracts, faiss_index, readiness, rag_status, scan } = kb.data
+    const counting = scan?.status === 'pending'
     const total = readiness?.domains_total ?? 0
     const ready = readiness?.domains_ready ?? 0
     const pct = total ? Math.round((100 * ready) / total) : 0
     body = (
       <>
         <Grid>
-          <Tile label="PubMed abstracts" value={fmtCompact(abstracts.total)} note={`${fmt(abstracts.total)} abstracts`} />
-          <Tile label="Research domains indexed" value={fmt(faiss_index.domains_indexed)} />
+          <Tile label="PubMed abstracts" value={counting ? 'Counting…' : fmtCompact(abstracts.total)}
+            note={counting ? 'First count since restart is running' : `${fmt(abstracts.total)} abstracts`} />
+          <Tile label="Research domains indexed" value={counting ? 'Counting…' : fmt(faiss_index.domains_indexed)}
+            note={scan?.scanned_at ? `Counted ${daysAgo(scan.scanned_at)}` : undefined} />
           <Tile label="Literature AI service" value={RAG_STATUS[rag_status] ?? rag_status} />
         </Grid>
         {readiness && total > 0 && (
