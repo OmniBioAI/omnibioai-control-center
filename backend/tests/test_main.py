@@ -802,6 +802,24 @@ class TestOnStartup(unittest.TestCase):
         mock_thread.assert_called_once()
         self.assertEqual(mock_thread.call_args.kwargs.get("target"), main_module._scheduler_loop)
 
+    def test_starts_knowledge_base_scan_in_background(self):
+        """KNOWLEDGE_BASE_SCAN_ON_STARTUP=1 (the default) counts the Literature
+        AI knowledge base once in the background, so the first visitor to
+        /knowledge-base is not the one who waits for the scan."""
+        with patch.dict(os.environ, {"UPTIME_SAMPLING": "0", "KNOWLEDGE_BASE_SCAN_ON_STARTUP": "1"}), \
+                patch("control_center.main.threading.Thread"), \
+                patch.object(main_module.knowledge_base_scanner, "refresh_in_background") as scan:
+            __import__("asyncio").run(main_module.on_startup())
+        scan.assert_called_once_with()
+
+    def test_knowledge_base_scan_on_startup_can_be_disabled(self):
+        """KNOWLEDGE_BASE_SCAN_ON_STARTUP=0 leaves the first scan to the first request."""
+        with patch.dict(os.environ, {"UPTIME_SAMPLING": "0", "KNOWLEDGE_BASE_SCAN_ON_STARTUP": "0"}), \
+                patch("control_center.main.threading.Thread"), \
+                patch.object(main_module.knowledge_base_scanner, "refresh_in_background") as scan:
+            __import__("asyncio").run(main_module.on_startup())
+        scan.assert_not_called()
+
 
 class TestPlatformManageInfraAuth(unittest.TestCase):
     """PR3D: docker_router/services_router/summary_router/config_router are

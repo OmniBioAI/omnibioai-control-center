@@ -227,8 +227,18 @@ detail or already on the Overview) and remain in AdminApp.
 it reads only the FAISS header (type code, then dimension) and checks for
 a PMID map, and reports how many domains can be queried at the configured
 embedding dimension (`RAG_EMBEDDING_DIM`, default 1024) -- counts only,
-no domain names or paths. The filesystem scan behind this route counts
-tens of millions of abstract files, so it is cached for
-`KNOWLEDGE_BASE_CACHE_SECONDS` (default 3600); the RAG health check stays
-live. The Overview shows this as "Re-indexing: X of Y domains ready to
-query".
+no domain names or paths.
+
+The filesystem scan behind this route counts tens of millions of abstract
+files, so it never runs on a visitor's request. A background scanner
+(`_KnowledgeBaseScanner` in `routes_llm.py`) counts once at startup
+(`KNOWLEDGE_BASE_SCAN_ON_STARTUP`, default `1`; `0` defers the first scan
+to the first request), then again whenever the last result is older than
+`KNOWLEDGE_BASE_REFRESH_SECONDS` (default 3600; the old name
+`KNOWLEDGE_BASE_CACHE_SECONDS` is still read). Requests always get the
+last completed scan immediately, only one scan runs at a time per process,
+and a failed scan keeps the previous result. The response's
+`scan: {status, scanned_at}` says which: `pending` (counts are `null`)
+until the first scan finishes, then `ready`. The RAG health check stays
+live. The Overview shows "Counting…" while pending, then "Re-indexing: X
+of Y domains ready to query".

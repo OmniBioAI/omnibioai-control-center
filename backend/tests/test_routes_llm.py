@@ -21,6 +21,8 @@ import json
 import os
 import struct as _struct
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -273,7 +275,15 @@ class TestDuBytes(unittest.TestCase):
 
 class TestGetKnowledgeBase(unittest.TestCase):
     """GET /knowledge-base's end-to-end abstract/index discovery and
-    rag_status derivation from RAG's own health response."""
+    rag_status derivation from RAG's own health response. Each test uses a
+    fresh background scanner and runs its scan synchronously first, the
+    way the startup warm-up would."""
+
+    def setUp(self) -> None:
+        self.scanner = routes_llm._KnowledgeBaseScanner()
+        patcher = patch.object(routes_llm, "scanner", self.scanner)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_no_data_dirs_found(self) -> None:
         """With no PubMed data directories at all, pubmed_root/index_root
@@ -282,6 +292,7 @@ class TestGetKnowledgeBase(unittest.TestCase):
             os.environ["WORKSPACE_ROOT"] = tmp
             ctx = _mock_async_client(get_side_effect=RuntimeError("down"))
             try:
+                self.scanner.refresh()
                 with patch.object(routes_llm.httpx, "AsyncClient", return_value=ctx):
                     resp = client.get("/knowledge-base")
             finally:
@@ -311,16 +322,10 @@ class TestGetKnowledgeBase(unittest.TestCase):
             mock_resp = MagicMock(status_code=200)
             ctx = _mock_async_client(get_return_value=mock_resp)
 
-            async def fake_create_subprocess_exec(*args, **kwargs):
-                proc = AsyncMock()
-                proc.communicate.return_value = (b"1024\t/idx\n", b"")
-                return proc
-
             try:
+                self.scanner.refresh()
                 with patch.object(routes_llm.httpx, "AsyncClient", return_value=ctx):
-                    with patch.object(routes_llm.asyncio, "create_subprocess_exec",
-                                       side_effect=fake_create_subprocess_exec):
-                        resp = client.get("/knowledge-base")
+                    resp = client.get("/knowledge-base")
             finally:
                 del os.environ["WORKSPACE_ROOT"]
 
@@ -339,15 +344,13 @@ class TestGetKnowledgeBase(unittest.TestCase):
             mock_resp = MagicMock(status_code=500)
             ctx = _mock_async_client(get_return_value=mock_resp)
             try:
+                self.scanner.refresh()
                 with patch.object(routes_llm.httpx, "AsyncClient", return_value=ctx):
                     resp = client.get("/knowledge-base")
             finally:
                 del os.environ["WORKSPACE_ROOT"]
         self.assertEqual(resp.json()["rag_status"], "degraded")
 
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 # ---------------------------------------------------------------------------
@@ -396,29 +399,96 @@ class TestIndexReadiness(unittest.TestCase):
             self.assertIsNone(routes_llm._faiss_dimension(Path(tmp) / "missing.faiss"))
 
 
-class TestKnowledgeBaseReadinessAndCache(unittest.TestCase):
-    def test_readiness_in_response_and_scan_cached(self) -> None:
+class TestKnowledgeBaseScanner(unittest.TestCase):
+    """The multi-minute filesystem scan runs off the request path, one at
+    a time; requests read the last completed result."""
+
+    def test_pending_before_first_scan_triggers_background_scan(self) -> None:
+        fresh = routes_llm._KnowledgeBaseScanner(scan=lambda: {"abstracts": {"total": 1}})
+        with patch.object(routes_llm, "scanner", fresh), \
+                patch.object(fresh, "refresh_in_background", return_value=True) as start, \
+                patch.object(routes_llm.httpx, "AsyncClient", side_effect=Exception("no rag")):
+            data = TestClient(app).get("/knowledge-base").json()
+        start.assert_called_once()
+        self.assertEqual(data["scan"], {"status": "pending", "scanned_at": None})
+        self.assertIsNone(data["abstracts"]["total"])
+        self.assertEqual(data["faiss_index"]["domain_list"], [])
+        self.assertIsNone(data["readiness"])
+
+    def test_serves_last_scan_without_rescanning(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             index_root = Path(tmp) / "data" / "PubMed" / "Index"
             (index_root / "cancer").mkdir(parents=True)
             _write_faiss(index_root / "cancer" / "pubmed_index.faiss", 1024)
             (index_root / "cancer" / "pmid_map.json").write_text("[]")
+            fresh = routes_llm._KnowledgeBaseScanner()
             env = {"WORKSPACE_ROOT": tmp, "PUBLIC_CACHE_SECONDS": "60"}
-            with patch.dict(os.environ, env), \
+            with patch.dict(os.environ, env), patch.object(routes_llm, "scanner", fresh), \
                     patch.object(routes_llm.httpx, "AsyncClient", side_effect=Exception("no rag")):
-                from control_center.core import public_cache
-                public_cache.clear()
-                anonymous = TestClient(app)  # the public dashboard sends no token
-                first = anonymous.get("/knowledge-base")
-                with patch.object(routes_llm, "_index_readiness") as readiness:
-                    second = client.get("/knowledge-base").json()
-                readiness.assert_not_called()
-                public_cache.clear()
-        data = first.json()
+                fresh.refresh()
+                with patch.object(routes_llm, "_scan_knowledge_base") as rescan:
+                    anonymous = TestClient(app).get("/knowledge-base")  # public dashboard: no token
+                    operator = client.get("/knowledge-base").json()
+                rescan.assert_not_called()
+        data = anonymous.json()
+        self.assertEqual(data["scan"]["status"], "ready")
+        self.assertIsNotNone(data["scan"]["scanned_at"])
         self.assertEqual(data["readiness"]["domains_ready"], 1)
-        self.assertEqual(data["readiness"]["expected_dimension"], 1024)
-        self.assertEqual(second["readiness"], data["readiness"])
         self.assertEqual(data["rag_status"], "unreachable")
-        self.assertEqual(first.headers["cache-control"], "public, max-age=60")
-        self.assertIsNone(data["index_root"])        # path stays operator-only
-        self.assertIsNotNone(second["index_root"])
+        self.assertEqual(anonymous.headers["cache-control"], "public, max-age=60")
+        self.assertIsNone(data["index_root"])            # path stays operator-only
+        self.assertIsNotNone(operator["index_root"])
+
+    def test_only_one_scan_runs_at_a_time(self) -> None:
+        started, release = threading.Event(), threading.Event()
+        calls = []
+
+        def slow_scan() -> dict:
+            calls.append(1)
+            started.set()
+            release.wait(5)
+            return {"n": len(calls)}
+
+        fresh = routes_llm._KnowledgeBaseScanner(scan=slow_scan)
+        self.assertTrue(fresh.refresh_in_background())
+        self.assertTrue(started.wait(5))
+        self.assertFalse(fresh.refresh_in_background())
+        self.assertFalse(fresh.refresh())
+        self.assertFalse(fresh.maybe_refresh())
+        release.set()
+        for _ in range(100):
+            if fresh.snapshot()[0] is not None:
+                break
+            time.sleep(0.01)
+        self.assertEqual(fresh.snapshot()[0], {"n": 1})
+        self.assertEqual(len(calls), 1)
+
+    def test_staleness_follows_refresh_interval(self) -> None:
+        fresh = routes_llm._KnowledgeBaseScanner(scan=lambda: {}, refresh_seconds=100)
+        self.assertTrue(fresh.is_stale())
+        fresh.refresh()
+        self.assertFalse(fresh.is_stale())
+        self.assertTrue(fresh.is_stale(now=time.monotonic() + 101))
+        with patch.object(fresh, "refresh_in_background", return_value=True) as start:
+            self.assertFalse(fresh.maybe_refresh())
+            start.assert_not_called()
+
+    def test_default_interval_and_failed_scan_keeps_last_result(self) -> None:
+        self.assertEqual(routes_llm._KnowledgeBaseScanner().refresh_seconds,
+                         routes_llm.KNOWLEDGE_BASE_REFRESH_SECONDS)
+        results = [{"total": 1}, RuntimeError("disk gone")]
+
+        def scan() -> dict:
+            value = results.pop(0)
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        fresh = routes_llm._KnowledgeBaseScanner(scan=scan)
+        fresh.refresh()
+        self.assertTrue(fresh.refresh())      # attempted, logged, not raised
+        self.assertEqual(fresh.snapshot()[0], {"total": 1})
+
+
+if __name__ == "__main__":
+    unittest.main()
