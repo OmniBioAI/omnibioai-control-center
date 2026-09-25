@@ -59,7 +59,7 @@ from control_center.api.routes_hipaa_readiness import router as hipaa_readiness_
 from control_center.api.routes_cloud import router as cloud_router
 from control_center.api.routes_integrations import router as integrations_router
 from control_center.api.routes_integration_health import router as integration_health_router
-from control_center.core.auth import require_permission
+from control_center.core.auth import infra_viewer, require_permission
 from control_center.api.routes_config import router as config_router
 from control_center.api.routes_cron import router as cron_router
 from control_center.api.routes_dashboard import router as dashboard_router
@@ -868,7 +868,7 @@ def coverage_status(_admin: dict = Depends(require_permission("platform.manage_i
 
 
 @app.get("/report/data")
-def report_data() -> JSONResponse:
+def report_data(full: bool = Depends(infra_viewer)) -> JSONResponse:
     """Return structured JSON data for the React frontend (projects, languages, coverage).
 
     DELIBERATELY UNAUTHENTICATED (2026-09-03 decision, reversing part of
@@ -893,15 +893,24 @@ def report_data() -> JSONResponse:
     aggregate the dashboard's own summary tiles could use), just no
     longer the only public source for this data. GET / and
     /coverage/status remain platform.manage_infra-gated; nothing else
-    about 8705cbf's audit changes here."""
+    about 8705cbf's audit changes here.
+
+    2026-09-25 (public showcase review): gitStatus[] -- branch names and
+    modified/untracked/unpushed counts -- is no longer returned to
+    anonymous callers. It is development state, not a platform metric,
+    and the public dashboard no longer shows its Ecosystem Status tab.
+    Operators (platform.manage_infra) still get the full file."""
     data_path = _workspace_root() / "work" / "out" / "reports" / "report_data.json"
     if not data_path.exists():
         return JSONResponse({"error": "No report data yet. Generate the report first."}, status_code=404)
     try:
         import json as _json
-        return JSONResponse(_json.loads(data_path.read_text(encoding="utf-8")))
+        data = _json.loads(data_path.read_text(encoding="utf-8"))
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+    if not full and isinstance(data, dict):
+        data.pop("gitStatus", None)
+    return JSONResponse(data)
 
 
 # ==============================================================================

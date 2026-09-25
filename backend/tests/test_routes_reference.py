@@ -24,10 +24,15 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+import jwt
+
 from control_center.api.routes_reference import _dir_exists_nonempty
+from control_center.core.jwt_verify import JWT_SECRET
 from control_center.main import app
 
 client = TestClient(app)
+_INFRA_TOKEN = jwt.encode({"sub": "1", "permissions": ["platform.manage_infra"]}, JWT_SECRET, algorithm="HS256")
+_infra_headers = {"Authorization": f"Bearer {_INFRA_TOKEN}"}
 
 
 class TestDirExistsNonempty(unittest.TestCase):
@@ -102,19 +107,37 @@ class TestGetReference(unittest.TestCase):
 
     def test_ref_root_via_data_reference(self) -> None:
         """An existing data/reference directory (even empty of
-        organisms) is discovered as available with the correct ref_root path."""
+        organisms) is discovered as available; an operator
+        (platform.manage_infra) also sees the ref_root path."""
         with tempfile.TemporaryDirectory() as tmp:
             ref_root = Path(tmp) / "data" / "reference"
             ref_root.mkdir(parents=True)
             os.environ["WORKSPACE_ROOT"] = tmp
             try:
-                resp = client.get("/reference")
+                resp = client.get("/reference", headers=_infra_headers)
             finally:
                 del os.environ["WORKSPACE_ROOT"]
         data = resp.json()
         self.assertTrue(data["available"])
         self.assertEqual(data["ref_root"], str(ref_root))
         self.assertEqual(data["organisms"], [])
+
+    def test_anonymous_caller_gets_no_ref_root(self) -> None:
+        """The public dashboard sees availability and index status but not
+        the filesystem path, in either the available or unavailable case."""
+        with tempfile.TemporaryDirectory() as tmp:
+            os.environ["WORKSPACE_ROOT"] = tmp
+            try:
+                missing = client.get("/reference").json()
+                (Path(tmp) / "data" / "reference").mkdir(parents=True)
+                present = client.get("/reference").json()
+            finally:
+                del os.environ["WORKSPACE_ROOT"]
+        for data in (missing, present):
+            self.assertNotIn("ref_root", data)
+            self.assertNotIn(tmp, str(data))
+        self.assertFalse(missing["available"])
+        self.assertTrue(present["available"])
 
     def test_organism_assembly_with_indexes_and_variants(self) -> None:
         """A reference root under the alternate omnibioai-data/reference

@@ -1,14 +1,21 @@
 from __future__ import annotations
+
 import os
-from fastapi import APIRouter
+
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+
+from control_center.core.auth import infra_viewer
+from control_center.core.public_view import public_cloud
 
 router = APIRouter()
 
 
 @router.get("/cloud")
-def get_cloud() -> JSONResponse:
-    return JSONResponse({
+def get_cloud(full: bool = Depends(infra_viewer)) -> JSONResponse:
+    # Region/queue/account/project/context/host are operator detail; the
+    # public dashboard gets label + configured only (core/public_view.py).
+    data = {
         "aws": {
             "label": "AWS Batch",
             "configured": bool(os.environ.get("AWS_ACCESS_KEY_ID") or
@@ -46,4 +53,5 @@ def get_cloud() -> JSONResponse:
                                os.environ.get("HPC_HOST")),
             "host": os.environ.get("SLURM_HOST") or os.environ.get("HPC_HOST", ""),
         },
-    })
+    }
+    return JSONResponse(data if full else public_cloud(data))

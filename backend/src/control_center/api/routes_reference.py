@@ -3,8 +3,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+
+from control_center.core.auth import infra_viewer
+from control_center.core.public_view import public_reference
 
 router = APIRouter()
 
@@ -48,7 +51,13 @@ def _dir_exists_nonempty(path: Path) -> bool:
 
 
 @router.get("/reference")
-def get_reference() -> JSONResponse:
+def get_reference(full: bool = Depends(infra_viewer)) -> JSONResponse:
+    data = _reference_status()
+    # ref_root is a filesystem path -- operators only (core/public_view.py).
+    return JSONResponse(data if full else public_reference(data))
+
+
+def _reference_status() -> dict:
     workspace = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
     # omnibioai-data is a symlink on host that doesn't resolve in container
     # Try multiple candidate paths
@@ -62,13 +71,13 @@ def get_reference() -> JSONResponse:
             break
 
     if ref_root is None:
-        return JSONResponse({
+        return {
             "available": False,
             "ref_root": str(workspace / "omnibioai-data" / "reference"),
             "organisms": [],
             "databases": {},
             "annotation": {},
-        })
+        }
 
     organisms = []
     for organism, assemblies in ORGANISMS.items():
@@ -110,10 +119,10 @@ def get_reference() -> JSONResponse:
             ann_path = ref_root / "annotation" / organism / source
             annotation_status[organism][source] = _dir_exists_nonempty(ann_path)
 
-    return JSONResponse({
+    return {
         "available": True,
         "ref_root": str(ref_root),
         "organisms": organisms,
         "databases": db_status,
         "annotation": annotation_status,
-    })
+    }
