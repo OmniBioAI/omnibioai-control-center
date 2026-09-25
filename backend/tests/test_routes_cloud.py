@@ -21,9 +21,14 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+import jwt
+
+from control_center.core.jwt_verify import JWT_SECRET
 from control_center.main import app
 
 client = TestClient(app)
+_INFRA_TOKEN = jwt.encode({"sub": "1", "permissions": ["platform.manage_infra"]}, JWT_SECRET, algorithm="HS256")
+_infra_headers = {"Authorization": f"Bearer {_INFRA_TOKEN}"}
 
 
 class TestGetCloud(unittest.TestCase):
@@ -48,7 +53,7 @@ class TestGetCloud(unittest.TestCase):
         """AWS_ACCESS_KEY_ID + AWS_DEFAULT_REGION set -> aws.configured is
         True and the reported region matches the env var."""
         with patch.dict(os.environ, {"AWS_ACCESS_KEY_ID": "AKIA123", "AWS_DEFAULT_REGION": "us-east-1"}):
-            data = client.get("/cloud").json()
+            data = client.get("/cloud", headers=_infra_headers).json()
         self.assertTrue(data["aws"]["configured"])
         self.assertEqual(data["aws"]["region"], "us-east-1")
 
@@ -69,9 +74,25 @@ class TestGetCloud(unittest.TestCase):
         env.pop("SLURM_HOST", None)
         env["HPC_HOST"] = "hpc.example.com"
         with patch.dict(os.environ, env, clear=True):
-            data = client.get("/cloud").json()
+            data = client.get("/cloud", headers=_infra_headers).json()
         self.assertTrue(data["slurm"]["configured"])
         self.assertEqual(data["slurm"]["host"], "hpc.example.com")
+
+
+    def test_anonymous_caller_sees_label_and_configured_only(self) -> None:
+        """The public dashboard gets each backend's label and configured
+        flag -- never its host, region, queue, account, project or
+        context."""
+        secrets = {"HPC_HOST": "hpc.internal.example", "AWS_BATCH_JOB_QUEUE": "omni-queue",
+                   "AWS_DEFAULT_REGION": "us-east-1", "AZURE_BATCH_ACCOUNT_NAME": "omniacct",
+                   "GCP_PROJECT": "omni-proj", "KUBE_CONTEXT": "omni-ctx"}
+        with patch.dict(os.environ, secrets):
+            data = client.get("/cloud").json()
+        for info in data.values():
+            self.assertEqual(set(info), {"label", "configured"})
+        self.assertTrue(data["slurm"]["configured"])
+        for value in secrets.values():
+            self.assertNotIn(value, str(data))
 
 
 if __name__ == "__main__":

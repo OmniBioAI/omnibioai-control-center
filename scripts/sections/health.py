@@ -246,6 +246,14 @@ def _health_activity_section_html() -> str:
 _HEALTH_SCRIPT = f"""
 <script>
 var _hChart=null,_hTimer=null,_hCd=30,_hUrl='';
+// Operator detail: /gpu, /activity and /integrity return their full output
+// only to a platform.manage_infra token (anonymous callers get the trimmed
+// public shape) and /audit-trail requires one -- send the signed-in
+// operator's token, same pattern as architecture.py's _ccAuthHeader.
+function _hAuth(){{
+  var t=localStorage.getItem('omnibioai_access_token');
+  return {{headers:t?{{'Authorization':'Bearer '+t}}:{{}}}};
+}}
 var _hIcons={{mysql:'🗄️',redis:'⚡',http:'🌐',tcp:'🔌'}};
 function _hLatCol(ms){{return ms<5?'#3B6D11':ms<20?'#854F0B':'#A32D2D';}}
 function hlthFetch(){{
@@ -356,7 +364,7 @@ function _gpuMemColor(usedMb, totalMb, memoryUnsupported){{
   return pct<70?'#3B6D11':pct<90?'#854F0B':'#A32D2D';
 }}
 function gpuFetch(){{
-  fetch(_hUrl+'/gpu').then(function(r){{return r.json();}}).then(function(d){{
+  fetch(_hUrl+'/gpu',_hAuth()).then(function(r){{return r.json();}}).then(function(d){{
     var el=document.getElementById('gpu-panel-body');
     if(!d.reachable){{
       el.innerHTML='<div style="font-size:12px;color:#A32D2D">GPU unreachable: '+(d.error||'unknown error')+'</div>';
@@ -444,7 +452,7 @@ function amHostRender(h){{
     card('cpu idle', _amNum(h.cpu_idle_pct,1)+'%');
 }}
 function activityFetch(){{
-  fetch(_hUrl+'/activity').then(function(r){{return r.json();}}).then(function(d){{
+  fetch(_hUrl+'/activity',_hAuth()).then(function(r){{return r.json();}}).then(function(d){{
     if(!d.reachable){{document.getElementById('am-host-summary').innerHTML='<div style="font-size:12px;color:#A32D2D;grid-column:1/-1">activity data unreachable: '+(d.error||'unknown')+'</div>';return;}}
     amHostRender(d.host);
     _AM.all=d.containers||[];
@@ -454,7 +462,7 @@ function activityFetch(){{
   }});
 }}
 function integrityFetch(){{
-  fetch(_hUrl+'/integrity').then(function(r){{return r.json();}}).then(function(d){{
+  fetch(_hUrl+'/integrity',_hAuth()).then(function(r){{return r.json();}}).then(function(d){{
     var el=document.getElementById('integrity-panel-body');
     var checks=d.checks||[];
     if(checks.length===0){{el.innerHTML='<div style="font-size:12px;color:var(--color-text-muted)">no paths configured for checking</div>';return;}}
@@ -553,7 +561,7 @@ function atApply(){{
   renderPg('at',_AT,atApply);
 }}
 function atFetch(){{
-  fetch(_hUrl+'/audit-trail').then(function(r){{return r.json();}}).then(function(d){{
+  fetch(_hUrl+'/audit-trail',_hAuth()).then(function(r){{return r.json();}}).then(function(d){{
     document.getElementById('at-k-total').textContent=d.total_events;
     document.getElementById('at-k-health').textContent=d.health_check_pings;
     var pct=d.total_events?Math.round(100*d.health_check_pings/d.total_events):0;

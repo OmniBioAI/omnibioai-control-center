@@ -48,7 +48,7 @@ describe('PublicEcosystemPage', () => {
     expect('fetchSummary' in api).toBe(false)
   })
 
-  it('shows Projects/Languages/Coverage/Ecosystem Status tabs -- no Architecture, no Health Status', async () => {
+  it('shows Projects/Languages/Coverage tabs -- no Ecosystem Status (git), no Architecture, no Health Status', async () => {
     const api = await import('../api')
     vi.mocked(api.fetchReportData).mockResolvedValue(REPORT_DATA)
     vi.mocked(api.fetchReportStatus).mockResolvedValue({ report_exists: true, status: 'idle' } as any)
@@ -56,7 +56,7 @@ describe('PublicEcosystemPage', () => {
     await waitFor(() => expect(screen.getByText('Projects')).toBeInTheDocument())
     expect(screen.getByText('Languages')).toBeInTheDocument()
     expect(screen.getByText('Code Coverage')).toBeInTheDocument()
-    expect(screen.getByText('Ecosystem Status')).toBeInTheDocument()
+    expect(screen.queryByText('Ecosystem Status')).not.toBeInTheDocument()
     expect(screen.queryByText('Architecture')).not.toBeInTheDocument()
     expect(screen.queryByText('Health Status')).not.toBeInTheDocument()
   })

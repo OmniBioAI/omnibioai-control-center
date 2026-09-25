@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { fetchReportData, fetchReportStatus } from '../api'
 import type { ReportData } from '../api'
 import {
-  C, ProjectsTab, LanguagesTab, CoverageTab, GitStatusTab,
+  C, ProjectsTab, LanguagesTab, CoverageTab,
 } from './EcosystemReportTabs'
 
 /**
@@ -26,13 +26,16 @@ import {
  * always-anonymous page. If no report has been generated yet, this page
  * just says so.
  */
-type SubTab = 'projects' | 'languages' | 'coverage' | 'gitStatus'
+// No Ecosystem Status (git) tab here: branch names and uncommitted/unpushed
+// counts are development state, not a platform metric, and GET /report/data
+// no longer returns gitStatus[] to anonymous callers. Operators still see it
+// in AdminApp's EcosystemPage.
+type SubTab = 'projects' | 'languages' | 'coverage'
 
 const SUBTABS: { id: SubTab; label: string }[] = [
   { id: 'projects',  label: 'Projects' },
   { id: 'languages', label: 'Languages' },
   { id: 'coverage',  label: 'Code Coverage' },
-  { id: 'gitStatus', label: 'Ecosystem Status' },
 ]
 
 function NoReportYet() {
@@ -120,7 +123,6 @@ export default function PublicEcosystemPage({ refreshKey }: { refreshKey: number
       {reportData && subTab === 'projects'  && <ProjectsTab data={reportData} />}
       {reportData && subTab === 'languages' && <LanguagesTab data={reportData} />}
       {reportData && subTab === 'coverage'  && <CoverageTab data={reportData} />}
-      {reportData && subTab === 'gitStatus' && <GitStatusTab data={reportData} />}
     </div>
   )
 }

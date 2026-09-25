@@ -49,3 +49,25 @@ def require_permission(permission: str):
         return payload
 
     return _require_permission
+
+
+def has_permission(authorization: str | None, permission: str) -> bool:
+    """Non-raising counterpart to require_permission: True only for a valid
+    bearer token whose `permissions` claim includes `permission`. Used by
+    the public read-only routes to decide between the full (operator) and
+    the trimmed (anonymous) response shape -- never to reject a request."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return False
+    token = authorization.split(" ", 1)[1].strip()
+    try:
+        payload = verify_token(token)
+    except TokenInvalid:
+        return False
+    return permission in (payload.get("permissions") or [])
+
+
+def infra_viewer(authorization: str | None = Header(default=None)) -> bool:
+    """FastAPI dependency: True when the caller holds platform.manage_infra.
+    Public routes use it to return full operational detail to operators
+    and the anonymous-safe shape (core/public_view.py) to everyone else."""
+    return has_permission(authorization, "platform.manage_infra")

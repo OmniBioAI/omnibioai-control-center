@@ -662,6 +662,24 @@ class TestReportData(unittest.TestCase):
                 del os.environ["WORKSPACE_ROOT"]
         self.assertEqual(resp.status_code, 200)
 
+    def test_git_status_only_for_operators(self):
+        """gitStatus[] (branch names, uncommitted/unpushed counts) is dropped
+        for anonymous callers and kept for a platform.manage_infra token."""
+        with tempfile.TemporaryDirectory() as tmp:
+            reports_dir = Path(tmp) / "work" / "out" / "reports"
+            reports_dir.mkdir(parents=True)
+            (reports_dir / "report_data.json").write_text(
+                '{"projects": [], "gitStatus": [{"repo": "x", "branch": "wip/secret"}]}'
+            )
+            os.environ["WORKSPACE_ROOT"] = tmp
+            try:
+                anonymous = client.get("/report/data").json()
+                operator = client.get("/report/data", headers=_admin_headers()).json()
+            finally:
+                del os.environ["WORKSPACE_ROOT"]
+        self.assertEqual(anonymous, {"projects": []})
+        self.assertEqual(operator["gitStatus"], [{"repo": "x", "branch": "wip/secret"}])
+
     def test_404_when_no_report_data(self):
         """With no report_data.json file present, the route returns 404 with an "error" key."""
         with tempfile.TemporaryDirectory() as tmp:

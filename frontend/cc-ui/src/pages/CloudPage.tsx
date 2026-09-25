@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { authHeaders } from '../auth'
 
 interface BackendInfo {
   label: string
@@ -12,8 +13,11 @@ interface BackendInfo {
   note?: string
 }
 
+// Region/queue/account/project/host/context come back only for an operator
+// token (platform.manage_infra); the anonymous control.omnibioai.org build
+// has none, so it receives label + configured only and those rows stay hidden.
 async function fetchCloud(): Promise<Record<string, BackendInfo>> {
-  const r = await fetch('/cloud')
+  const r = await fetch('/cloud', { headers: authHeaders() })
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   return r.json()
 }

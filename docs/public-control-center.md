@@ -114,3 +114,34 @@ build-mode/domain split. Net effect for an anonymous visitor: the
 Architecture and Health sub-tabs show their existing empty/error state,
 and the Generate button in the empty-report state is inert (a no-op
 click) rather than hidden -- a UX rough edge, not a security exposure.
+
+## 2026-09-25: operator detail trimmed from the remaining public routes
+
+A review of `control.omnibioai.org` as a public showcase found that several
+routes described above as "aggregate-only" returned more than aggregates to
+anonymous callers:
+
+| Route | Leaked to anonymous callers |
+|---|---|
+| `/cloud` | Slurm/HPC hostname, AWS Batch queue, Azure Batch account, GCP project and region, Kubernetes context (rendered by `CloudPage.tsx`) |
+| `/integrity` | Filesystem paths and symlink targets; the settings path in the 500 error |
+| `/activity` | Per-container names with CPU/memory/network figures |
+| `/database` | MySQL schema names and sizes |
+| `/celery` | Worker names (typically `celery@<hostname>`), recent task names, exception text |
+| `/image-freshness` | Service and image names |
+| `/gateway-traffic` | Top routes by request count |
+| `/gpu` | Free-text messages, including exception text |
+| `/reference` | Absolute `ref_root` path |
+| `/report/data` | `gitStatus[]`: branch names and uncommitted/unpushed counts (accepted on 2026-09-03; reversed here) |
+
+These routes stay reachable without a login, but now return their full
+output only to a caller whose token carries `platform.manage_infra`
+(`core.auth.infra_viewer`). Everyone else gets the allowlisted,
+counts-only shape built by `core/public_view.py`; a field added to a check
+later stays private until it is deliberately added there. The admin
+surfaces keep full detail: `CloudPage.tsx` and the generated report's
+`/gpu`, `/activity`, `/integrity` and `/audit-trail` calls now send the
+signed-in operator's token. The public Ecosystem Report no longer shows
+the Ecosystem Status (git) tab, and the public header says "Control center
+online" instead of "All systems operational", since it is derived from
+the control center's own `/health` only.

@@ -45,9 +45,11 @@ const ORGANIZATIONS_TAB: { id: Tab; label: string } = { id: 'organizations', lab
 const USERS_TAB: { id: Tab; label: string } = { id: 'users', label: 'Users' }
 
 const STATUS_CFG = {
-  UP:   { label: 'All systems operational', bg: 'rgba(34,197,94,0.12)',   color: '#22c55e', border: 'rgba(34,197,94,0.3)',   dot: '#22c55e', pulse: true },
+  // ControlApp derives this from GET /health on the control center itself,
+  // so the label claims only what that check proves.
+  UP:   { label: 'Control center online',   bg: 'rgba(34,197,94,0.12)',   color: '#22c55e', border: 'rgba(34,197,94,0.3)',   dot: '#22c55e', pulse: true },
   WARN: { label: 'Services degraded',       bg: 'rgba(245,158,11,0.12)',  color: '#f59e0b', border: 'rgba(245,158,11,0.3)',  dot: '#f59e0b', pulse: false },
-  DOWN: { label: 'One or more systems down',bg: 'rgba(239,68,68,0.12)',   color: '#ef4444', border: 'rgba(239,68,68,0.3)',   dot: '#ef4444', pulse: false },
+  DOWN: { label: 'Control center unreachable',bg: 'rgba(239,68,68,0.12)',   color: '#ef4444', border: 'rgba(239,68,68,0.3)',   dot: '#ef4444', pulse: false },
 }
 
 export default function Header({
