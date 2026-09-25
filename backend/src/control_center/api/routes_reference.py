@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
+from control_center.core import public_cache
 from control_center.core.auth import infra_viewer
 from control_center.core.public_view import public_reference
 
@@ -52,9 +53,10 @@ def _dir_exists_nonempty(path: Path) -> bool:
 
 @router.get("/reference")
 def get_reference(full: bool = Depends(infra_viewer)) -> JSONResponse:
-    data = _reference_status()
     # ref_root is a filesystem path -- operators only (core/public_view.py).
-    return JSONResponse(data if full else public_reference(data))
+    if full:
+        return JSONResponse(_reference_status())
+    return JSONResponse(public_cache.cached("reference", lambda: public_reference(_reference_status())))
 
 
 def _reference_status() -> dict:
