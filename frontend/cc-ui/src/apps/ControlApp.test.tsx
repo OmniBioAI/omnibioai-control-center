@@ -20,6 +20,7 @@ vi.mock('../api', () => ({
   fetchReportStatus: vi.fn().mockResolvedValue({ report_exists: false, status: 'idle' }),
 }))
 
+vi.mock('../pages/PublicOverviewPage', () => ({ default: () => <div data-testid="PublicOverviewPage" /> }))
 vi.mock('../pages/PublicHealthPage', () => ({ default: () => <div data-testid="PublicHealthPage" /> }))
 vi.mock('../pages/PublicEcosystemPage', () => ({ default: () => <div data-testid="PublicEcosystemPage" /> }))
 vi.mock('../pages/LlmPage', () => ({ default: () => <div data-testid="LlmPage" /> }))
@@ -36,7 +37,7 @@ describe('ControlApp is a genuinely anonymous public dashboard', () => {
   it('renders the dashboard immediately, with no token and no login screen', async () => {
     vi.mocked(auth.getToken).mockReturnValue(null)
     render(<ControlApp />)
-    await waitFor(() => expect(screen.getByTestId('PublicHealthPage')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('PublicOverviewPage')).toBeInTheDocument())
     expect(screen.queryByText(/Ecosystem Management Console/)).not.toBeInTheDocument()
     expect(screen.queryByText('Access Denied')).not.toBeInTheDocument()
   })
@@ -48,7 +49,7 @@ describe('ControlApp is a genuinely anonymous public dashboard', () => {
     // to decide what to render, and it clears it unconditionally.
     vi.mocked(auth.getToken).mockReturnValue('stale-token-from-a-different-build')
     render(<ControlApp />)
-    await waitFor(() => expect(screen.getByTestId('PublicHealthPage')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('PublicOverviewPage')).toBeInTheDocument())
     expect(screen.queryByText('Access Denied')).not.toBeInTheDocument()
   })
 
@@ -70,10 +71,11 @@ describe('ControlApp page set: only the endpoints confirmed safe for anonymous a
     window.history.pushState(null, '', '/')
   })
 
-  it('shows Health/Ecosystem/LLMs/Cloud/Integrations tabs -- no Docker, no Config, no Organizations, no Users', async () => {
+  it('shows Overview/Health/Ecosystem/LLMs/Cloud/Integrations tabs -- no Docker, no Config, no Organizations, no Users', async () => {
     render(<ControlApp />)
-    await waitFor(() => expect(screen.getByTestId('PublicHealthPage')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('PublicOverviewPage')).toBeInTheDocument())
 
+    expect(screen.getByText('Overview')).toBeInTheDocument()
     expect(screen.getByText('Health Dashboard')).toBeInTheDocument()
     expect(screen.getByText('Ecosystem Report')).toBeInTheDocument()
     expect(screen.getByText('LLMs')).toBeInTheDocument()
@@ -87,13 +89,28 @@ describe('ControlApp page set: only the endpoints confirmed safe for anonymous a
 
   it('has no "Generate Report" mutation control -- report/generate stays platform.manage_content-gated and this build has no way to satisfy that', async () => {
     render(<ControlApp />)
-    await waitFor(() => expect(screen.getByTestId('PublicHealthPage')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('PublicOverviewPage')).toBeInTheDocument())
     expect(screen.queryByText(/Generate Report/)).not.toBeInTheDocument()
+  })
+
+  it('"View Report" opens the Ecosystem Report tab instead of reloading this dashboard', async () => {
+    const api = await import('../api')
+    vi.mocked(api.fetchReportStatus).mockResolvedValueOnce({ report_exists: true, status: 'idle' } as never)
+    render(<ControlApp />)
+    fireEvent.click(await screen.findByText('View Report'))
+    await waitFor(() => expect(screen.getByTestId('PublicEcosystemPage')).toBeInTheDocument())
+  })
+
+  it('opens on the Overview tab and still reaches the Health tab', async () => {
+    render(<ControlApp />)
+    await waitFor(() => expect(screen.getByTestId('PublicOverviewPage')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Health Dashboard'))
+    await waitFor(() => expect(screen.getByTestId('PublicHealthPage')).toBeInTheDocument())
   })
 
   it('renders PublicEcosystemPage (not EcosystemPage) anonymously when the Ecosystem Report tab is selected', async () => {
     render(<ControlApp />)
-    await waitFor(() => expect(screen.getByTestId('PublicHealthPage')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('PublicOverviewPage')).toBeInTheDocument())
     fireEvent.click(screen.getByText('Ecosystem Report'))
     await waitFor(() => expect(screen.getByTestId('PublicEcosystemPage')).toBeInTheDocument())
   })
