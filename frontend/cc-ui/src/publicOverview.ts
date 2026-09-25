@@ -87,3 +87,37 @@ export async function fetchOpenIssues(): Promise<PublicIssue[]> {
     .filter(i => i.status !== 'resolved')
     .map(({ id, title, severity, status, area, opened_at }) => ({ id, title, severity, status, area, opened_at }))
 }
+
+// ── Showcase (curated, schema-validated -- core/showcase.py) ─────────────
+
+export interface Showcase {
+  available: boolean
+  as_of: string | null
+  releases: { version: string; date: string | null; url: string | null }[]
+  benchmarks: { pipeline: string; dataset: string; metrics: Record<string, number | string>; date: string; url: string | null }[]
+  example_runs: { title: string; dataset: string; description: string; report_url: string | null; inputs_url: string | null }[]
+  tool_versions: { name: string; version: string; category: string | null }[]
+  publications: { year: number; title: string; venue: string; url: string | null }[]
+  test_evidence: { suite: string; date: string; passed: number; failed: number; skipped: number; blocked: number; url: string | null }[]
+  repo_coverage: { repo: string; coverage_pct: number; date: string }[]
+  ci_repos: { repo: string; workflow: string; label: string | null }[]
+  security_controls: { area: string; status: 'implemented' | 'partial' | 'planned'; summary: string }[]
+  data_handling: string[]
+  limitations: { title: string; detail: string; url: string | null }[]
+  regression: {
+    generated_at: string | null
+    freshness: string | null
+    phases: Record<string, { status: string; certification_status: string }>
+    capabilities_total: number
+    capabilities_by_certification: Record<string, number>
+  } | null
+}
+
+export interface UptimeSummary {
+  window_days: number
+  sample_seconds: number
+  services: { label: string; overall_pct: number | null; days: { date: string; availability_pct: number | null }[] }[]
+}
+
+export const fetchShowcase = () => getJson<Showcase>('/showcase')
+export const fetchUptime = () => getJson<UptimeSummary>('/uptime')

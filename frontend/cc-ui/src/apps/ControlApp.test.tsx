@@ -21,6 +21,7 @@ vi.mock('../api', () => ({
 }))
 
 vi.mock('../pages/PublicOverviewPage', () => ({ default: () => <div data-testid="PublicOverviewPage" /> }))
+vi.mock('../pages/PublicEvidencePage', () => ({ default: () => <div data-testid="PublicEvidencePage" /> }))
 vi.mock('../pages/PublicHealthPage', () => ({ default: () => <div data-testid="PublicHealthPage" /> }))
 vi.mock('../pages/PublicEcosystemPage', () => ({ default: () => <div data-testid="PublicEcosystemPage" /> }))
 vi.mock('../pages/LlmPage', () => ({ default: () => <div data-testid="LlmPage" /> }))
@@ -76,6 +77,7 @@ describe('ControlApp page set: only the endpoints confirmed safe for anonymous a
     await waitFor(() => expect(screen.getByTestId('PublicOverviewPage')).toBeInTheDocument())
 
     expect(screen.getByText('Overview')).toBeInTheDocument()
+    expect(screen.getByText('Evidence')).toBeInTheDocument()
     expect(screen.getByText('Health Dashboard')).toBeInTheDocument()
     expect(screen.getByText('Ecosystem Report')).toBeInTheDocument()
     expect(screen.getByText('LLMs')).toBeInTheDocument()
@@ -106,6 +108,8 @@ describe('ControlApp page set: only the endpoints confirmed safe for anonymous a
     await waitFor(() => expect(screen.getByTestId('PublicOverviewPage')).toBeInTheDocument())
     fireEvent.click(screen.getByText('Health Dashboard'))
     await waitFor(() => expect(screen.getByTestId('PublicHealthPage')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Evidence'))
+    await waitFor(() => expect(screen.getByTestId('PublicEvidencePage')).toBeInTheDocument())
   })
 
   it('renders PublicEcosystemPage (not EcosystemPage) anonymously when the Ecosystem Report tab is selected', async () => {

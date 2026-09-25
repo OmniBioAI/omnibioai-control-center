@@ -20,6 +20,7 @@ vi.mock('../publicOverview', async (orig) => {
     fetchReferenceStatus: vi.fn(),
     fetchBackends: vi.fn(),
     fetchOpenIssues: vi.fn(),
+    fetchUptime: vi.fn(),
   }
 })
 
@@ -49,6 +50,14 @@ async function mocks() {
     local: { label: 'Local Docker', configured: true },
     aws: { label: 'AWS Batch', configured: false },
   })
+  vi.mocked(po.fetchUptime).mockResolvedValue({
+    window_days: 3, sample_seconds: 300,
+    services: [{ label: 'Workbench', overall_pct: 99.8, days: [
+      { date: '2026-09-23', availability_pct: null },
+      { date: '2026-09-24', availability_pct: 100 },
+      { date: '2026-09-25', availability_pct: 96.5 },
+    ] }],
+  })
   vi.mocked(po.fetchOpenIssues).mockResolvedValue([
     { id: '1', title: 'RAG re-indexing in progress', severity: 'medium', status: 'open', area: 'rag', opened_at: '2026-09-18T00:00:00Z' },
   ])
@@ -73,6 +82,24 @@ describe('PublicOverviewPage', () => {
     expect(screen.getByText('Local Docker · configured')).toBeInTheDocument()
     expect(screen.getByText('AWS Batch · not configured')).toBeInTheDocument()
     expect(screen.getByText('RAG re-indexing in progress')).toBeInTheDocument()
+  })
+
+  it('shows per-service uptime bars with a day-by-day breakdown', async () => {
+    await mocks()
+    render(<PublicOverviewPage refreshKey={0} />)
+    expect(await screen.findByText('99.8% available')).toBeInTheDocument()
+    const bar = screen.getByRole('img', { name: 'Workbench: daily availability over 3 days' })
+    expect(bar.children).toHaveLength(3)
+    expect(screen.getByTitle('2026-09-23: no data')).toBeInTheDocument()
+    expect(screen.getByTitle('2026-09-25: 96.5%')).toBeInTheDocument()
+    expect(screen.getByText(/Sampled every 5 minutes/)).toBeInTheDocument()
+  })
+
+  it('says uptime is not published yet when no services are allowlisted', async () => {
+    const po = await mocks()
+    vi.mocked(po.fetchUptime).mockResolvedValue({ window_days: 90, sample_seconds: 300, services: [] })
+    render(<PublicOverviewPage refreshKey={0} />)
+    expect(await screen.findByText('Uptime history is not being published yet.')).toBeInTheDocument()
   })
 
   it('does not show a coverage percentage', async () => {
