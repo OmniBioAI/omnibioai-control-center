@@ -187,3 +187,15 @@ Set `UPTIME_SAMPLING=0` to disable the sampler. `GET /uptime` shows
 anonymous callers only the `uptime_services` allowlist under its public
 labels; a `platform.manage_infra` caller sees every recorded service.
 History starts accumulating when the sampler first runs.
+
+Every worker process starts the sampler loop, but only the process holding
+an exclusive lock on `<store>.sampler.lock` samples; the others retry each
+interval and take over if it exits, so scaling uvicorn workers or running
+with `--reload` does not double-count. Writes are serialised by
+`<store>.lock`.
+
+This history is measured from inside the deployment: if the whole host is
+down, nothing is sampled and those days show as "no data", not as an
+outage. Pair it with an external uptime monitor (for example UptimeRobot
+or Better Stack checking https://control.omnibioai.org/health) for alerting
+and an outside view.

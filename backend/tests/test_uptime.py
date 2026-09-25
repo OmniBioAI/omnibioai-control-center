@@ -109,10 +109,34 @@ class TestSampler(unittest.TestCase):
 
     def test_run_forever_is_bounded_for_tests(self) -> None:
         sleep = MagicMock()
-        with patch.object(uptime, "sample_once") as sample:
+        with _Store(), patch.object(uptime, "sample_once") as sample:
             uptime.run_forever(lambda: None, sleep=sleep, iterations=2)
         self.assertEqual(sample.call_count, 2)
         sleep.assert_called_with(uptime.SAMPLE_SECONDS)
+
+
+class TestSingleSampler(unittest.TestCase):
+    """Every worker process runs the loop; only the holder of the sampler
+    lock samples, and another takes over when it goes away."""
+
+    def test_only_one_holder_at_a_time(self) -> None:
+        with _Store():
+            first = uptime.try_become_sampler()
+            self.assertIsNotNone(first)
+            self.assertIsNone(uptime.try_become_sampler())
+            first.close()  # the holding process exits
+            second = uptime.try_become_sampler()
+            self.assertIsNotNone(second)
+            second.close()
+
+    def test_loop_samples_only_while_holding_the_role(self) -> None:
+        with _Store(), patch.object(uptime, "sample_once") as sample:
+            other = uptime.try_become_sampler()
+            uptime.run_forever(lambda: None, sleep=MagicMock(), iterations=2)
+            self.assertEqual(sample.call_count, 0)
+            other.close()
+            uptime.run_forever(lambda: None, sleep=MagicMock(), iterations=2)
+            self.assertEqual(sample.call_count, 2)
 
 
 class TestCheckServiceHasNoAlertSideEffect(unittest.TestCase):
