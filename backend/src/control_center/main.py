@@ -70,6 +70,9 @@ from control_center.api.routes_infra import router as infra_router
 from control_center.api.routes_known_issues import router as known_issues_router
 from control_center.api.routes_llm import router as llm_router
 from control_center.api.routes_reference import router as reference_router
+from control_center.api.routes_showcase import router as showcase_router
+from control_center.core import uptime
+from control_center.core.settings import load_settings
 from control_center.api.routes_regression_health import router as regression_health_router
 from control_center.api.routes_security_posture import router as security_posture_router
 from control_center.api.routes_report import router as report_router
@@ -202,6 +205,8 @@ app.include_router(cloud_router)
 # only, no internal topology, no credential values).
 app.include_router(integrations_router)
 app.include_router(reference_router)
+# Public showcase content and uptime history -- see routes_showcase.py.
+app.include_router(showcase_router)
 # router_storage (GET /storage) previously had no gate -- disk usage
 # breakdown by directory plus `docker system df` output. Gated the same
 # way docker_router/summary_router are, above.
@@ -1120,6 +1125,10 @@ async def on_startup() -> None:
     }})
     scheduler = threading.Thread(target=_scheduler_loop, daemon=True)
     scheduler.start()
+    if os.environ.get("UPTIME_SAMPLING", "1") != "0":
+        # Public uptime history (core/uptime.py): samples the configured
+        # service checks without sending Down alerts.
+        threading.Thread(target=uptime.run_forever, args=(load_settings,), daemon=True).start()
 
 
 # ==============================================================================

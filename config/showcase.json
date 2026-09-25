@@ -1,0 +1,98 @@
+{
+  "as_of": "2026-09-25",
+  "releases_repo": "OmniBioAI/omnibioai-studio",
+  "releases": [],
+  "benchmarks": [],
+  "example_runs": [],
+  "tool_versions": [],
+  "publications": [
+    {
+      "year": 2025,
+      "title": "Genetic mutations in lymphocytic variant of hypereosinophilic syndrome: study of five siblings",
+      "venue": "Frontiers in Medicine",
+      "url": "https://www.frontiersin.org/journals/medicine/articles/10.3389/fmed.2025.1679484/full"
+    },
+    {
+      "year": 2018,
+      "title": "Whole Exome Sequencing identifies common and rare variant Metabolic QTLs in a Middle Eastern Population",
+      "venue": "Nature Communications",
+      "url": "https://www.nature.com/articles/s41467-017-01972-9"
+    },
+    {
+      "year": 2015,
+      "title": "MetaRNA-Seq: An Interactive Tool to Browse and Annotate Metadata from RNA-Seq Studies",
+      "venue": "BioMed Research International",
+      "url": "https://onlinelibrary.wiley.com/doi/10.1155/2015/318064"
+    }
+  ],
+  "test_evidence": [],
+  "repo_coverage": [],
+  "ci_repos": [
+    { "repo": "OmniBioAI/omnibioai-control-center", "workflow": "ci.yml", "label": "Control Center" },
+    { "repo": "OmniBioAI/omnibioai-docs", "workflow": "ci.yml", "label": "Documentation" },
+    { "repo": "OmniBioAI/omnibioai-landing", "workflow": "ci.yml", "label": "Website" }
+  ],
+  "security_controls": [
+    {
+      "area": "Identity and authentication",
+      "status": "implemented",
+      "summary": "Short-lived signed tokens with refresh-token reuse detection; passwords stored only as hashes; organization SSO, OAuth and multi-factor authentication covered by automated tests."
+    },
+    {
+      "area": "Authorization",
+      "status": "partial",
+      "summary": "Platform-wide and organization-defined roles; a custom role can never hold a platform-wide permission. Resource ownership checks are not yet applied consistently on every code path."
+    },
+    {
+      "area": "Tenant isolation",
+      "status": "partial",
+      "summary": "Organization data is scoped to its organization by default and cross-organization access is tested for several core services; enforcement is not yet uniform across every service."
+    },
+    {
+      "area": "Service-to-service identity",
+      "status": "partial",
+      "summary": "Signed, independently verified credentials on some internal paths (for example scheduler to tool execution); most internal traffic still relies on network placement. Migration in progress."
+    },
+    {
+      "area": "Audit logging",
+      "status": "partial",
+      "summary": "Security events flow into a durable, append-only audit pipeline with a tested recovery path; audit retention and immutability are partly implemented."
+    }
+  ],
+  "data_handling": [
+    "Security controls are HIPAA-aligned. OmniBioAI is not described as HIPAA compliant or certified: that requires a formal risk assessment, Business Associate Agreements and an audit.",
+    "Data created within an organization is scoped to that organization by default. Public reference databases are shared across organizations by design."
+  ],
+  "limitations": [
+    {
+      "title": "Literature AI indexes are being rebuilt",
+      "detail": "Most PubMed domain indexes are being re-embedded to 1024 dimensions; until that finishes, only part of the corpus can be queried.",
+      "url": "https://docs.omnibioai.org/biomedical-knowledge/limitations/"
+    },
+    {
+      "title": "Scheduled PubMed sync awaiting verification",
+      "detail": "The sync schedule was repaired; a successful post-repair scheduled run has not yet been recorded.",
+      "url": "https://docs.omnibioai.org/biomedical-knowledge/freshness-and-synchronization/"
+    },
+    {
+      "title": "Prepared genome indexes cover human and mouse",
+      "detail": "Twelve organisms have genome, transcript and annotation files; prepared aligner indexes currently exist for human and mouse only.",
+      "url": "https://docs.omnibioai.org/reference-data/organism-assets/"
+    },
+    {
+      "title": "Per-service authentication is not yet universal",
+      "detail": "The gateway validates tokens for routed traffic, but not every internal service performs its own authentication check yet.",
+      "url": "https://docs.omnibioai.org/admin/security/"
+    }
+  ],
+  "uptime_services": {
+    "workbench": "Workbench",
+    "auth-service": "Sign-in and identity",
+    "api-gateway": "API gateway",
+    "tes": "Tool execution",
+    "rag": "Literature AI",
+    "model-registry": "Model registry",
+    "workflow-bundles": "Workflow catalog",
+    "lims": "LIMS"
+  }
+}

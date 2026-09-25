@@ -1,4 +1,4 @@
-export type Tab = 'overview' | 'health' | 'ecosystem' | 'llms' | 'cloud' | 'integrations' | 'organizations' | 'users'
+export type Tab = 'overview' | 'evidence' | 'health' | 'ecosystem' | 'llms' | 'cloud' | 'integrations' | 'organizations' | 'users'
 
 interface Props {
   tab: Tab
@@ -33,6 +33,7 @@ interface Props {
 // wasn't in ControlApp's tab set before this PR.
 const OPS_TABS: { id: Tab; label: string }[] = [
   { id: 'overview',     label: 'Overview' },
+  { id: 'evidence',     label: 'Evidence' },
   { id: 'health',       label: 'Health Dashboard' },
   { id: 'ecosystem',    label: 'Ecosystem Report' },
   { id: 'llms',         label: 'LLMs' },

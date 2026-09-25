@@ -1,13 +1,16 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { fetchHealth } from '../api'
-import { Card, SectionHeader } from '../components/ui'
+import { Card } from '../components/ui'
+import {
+  Badge, Grid, Loading, Section, Tile, Unavailable, daysAgo, fmt, useLoad, type Load,
+} from '../components/publicShowcase'
 import {
   CATALOG_SNAPSHOT,
   fetchAiAndWorkflow, fetchBackends, fetchOpenIssues, fetchPublicStats,
-  fetchReferenceStatus, fetchUsage,
+  fetchReferenceStatus, fetchUptime, fetchUsage,
   type BackendStatus, type PublicAiAndWorkflow, type PublicIssue, type PublicStats,
-  type ReferenceStatus, type UsageStatus,
+  type ReferenceStatus, type UptimeSummary, type UsageStatus,
 } from '../publicOverview'
 
 /**
@@ -18,79 +21,6 @@ import {
  * own card instead of blanking the page. Figures are labelled with where
  * they come from and when; nothing here is placeholder data.
  */
-
-type Load<T> = { state: 'loading' } | { state: 'ok'; data: T } | { state: 'error' }
-
-function useLoad<T>(fn: () => Promise<T>, refreshKey: number): Load<T> {
-  const [value, setValue] = useState<Load<T>>({ state: 'loading' })
-  useEffect(() => {
-    let cancelled = false
-    setValue({ state: 'loading' })
-    fn().then(
-      data => { if (!cancelled) setValue({ state: 'ok', data }) },
-      () => { if (!cancelled) setValue({ state: 'error' }) },
-    )
-    return () => { cancelled = true }
-    // fn is a module-level fetcher; only refreshKey should re-trigger.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey])
-  return value
-}
-
-const fmt = (n: number | null | undefined) => (typeof n === 'number' ? n.toLocaleString('en-US') : '—')
-
-function daysAgo(iso: string | null): string {
-  if (!iso) return ''
-  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000)
-  return days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`
-}
-
-function Section({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
-  return (
-    <section style={{ marginTop: 32 }}>
-      <SectionHeader title={title} description={description} />
-      <div style={{ marginTop: 14 }}>{children}</div>
-    </section>
-  )
-}
-
-function Grid({ min = 150, children }: { min?: number; children: ReactNode }) {
-  // 150px keeps two tiles per row on a phone and five or six on a desktop.
-  return <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${min}px, 1fr))`, gap: 12 }}>{children}</div>
-}
-
-function Tile({ label, value, note, href }: { label: string; value: string; note?: string; href?: string }) {
-  const body = (
-    <Card style={{ height: '100%' }}>
-      <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--accent)', lineHeight: 1 }}>{value}</div>
-      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginTop: 8 }}>{label}</div>
-      {note && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, lineHeight: 1.45 }}>{note}</div>}
-    </Card>
-  )
-  return href
-    ? <a href={href} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>{body}</a>
-    : body
-}
-
-function Unavailable({ what }: { what: string }) {
-  return <Card><span style={{ fontSize: 13, color: 'var(--muted)' }}>{what} is unavailable right now.</span></Card>
-}
-
-function Loading() {
-  return <Card><span style={{ fontSize: 13, color: 'var(--muted)' }}>Loading…</span></Card>
-}
-
-function Badge({ ok, children }: { ok: boolean; children: ReactNode }) {
-  return (
-    <span style={{
-      display: 'inline-block', fontSize: 11, fontFamily: 'var(--mono)', padding: '2px 7px', borderRadius: 4,
-      margin: '0 4px 4px 0',
-      color: ok ? 'var(--green)' : 'var(--muted)',
-      background: ok ? 'var(--green-bg)' : 'transparent',
-      border: `1px solid ${ok ? 'var(--green-border)' : 'var(--border)'}`,
-    }}>{children}</span>
-  )
-}
 
 // ── Sections ─────────────────────────────────────────────────────────────
 
@@ -123,6 +53,48 @@ function StatusStrip({ refreshKey, stats }: { refreshKey: number; stats: Load<Pu
       )}
     </Card>
   )
+}
+
+function dayColor(pct: number | null): string {
+  if (pct === null) return 'var(--border)'
+  if (pct >= 99.5) return 'var(--green)'
+  if (pct >= 95) return 'var(--amber)'
+  return 'var(--red)'
+}
+
+function UptimeSection({ uptime }: { uptime: Load<UptimeSummary> }) {
+  let body: ReactNode
+  if (uptime.state === 'loading') body = <Loading />
+  else if (uptime.state === 'error') body = <Unavailable what="Uptime history" />
+  else if (uptime.data.services.length === 0) body = (
+    <Card><span style={{ fontSize: 13, color: 'var(--muted)' }}>Uptime history is not being published yet.</span></Card>
+  )
+  else body = (
+    <Card>
+      {uptime.data.services.map((svc, n) => (
+        <div key={svc.label} style={{ padding: '8px 0', borderTop: n ? '1px solid var(--border)' : 'none' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
+            <span style={{ color: 'var(--text)', fontWeight: 600 }}>{svc.label}</span>
+            <span style={{ color: 'var(--muted)' }}>
+              {svc.overall_pct === null ? 'no data yet' : `${svc.overall_pct}% available`}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 2 }} role="img"
+            aria-label={`${svc.label}: daily availability over ${uptime.data.window_days} days`}>
+            {svc.days.map(d => (
+              <span key={d.date}
+                title={`${d.date}: ${d.availability_pct === null ? 'no data' : `${d.availability_pct}%`}`}
+                style={{ flex: 1, height: 22, borderRadius: 2, background: dayColor(d.availability_pct) }} />
+            ))}
+          </div>
+        </div>
+      ))}
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
+        {uptime.data.window_days} days, oldest on the left. Sampled every {Math.round(uptime.data.sample_seconds / 60)} minutes by the control center's own health checks; grey means no samples that day.
+      </div>
+    </Card>
+  )
+  return <Section title="Uptime" description="Daily availability of the platform's main services.">{body}</Section>
 }
 
 function CatalogSection() {
@@ -297,6 +269,7 @@ export default function PublicOverviewPage({ refreshKey }: { refreshKey: number 
   const reference = useLoad(fetchReferenceStatus, refreshKey)
   const backends = useLoad(fetchBackends, refreshKey)
   const issues = useLoad(fetchOpenIssues, refreshKey)
+  const uptime = useLoad(fetchUptime, refreshKey)
 
   return (
     <div>
@@ -307,6 +280,7 @@ export default function PublicOverviewPage({ refreshKey }: { refreshKey: number 
         </p>
       </div>
       <StatusStrip refreshKey={refreshKey} stats={stats} />
+      <UptimeSection uptime={uptime} />
       <CatalogSection />
       <ActivitySection usage={usage} />
       <AiSection summary={summary} />

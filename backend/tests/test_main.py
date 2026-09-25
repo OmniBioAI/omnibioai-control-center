@@ -782,14 +782,25 @@ class TestSchedulerLoop(unittest.TestCase):
 class TestOnStartup(unittest.TestCase):
     """on_startup()'s launch of the background _scheduler_loop thread."""
 
-    def test_starts_scheduler_thread(self):
-        """on_startup() creates and starts a daemon Thread targeting _scheduler_loop."""
-        with patch("control_center.main.threading.Thread") as mock_thread:
+    def test_starts_scheduler_and_uptime_threads(self):
+        """on_startup() starts the report scheduler and, by default, the
+        uptime sampler (core/uptime.py) as daemon threads."""
+        with patch.dict(os.environ, {"UPTIME_SAMPLING": "1"}), \
+                patch("control_center.main.threading.Thread") as mock_thread:
             asyncio_run = __import__("asyncio").run
             asyncio_run(main_module.on_startup())
+        targets = [c.kwargs.get("target") for c in mock_thread.call_args_list]
+        self.assertEqual(targets, [main_module._scheduler_loop, main_module.uptime.run_forever])
+        self.assertTrue(all(c.kwargs.get("daemon") for c in mock_thread.call_args_list))
+        self.assertEqual(mock_thread.return_value.start.call_count, 2)
+
+    def test_uptime_sampling_can_be_disabled(self):
+        """UPTIME_SAMPLING=0 starts only the report scheduler."""
+        with patch.dict(os.environ, {"UPTIME_SAMPLING": "0"}), \
+                patch("control_center.main.threading.Thread") as mock_thread:
+            __import__("asyncio").run(main_module.on_startup())
         mock_thread.assert_called_once()
         self.assertEqual(mock_thread.call_args.kwargs.get("target"), main_module._scheduler_loop)
-        mock_thread.return_value.start.assert_called_once()
 
 
 class TestPlatformManageInfraAuth(unittest.TestCase):

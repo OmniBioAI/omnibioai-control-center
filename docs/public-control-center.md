@@ -145,3 +145,45 @@ signed-in operator's token. The public Ecosystem Report no longer shows
 the Ecosystem Status (git) tab, and the public header says "Control center
 online" instead of "All systems operational", since it is derived from
 the control center's own `/health` only.
+
+## Public showcase: Overview and Evidence tabs
+
+`control.omnibioai.org` opens on **Overview** (`PublicOverviewPage.tsx`) and
+has an **Evidence** tab (`PublicEvidencePage.tsx`). Both read only routes
+that answer without a token.
+
+### Curated content: `showcase.json`
+
+`GET /showcase` serves a reviewed file validated by `core/showcase.py`
+(unknown keys and non-https links are rejected; an invalid or missing file
+yields empty sections, never an error page). `config/showcase.json` in this
+repository is the reviewed source; the running service reads
+`SHOWCASE_PATH`, else `showcase.json` next to `CONTROL_CENTER_CONFIG`
+(i.e. `/config/showcase.json` with the Compose mount). Copy the file into
+the deployed config directory after changing it.
+
+| Key | Shown as |
+|---|---|
+| `benchmarks`, `example_runs`, `tool_versions` | Scientific validation |
+| `ci_repos` | Live GitHub Actions badges |
+| `test_evidence`, `repo_coverage` | Dated test runs; coverage per repository (never averaged) |
+| `security_controls`, `data_handling`, `limitations` | Security, data handling, known limitations |
+| `releases` / `releases_repo` | Release list; when `releases` is empty, the GitHub Releases of `releases_repo` (cached 1 h) |
+| `publications` | Publications |
+| `uptime_services` | Which services appear on the public uptime bars, and their public labels (not returned by `/showcase`) |
+
+Empty sections render as "being prepared", never as placeholder numbers.
+`/showcase` also carries a counts-and-date summary of the promoted
+regression certification (`regression_health.py`): phase and capability
+statuses only, no findings text or evidence.
+
+### Uptime history
+
+`core/uptime.py` samples every configured service check every
+`UPTIME_SAMPLE_SECONDS` (default 300) using `core.runner.check_service`,
+which sends no Discord alerts, and keeps per-day counts for 90 days in
+`UPTIME_STORE_PATH` (default `$WORKSPACE_ROOT/work/out/uptime/uptime.json`).
+Set `UPTIME_SAMPLING=0` to disable the sampler. `GET /uptime` shows
+anonymous callers only the `uptime_services` allowlist under its public
+labels; a `platform.manage_infra` caller sees every recorded service.
+History starts accumulating when the sampler first runs.
