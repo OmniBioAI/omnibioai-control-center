@@ -69,14 +69,29 @@ jobs:
             echo "No tests directory found, skipping pytest"
           fi
 
+  # The Dockerfile has two deployable stages, and a build without a
+  # `target` produces only the last one (the nginx frontend). Pushing that
+  # as omnibioai-control-center:latest would replace the backend that
+  # omnibioai-studio's release compose files run from that name, so each
+  # stage is built explicitly and pushed under its own image name:
+  #   backend  -> ghcr.io/omnibioai/omnibioai-control-center      (:7070)
+  #   frontend -> ghcr.io/omnibioai/omnibioai-control-center-web  (:5174)
   docker:
-    name: Build & Push Docker image
+    name: Build & Push Docker image (${{ matrix.target }})
     runs-on: ubuntu-latest
     needs: lint-and-test
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: backend
+            image: ghcr.io/${{ github.repository }}
+          - target: frontend
+            image: ghcr.io/${{ github.repository }}-web
 
     steps:
       - uses: actions/checkout@v4
@@ -92,7 +107,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ matrix.image }}
           tags: |
             type=semver,pattern={{version}}
             type=raw,value=latest
@@ -100,12 +115,19 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # The VITE_LIMS_SSO_* values are public OAuth client settings (the
+      # same defaults omnibioai-studio/docker-compose.yml passes), not
+      # secrets; the backend stage ignores them.
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
+          target: ${{ matrix.target }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          build-args: |
+            VITE_LIMS_SSO_CLIENT_ID=omnibioai-lims
+            VITE_LIMS_SSO_REDIRECT_URI=https://lims.omnibioai.org/sso/callback
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
