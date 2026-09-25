@@ -76,9 +76,14 @@ jobs:
   # stage is built explicitly and pushed under its own image name:
   #   backend  -> ghcr.io/omnibioai/omnibioai-control-center      (:7070)
   #   frontend -> ghcr.io/omnibioai/omnibioai-control-center-web  (:5174)
+  #
+  # Runs on an arm64 runner: omnibioai-base (the backend's FROM) is
+  # published for arm64 only, matching the aarch64 deployment host, so on
+  # the default amd64 runner the backend's first RUN fails with
+  # "exec format error" and the frontend comes out amd64-only.
   docker:
     name: Build & Push Docker image (${{ matrix.target }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     needs: lint-and-test
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
