@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import os
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import jwt
@@ -72,6 +73,26 @@ class TestCached(_CacheOn):
         compute.assert_awaited_once()
         with patch.dict(os.environ, {"PUBLIC_CACHE_SECONDS": "0"}):
             run(public_cache.cached_async("a", compute))
+        self.assertEqual(compute.await_count, 2)
+
+
+class TestTtlOverride(_CacheOn):
+    def test_override_extends_and_zero_disables(self) -> None:
+        compute = AsyncMock(return_value=1)
+        clock = SimpleNamespace(monotonic=MagicMock(side_effect=[0.0, 120.0]))
+        with patch.object(public_cache, "time", clock):  # not asyncio's own clock
+            asyncio.run(public_cache.cached_async("long", compute, ttl=3600))
+            asyncio.run(public_cache.cached_async("long", compute, ttl=3600))
+        compute.assert_awaited_once()  # still cached at 120 s, past the 60 s default
+        asyncio.run(public_cache.cached_async("off", compute, ttl=0))
+        asyncio.run(public_cache.cached_async("off", compute, ttl=0))
+        self.assertEqual(compute.await_count, 3)
+
+    def test_global_disable_wins_over_override(self) -> None:
+        compute = AsyncMock(return_value=1)
+        with patch.dict(os.environ, {"PUBLIC_CACHE_SECONDS": "0"}):
+            asyncio.run(public_cache.cached_async("k", compute, ttl=3600))
+            asyncio.run(public_cache.cached_async("k", compute, ttl=3600))
         self.assertEqual(compute.await_count, 2)
 
 

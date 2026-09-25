@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import ControlApp from './ControlApp'
+import ControlApp, { tabFromPath } from './ControlApp'
 import * as auth from '../auth'
 
 vi.mock('../auth', async () => {
@@ -17,16 +17,14 @@ vi.mock('../auth', async () => {
 
 vi.mock('../api', () => ({
   fetchHealth: vi.fn().mockResolvedValue({ status: 'ok' }),
-  fetchReportStatus: vi.fn().mockResolvedValue({ report_exists: false, status: 'idle' }),
 }))
+
+// jsdom has no scrolling; ControlApp scrolls to the top on tab change.
+window.scrollTo = vi.fn() as unknown as typeof window.scrollTo
 
 vi.mock('../pages/PublicOverviewPage', () => ({ default: () => <div data-testid="PublicOverviewPage" /> }))
 vi.mock('../pages/PublicEvidencePage', () => ({ default: () => <div data-testid="PublicEvidencePage" /> }))
-vi.mock('../pages/PublicHealthPage', () => ({ default: () => <div data-testid="PublicHealthPage" /> }))
 vi.mock('../pages/PublicEcosystemPage', () => ({ default: () => <div data-testid="PublicEcosystemPage" /> }))
-vi.mock('../pages/LlmPage', () => ({ default: () => <div data-testid="LlmPage" /> }))
-vi.mock('../pages/CloudPage', () => ({ default: () => <div data-testid="CloudPage" /> }))
-vi.mock('../pages/IntegrationsPage', () => ({ default: () => <div data-testid="IntegrationsPage" /> }))
 
 describe('ControlApp is a genuinely anonymous public dashboard', () => {
   beforeEach(() => {
@@ -72,17 +70,14 @@ describe('ControlApp page set: only the endpoints confirmed safe for anonymous a
     window.history.pushState(null, '', '/')
   })
 
-  it('shows Overview/Health/Ecosystem/LLMs/Cloud/Integrations tabs -- no Docker, no Config, no Organizations, no Users', async () => {
+  it('shows only Overview, Evidence and Ecosystem Report tabs', async () => {
     render(<ControlApp />)
     await waitFor(() => expect(screen.getByTestId('PublicOverviewPage')).toBeInTheDocument())
 
-    expect(screen.getByText('Overview')).toBeInTheDocument()
-    expect(screen.getByText('Evidence')).toBeInTheDocument()
-    expect(screen.getByText('Health Dashboard')).toBeInTheDocument()
-    expect(screen.getByText('Ecosystem Report')).toBeInTheDocument()
-    expect(screen.getByText('LLMs')).toBeInTheDocument()
-    expect(screen.getByText('Cloud')).toBeInTheDocument()
-    expect(screen.getByText('Integrations')).toBeInTheDocument()
+    expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['Overview', 'Evidence', 'Ecosystem Report'])
+    for (const gone of ['Health Dashboard', 'LLMs', 'Cloud', 'Integrations', 'View Report']) {
+      expect(screen.queryByText(gone)).not.toBeInTheDocument()
+    }
     expect(screen.queryByText('Docker Images')).not.toBeInTheDocument()
     expect(screen.queryByText('Config')).not.toBeInTheDocument()
     expect(screen.queryByText('Organizations')).not.toBeInTheDocument()
@@ -95,14 +90,6 @@ describe('ControlApp page set: only the endpoints confirmed safe for anonymous a
     expect(screen.queryByText(/Generate Report/)).not.toBeInTheDocument()
   })
 
-  it('"View Report" opens the Ecosystem Report tab instead of reloading this dashboard', async () => {
-    const api = await import('../api')
-    vi.mocked(api.fetchReportStatus).mockResolvedValueOnce({ report_exists: true, status: 'idle' } as never)
-    render(<ControlApp />)
-    fireEvent.click(await screen.findByText('View Report'))
-    await waitFor(() => expect(screen.getByTestId('PublicEcosystemPage')).toBeInTheDocument())
-  })
-
   it('applies the public brand and loads the website fonts once', async () => {
     const { container, unmount } = render(<ControlApp />)
     await waitFor(() => expect(screen.getByTestId('PublicOverviewPage')).toBeInTheDocument())
@@ -113,13 +100,33 @@ describe('ControlApp page set: only the endpoints confirmed safe for anonymous a
     expect(document.head.querySelectorAll('link[href*="Space+Grotesk"]')).toHaveLength(1)
   })
 
-  it('opens on the Overview tab and still reaches the Health tab', async () => {
+  it('gives every tab its own URL and title, and follows Back/Forward', async () => {
     render(<ControlApp />)
     await waitFor(() => expect(screen.getByTestId('PublicOverviewPage')).toBeInTheDocument())
-    fireEvent.click(screen.getByText('Health Dashboard'))
-    await waitFor(() => expect(screen.getByTestId('PublicHealthPage')).toBeInTheDocument())
+    expect(document.title).toBe('OmniBioAI — Platform Overview')
     fireEvent.click(screen.getByText('Evidence'))
     await waitFor(() => expect(screen.getByTestId('PublicEvidencePage')).toBeInTheDocument())
+    expect(window.location.pathname).toBe('/evidence')
+    expect(document.title).toBe('OmniBioAI — Evidence')
+    fireEvent.click(screen.getByText('Ecosystem Report'))
+    expect(window.location.pathname).toBe('/ecosystem')
+    window.history.pushState(null, '', '/evidence')
+    fireEvent(window, new PopStateEvent('popstate'))
+    await waitFor(() => expect(screen.getByTestId('PublicEvidencePage')).toBeInTheDocument())
+  })
+
+  it('opens the tab named in the URL, so links can point straight at one', async () => {
+    window.history.pushState(null, '', '/evidence')
+    render(<ControlApp />)
+    await waitFor(() => expect(screen.getByTestId('PublicEvidencePage')).toBeInTheDocument())
+  })
+
+  it('maps paths to tabs, defaulting to Overview', () => {
+    expect(tabFromPath('/')).toBe('overview')
+    expect(tabFromPath('/overview')).toBe('overview')
+    expect(tabFromPath('/evidence/')).toBe('evidence')
+    expect(tabFromPath('/ecosystem')).toBe('ecosystem')
+    expect(tabFromPath('/health')).toBe('overview')
   })
 
   it('renders PublicEcosystemPage (not EcosystemPage) anonymously when the Ecosystem Report tab is selected', async () => {

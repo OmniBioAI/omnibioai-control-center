@@ -3,13 +3,13 @@ import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recha
 import { fetchHealth } from '../api'
 import { Card } from '../components/ui'
 import {
-  Badge, Grid, Loading, Section, Tile, Unavailable, daysAgo, fmt, useLoad, type Load,
+  Badge, Grid, Loading, Section, Tile, Unavailable, daysAgo, fmt, fmtCompact, useLoad, type Load,
 } from '../components/publicShowcase'
 import {
   CATALOG_SNAPSHOT,
   fetchAiAndWorkflow, fetchBackends, fetchOpenIssues, fetchPublicStats,
-  fetchReferenceStatus, fetchUptime, fetchUsage,
-  type BackendStatus, type PublicAiAndWorkflow, type PublicIssue, type PublicStats,
+  fetchKnowledgeBase, fetchReferenceStatus, fetchUptime, fetchUsage,
+  type BackendStatus, type KnowledgeBase, type PublicAiAndWorkflow, type PublicIssue, type PublicStats,
   type ReferenceStatus, type UptimeSummary, type UsageStatus,
 } from '../publicOverview'
 
@@ -177,6 +177,53 @@ function AiSection({ summary }: { summary: Load<PublicAiAndWorkflow> }) {
   return <Section title="AI platform" description="Live counts from the model registry and workflow-bundle services.">{body}</Section>
 }
 
+const RAG_STATUS: Record<string, string> = { running: 'Online', degraded: 'Degraded', unreachable: 'Unreachable' }
+
+function LiteratureSection({ kb }: { kb: Load<KnowledgeBase> }) {
+  let body: ReactNode
+  if (kb.state === 'loading') body = <Loading />
+  else if (kb.state === 'error') body = <Unavailable what="Literature AI status" />
+  else {
+    const { abstracts, faiss_index, readiness, rag_status } = kb.data
+    const total = readiness?.domains_total ?? 0
+    const ready = readiness?.domains_ready ?? 0
+    const pct = total ? Math.round((100 * ready) / total) : 0
+    body = (
+      <>
+        <Grid>
+          <Tile label="PubMed abstracts" value={fmtCompact(abstracts.total)} note={`${fmt(abstracts.total)} abstracts`} />
+          <Tile label="Research domains indexed" value={fmt(faiss_index.domains_indexed)} />
+          <Tile label="Literature AI service" value={RAG_STATUS[rag_status] ?? rag_status} />
+        </Grid>
+        {readiness && total > 0 && (
+          <Card style={{ marginTop: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, fontSize: 13 }}>
+              <span style={{ color: 'var(--text)', fontWeight: 600 }}>
+                {ready === total
+                  ? `All ${fmt(total)} domains ready to query`
+                  : `Re-indexing: ${fmt(ready)} of ${fmt(total)} domains ready to query`}
+              </span>
+              <span style={{ color: 'var(--muted)' }}>{pct}%</span>
+            </div>
+            <div role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={ready}
+              aria-label="Domains ready to query"
+              style={{ height: 8, borderRadius: 4, background: 'var(--border)', marginTop: 8, overflow: 'hidden' }}>
+              <div style={{ width: `${pct}%`, height: '100%', background: 'var(--accent)' }} />
+            </div>
+            {ready < total && (
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8, lineHeight: 1.5 }}>
+                Indexes are being rebuilt with {readiness.expected_dimension}-dimension embeddings. A domain can be
+                queried once its index matches that size; the rest become available as re-embedding completes.
+              </div>
+            )}
+          </Card>
+        )}
+      </>
+    )
+  }
+  return <Section title="Literature AI" description="PubMed knowledge base behind the platform's literature answers.">{body}</Section>
+}
+
 const INDEX_LABELS: Record<string, string> = { star: 'STAR', bwa: 'BWA', bowtie2: 'Bowtie2', salmon: 'Salmon', cellranger: 'CellRanger' }
 
 function GenomesSection({ reference }: { reference: Load<ReferenceStatus> }) {
@@ -231,7 +278,7 @@ function CodebaseSection({ stats }: { stats: Load<PublicStats> }) {
   else if (stats.state === 'error' || stats.data.total_lines === null) body = <Unavailable what="Codebase statistics" />
   else body = (
     <Grid>
-      <Tile label="Lines of code" value={fmt(stats.data.total_lines)} />
+      <Tile label="Lines of code" value={fmtCompact(stats.data.total_lines)} note={`${fmt(stats.data.total_lines)} lines`} />
       <Tile label="Source files" value={fmt(stats.data.total_files)} />
       <Tile label="Repositories measured" value={fmt(stats.data.repos_measured)} />
     </Grid>
@@ -270,6 +317,7 @@ export default function PublicOverviewPage({ refreshKey }: { refreshKey: number 
   const backends = useLoad(fetchBackends, refreshKey)
   const issues = useLoad(fetchOpenIssues, refreshKey)
   const uptime = useLoad(fetchUptime, refreshKey)
+  const kb = useLoad(fetchKnowledgeBase, refreshKey)
 
   return (
     <div>
@@ -284,6 +332,7 @@ export default function PublicOverviewPage({ refreshKey }: { refreshKey: number 
       <CatalogSection />
       <ActivitySection usage={usage} />
       <AiSection summary={summary} />
+      <LiteratureSection kb={kb} />
       <GenomesSection reference={reference} />
       <BackendsSection backends={backends} />
       <CodebaseSection stats={stats} />

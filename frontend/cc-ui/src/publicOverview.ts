@@ -121,3 +121,21 @@ export interface UptimeSummary {
 
 export const fetchShowcase = () => getJson<Showcase>('/showcase')
 export const fetchUptime = () => getJson<UptimeSummary>('/uptime')
+
+// ── Literature AI (GET /knowledge-base aggregate fields) ─────────────────
+
+export interface KnowledgeBase {
+  rag_status: 'running' | 'degraded' | 'unreachable' | string
+  abstracts: { total: number; domains_with_abstracts: number }
+  faiss_index: { domains_indexed: number; size_gb: number }
+  readiness: {
+    expected_dimension: number
+    domains_total: number
+    domains_ready: number
+    domains_by_dimension: Record<string, number>
+    missing_map: number
+    unreadable: number
+  } | null
+}
+
+export const fetchKnowledgeBase = () => getJson<KnowledgeBase>('/knowledge-base')

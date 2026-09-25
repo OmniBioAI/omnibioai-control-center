@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
-import { fetchHealth, fetchReportStatus } from '../api'
+import { useState, useEffect } from 'react'
+import { fetchHealth } from '../api'
 import { clearToken } from '../auth'
 import Header from '../components/Header'
 // Website palette and layout rules, scoped to .public-brand (see the file).
@@ -21,11 +21,7 @@ function useBrandFonts() {
 import type { Tab } from '../components/Header'
 import PublicOverviewPage from '../pages/PublicOverviewPage'
 import PublicEvidencePage from '../pages/PublicEvidencePage'
-import PublicHealthPage from '../pages/PublicHealthPage'
 import PublicEcosystemPage from '../pages/PublicEcosystemPage'
-import LlmPage from '../pages/LlmPage'
-import CloudPage from '../pages/CloudPage'
-import IntegrationsPage from '../pages/IntegrationsPage'
 
 /**
  * Public Read-Only Control Center architecture -- built with
@@ -35,13 +31,14 @@ import IntegrationsPage from '../pages/IntegrationsPage'
  * docs/public-control-center.md for the full investigation this PR
  * implements.
  *
- * Health, Ecosystem Report, LLMs, Cloud, Integrations are exactly the
- * pages whose backend routes are safe for anonymous access (health_
- * router/report_router/llm_router/cloud_router/integrations_router carry
- * no permission dependency in main.py, and none of their response shapes
- * contain a per-user identifier, credential, or internal topology
- * detail -- confirmed by reading each one directly, not assumed; see
- * test_public_dashboard_no_leak.py for the regression guard). Ecosystem
+ Public page set (2026-09-25 showcase trim): Overview, Evidence and
+ * Ecosystem Report, each reachable at its own URL (/overview, /evidence,
+ * /ecosystem; / opens Overview) so a tab can be linked directly. The
+ * former Health, LLMs, Cloud and Integrations tabs were operator detail:
+ * the Overview already shows control-center status, execution backends
+ * and AI platform counts, and those pages remain in AdminApp. Every
+ * route these pages call answers anonymously with its public shape
+ * (core/public_view.py, test_public_dashboard_no_leak.py). Ecosystem
  * Report renders via PublicEcosystemPage.tsx here, NOT the full
  * EcosystemPage.tsx AdminApp uses -- that file also contains ArchTab's
  * static internal-topology map (real service names/ports/tech stack)
@@ -64,16 +61,53 @@ import IntegrationsPage from '../pages/IntegrationsPage'
  * source-text check): Organizations/Users/Roles/Teams/etc. were never
  * here and still aren't.
  */
+export const TAB_PATHS: Record<Tab, string> = {
+  overview: '/overview',
+  evidence: '/evidence',
+  ecosystem: '/ecosystem',
+}
+
+const TAB_TITLES: Record<Tab, string> = {
+  overview: 'Platform Overview',
+  evidence: 'Evidence',
+  ecosystem: 'Ecosystem Report',
+}
+
+/** '/', unknown paths and trailing slashes all resolve to a real tab. */
+export function tabFromPath(pathname: string): Tab {
+  const path = pathname.replace(/\/+$/, '') || '/'
+  const match = (Object.keys(TAB_PATHS) as Tab[]).find(t => TAB_PATHS[t] === path)
+  return match ?? 'overview'
+}
+
 export default function ControlApp() {
   return <ControlDashboard />
 }
 
 function ControlDashboard() {
   useBrandFonts()
-  const [tab, setTab] = useState<Tab>('overview')
+  const [tab, setTabState] = useState<Tab>(() => tabFromPath(window.location.pathname))
   const [overallStatus, setOverallStatus] = useState<'UP' | 'WARN' | 'DOWN' | null>(null)
-  const [reportExists, setReportExists] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+
+  // Each tab has its own URL so it can be shared; Back/Forward move
+  // between tabs.
+  const setTab = (next: Tab) => {
+    if (next === tab) return
+    window.history.pushState(null, '', TAB_PATHS[next])
+    setTabState(next)
+    window.scrollTo(0, 0)
+  }
+
+  useEffect(() => {
+    const onPop = () => setTabState(tabFromPath(window.location.pathname))
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+
+  useEffect(() => {
+    document.title = `OmniBioAI — ${TAB_TITLES[tab]}`
+  }, [tab])
 
   // This build never operates in an authenticated mode -- there is no
   // login screen to reach one from. Clearing unconditionally on mount
@@ -102,40 +136,20 @@ function ControlDashboard() {
     return () => clearInterval(t)
   }, [])
 
-  const pollReport = useCallback(async () => {
-    try {
-      const s = await fetchReportStatus()
-      setReportExists(s.report_exists)
-      if (s.status === 'running') {
-        setTimeout(pollReport, 2000)
-      }
-    } catch { /* ignore */ }
-  }, [])
-
-  useEffect(() => { pollReport() }, [pollReport])
-
   return (
     <div className="public-brand" style={{ minHeight: '100vh', background: 'var(--bg)', fontFamily: 'var(--sans)' }}>
       <Header
         tab={tab}
         onTab={setTab}
         status={overallStatus}
-        reportExists={reportExists}
         onRefresh={() => setRefreshKey(k => k + 1)}
-        showOpsTabs={true}
-        showOrganizationsTab={false}
-        showUsersTab={false}
       />
       {/* 56px header + 44px tab bar = 100px offset */}
       <div style={{ paddingTop: 100 }}>
         <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 48px' }}>
-          {tab === 'overview'     && <PublicOverviewPage   refreshKey={refreshKey} />}
-          {tab === 'evidence'     && <PublicEvidencePage   refreshKey={refreshKey} />}
-          {tab === 'health'       && <PublicHealthPage     refreshKey={refreshKey} />}
-          {tab === 'ecosystem'    && <PublicEcosystemPage  refreshKey={refreshKey} />}
-          {tab === 'llms'         && <LlmPage           refreshKey={refreshKey} />}
-          {tab === 'cloud'        && <CloudPage         refreshKey={refreshKey} />}
-          {tab === 'integrations' && <IntegrationsPage />}
+          {tab === 'overview'  && <PublicOverviewPage  refreshKey={refreshKey} />}
+          {tab === 'evidence'  && <PublicEvidencePage  refreshKey={refreshKey} />}
+          {tab === 'ecosystem' && <PublicEcosystemPage refreshKey={refreshKey} />}
         </div>
       </div>
     </div>

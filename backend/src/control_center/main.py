@@ -191,12 +191,12 @@ app.include_router(known_issues_router)
 #     public route into the admin gate along with /knowledge-base; the
 #     2026-09-02 investigation confirmed that was an accidental
 #     over-gate, reverted here.
-#   - GET /knowledge-base stays gated -- it returns absolute internal
-#     filesystem paths (pubmed_root/index_root) and is not part of the
-#     public surface (no ControlApp page calls it). Its
-#     platform.manage_infra check now lives directly on the route in
-#     routes_llm.py, the same per-route pattern routes_cron.py uses for
-#     its two gated GET routes.
+#   - GET /knowledge-base returns its aggregate counts (abstracts,
+#     indexed domains, index size, re-indexing readiness) to everyone --
+#     the public Overview's Literature AI section reads it -- while the
+#     absolute pubmed_root/index_root paths stay behind
+#     platform.manage_infra (checked in routes_llm.py). Its filesystem
+#     scan is cached (KNOWLEDGE_BASE_CACHE_SECONDS).
 app.include_router(llm_router)
 app.include_router(infra_router)
 app.include_router(cloud_router)
@@ -1102,7 +1102,7 @@ async def _public_cache_header(request, call_next):
 
 
 _PUBLIC_CACHEABLE_PATHS = frozenset({
-    "/usage", "/reference", "/showcase", "/uptime", "/dashboard/summary", "/report/public-stats",
+    "/usage", "/reference", "/showcase", "/uptime", "/dashboard/summary", "/report/public-stats", "/knowledge-base",
     "/gpu", "/celery", "/database", "/image-freshness", "/gateway-traffic", "/activity", "/integrity",
 })
 

@@ -210,3 +210,25 @@ severity, status, area and opened date, never the description. New issues
 publish one with the "Show on public dashboard" checkbox or the per-issue
 "Public" toggle on the Known Issues page. Callers holding
 `platform.manage_content` or `platform.manage_infra` see every issue.
+
+### Public page set and URLs (2026-09-25)
+
+The public build has three tabs, each at its own URL so it can be linked
+directly: `/overview` (also `/`), `/evidence` and `/ecosystem`. Back and
+Forward move between tabs, and the page title follows the tab. nginx's
+`location /` SPA fallback serves these paths; none collides with an
+`api-proxy.conf` prefix. The former Health, LLMs, Cloud and Integrations
+tabs were removed from the public build (their content was operator
+detail or already on the Overview) and remain in AdminApp.
+
+### Literature AI progress
+
+`GET /knowledge-base` now also returns `readiness`: for each domain index
+it reads only the FAISS header (type code, then dimension) and checks for
+a PMID map, and reports how many domains can be queried at the configured
+embedding dimension (`RAG_EMBEDDING_DIM`, default 1024) -- counts only,
+no domain names or paths. The filesystem scan behind this route counts
+tens of millions of abstract files, so it is cached for
+`KNOWLEDGE_BASE_CACHE_SECONDS` (default 3600); the RAG health check stays
+live. The Overview shows this as "Re-indexing: X of Y domains ready to
+query".
