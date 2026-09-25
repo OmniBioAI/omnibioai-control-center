@@ -1,4 +1,4 @@
-export type Tab = 'health' | 'ecosystem' | 'llms' | 'cloud' | 'integrations' | 'organizations' | 'users'
+export type Tab = 'overview' | 'health' | 'ecosystem' | 'llms' | 'cloud' | 'integrations' | 'organizations' | 'users'
 
 interface Props {
   tab: Tab
@@ -22,8 +22,6 @@ interface Props {
   showUsersTab?: boolean
 }
 
-const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
-
 // Public Read-Only Control Center architecture: Docker/Config are gone
 // from this list -- both call backend routes gated behind
 // platform.manage_infra (docker_router/config_router in main.py), and
@@ -34,6 +32,7 @@ const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
 // auth (booleans/labels only, see that module's own comment), it just
 // wasn't in ControlApp's tab set before this PR.
 const OPS_TABS: { id: Tab; label: string }[] = [
+  { id: 'overview',     label: 'Overview' },
   { id: 'health',       label: 'Health Dashboard' },
   { id: 'ecosystem',    label: 'Ecosystem Report' },
   { id: 'llms',         label: 'LLMs' },
@@ -122,22 +121,22 @@ export default function Header({
               Report" button (POST /report/generate, platform.manage_content
               -gated) is gone -- this build has no way to satisfy that gate
               and no mutation belongs in an always-anonymous surface. "View
-              Report" below stays: it's a plain GET link to already-generated,
-              already-public report content. */}
+              Report" opens the Ecosystem Report tab: the previous link to
+              `${BASE}/` landed on nginx's SPA fallback, i.e. reopened this
+              same dashboard in a new tab (the backend's own GET / is
+              platform.manage_infra-gated). */}
           {reportExists && (
-            <a
-              href={`${BASE}/`}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={() => onTab('ecosystem')}
               style={{
                 fontSize: 13, fontWeight: 600, padding: '7px 15px',
                 border: '1px solid rgba(0,229,160,0.3)', borderRadius: 8,
                 background: 'rgba(0,229,160,0.08)', color: '#00e5a0',
-                display: 'inline-flex', alignItems: 'center', gap: 4,
+                display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
               }}
             >
-              View Report ↗
-            </a>
+              View Report
+            </button>
           )}
         </div>
       </div>

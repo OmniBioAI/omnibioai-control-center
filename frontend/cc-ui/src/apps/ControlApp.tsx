@@ -3,6 +3,7 @@ import { fetchHealth, fetchReportStatus } from '../api'
 import { clearToken } from '../auth'
 import Header from '../components/Header'
 import type { Tab } from '../components/Header'
+import PublicOverviewPage from '../pages/PublicOverviewPage'
 import PublicHealthPage from '../pages/PublicHealthPage'
 import PublicEcosystemPage from '../pages/PublicEcosystemPage'
 import LlmPage from '../pages/LlmPage'
@@ -51,7 +52,7 @@ export default function ControlApp() {
 }
 
 function ControlDashboard() {
-  const [tab, setTab] = useState<Tab>('health')
+  const [tab, setTab] = useState<Tab>('overview')
   const [overallStatus, setOverallStatus] = useState<'UP' | 'WARN' | 'DOWN' | null>(null)
   const [reportExists, setReportExists] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -110,6 +111,7 @@ function ControlDashboard() {
       {/* 56px header + 44px tab bar = 100px offset */}
       <div style={{ paddingTop: 100 }}>
         <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 48px' }}>
+          {tab === 'overview'     && <PublicOverviewPage   refreshKey={refreshKey} />}
           {tab === 'health'       && <PublicHealthPage     refreshKey={refreshKey} />}
           {tab === 'ecosystem'    && <PublicEcosystemPage  refreshKey={refreshKey} />}
           {tab === 'llms'         && <LlmPage           refreshKey={refreshKey} />}

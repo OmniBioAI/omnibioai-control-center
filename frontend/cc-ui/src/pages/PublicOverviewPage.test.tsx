@@ -1,0 +1,143 @@
+import { render, screen, waitFor, within } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import PublicOverviewPage from './PublicOverviewPage'
+
+// recharts' ResponsiveContainer measures its parent, which jsdom can't do.
+vi.mock('recharts', async (orig) => {
+  const actual = await orig<typeof import('recharts')>()
+  return { ...actual, ResponsiveContainer: ({ children }: { children: unknown }) => <div>{children as never}</div> }
+})
+
+vi.mock('../api', () => ({ fetchHealth: vi.fn() }))
+
+vi.mock('../publicOverview', async (orig) => {
+  const actual = await orig<typeof import('../publicOverview')>()
+  return {
+    ...actual,
+    fetchPublicStats: vi.fn(),
+    fetchUsage: vi.fn(),
+    fetchAiAndWorkflow: vi.fn(),
+    fetchReferenceStatus: vi.fn(),
+    fetchBackends: vi.fn(),
+    fetchOpenIssues: vi.fn(),
+  }
+})
+
+async function mocks() {
+  const api = await import('../api')
+  const po = await import('../publicOverview')
+  vi.mocked(api.fetchHealth).mockResolvedValue({ status: 'ok' } as never)
+  vi.mocked(po.fetchPublicStats).mockResolvedValue({
+    generated_at: '2026-09-24T10:00:00Z', total_lines: 5_123_456, total_files: 40_000,
+    ecosystem_coverage_percent: 90.1, repos_measured: 33,
+  })
+  vi.mocked(po.fetchUsage).mockResolvedValue({
+    runs_by_day: [{ date: '2026-09-23', count: 4 }, { date: '2026-09-24', count: 6 }],
+    top_plugins: [{ name: 'deseq2', runs_30d: 7 }, { name: 'seurat', runs_30d: 3 }],
+    workflow_success_rate_pct: 92.5,
+    success_rate_caveat: 'computed across individual plugin-step runs',
+  })
+  vi.mocked(po.fetchAiAndWorkflow).mockResolvedValue({
+    ai_platform: { registered_models: 12, active_models: 5, embedding_models: 2, llm_providers: 3 },
+    workflow: { workflow_bundles: 869 },
+  })
+  vi.mocked(po.fetchReferenceStatus).mockResolvedValue({
+    available: true,
+    organisms: [{ organism: 'human', assembly: 'GRCh38', indexes: { star: true, bwa: false } }],
+  })
+  vi.mocked(po.fetchBackends).mockResolvedValue({
+    local: { label: 'Local Docker', configured: true },
+    aws: { label: 'AWS Batch', configured: false },
+  })
+  vi.mocked(po.fetchOpenIssues).mockResolvedValue([
+    { id: '1', title: 'RAG re-indexing in progress', severity: 'medium', status: 'open', area: 'rag', opened_at: '2026-09-18T00:00:00Z' },
+  ])
+  return po
+}
+
+describe('PublicOverviewPage', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('renders every section from the public endpoints', async () => {
+    await mocks()
+    render(<PublicOverviewPage refreshKey={0} />)
+    await waitFor(() => expect(screen.getByText('Control center online')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('5,123,456')).toBeInTheDocument())
+    expect(screen.getByText('Workbench plugins')).toBeInTheDocument()   // catalog snapshot
+    expect(screen.getByText('10')).toBeInTheDocument()                  // runs in 30 days
+    expect(screen.getByText('92.5%')).toBeInTheDocument()
+    expect(screen.getByText('deseq2')).toBeInTheDocument()
+    expect(screen.getByText('869')).toBeInTheDocument()                 // workflow bundles
+    expect(screen.getByText('GRCh38')).toBeInTheDocument()
+    expect(screen.getByText('STAR')).toBeInTheDocument()
+    expect(screen.getByText('Local Docker · configured')).toBeInTheDocument()
+    expect(screen.getByText('AWS Batch · not configured')).toBeInTheDocument()
+    expect(screen.getByText('RAG re-indexing in progress')).toBeInTheDocument()
+  })
+
+  it('does not show a coverage percentage', async () => {
+    await mocks()
+    render(<PublicOverviewPage refreshKey={0} />)
+    await waitFor(() => expect(screen.getByText('5,123,456')).toBeInTheDocument())
+    expect(screen.queryByText(/90\.1/)).not.toBeInTheDocument()
+  })
+
+  it('isolates a failing section instead of blanking the page', async () => {
+    const po = await mocks()
+    vi.mocked(po.fetchUsage).mockRejectedValue(new Error('/usage 500'))
+    render(<PublicOverviewPage refreshKey={0} />)
+    await waitFor(() => expect(screen.getByText('Usage data is unavailable right now.')).toBeInTheDocument())
+    expect(await screen.findByText('869')).toBeInTheDocument()
+  })
+
+  it('shows honest empty states', async () => {
+    const po = await mocks()
+    const api = await import('../api')
+    vi.mocked(api.fetchHealth).mockRejectedValue(new Error('down'))
+    vi.mocked(po.fetchOpenIssues).mockResolvedValue([])
+    vi.mocked(po.fetchReferenceStatus).mockResolvedValue({ available: true, organisms: [] })
+    vi.mocked(po.fetchPublicStats).mockResolvedValue({
+      generated_at: null, total_lines: null, total_files: null, ecosystem_coverage_percent: null, repos_measured: 0,
+    })
+    render(<PublicOverviewPage refreshKey={0} />)
+    await waitFor(() => expect(screen.getByText('Control center unreachable')).toBeInTheDocument())
+    expect(await screen.findByText('No open known issues.')).toBeInTheDocument()
+    expect(screen.getByText('No reference genomes installed yet.')).toBeInTheDocument()
+    expect(screen.getByText('Codebase statistics is unavailable right now.')).toBeInTheDocument()
+  })
+
+  it('labels the catalog figures as a dated, registered-in-source snapshot', async () => {
+    await mocks()
+    render(<PublicOverviewPage refreshKey={0} />)
+    const section = screen.getByText('Platform at a glance').closest('section') as HTMLElement
+    expect(within(section).getByText(/snapshot 2026-09-19/)).toBeInTheDocument()
+    expect(within(section).getByText(/not the same as tested or deployed/)).toBeInTheDocument()
+  })
+})
+
+describe('publicOverview fetchers', () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  it('never sends an Authorization header, and hides resolved issues and descriptions', async () => {
+    const { fetchOpenIssues } = await vi.importActual<typeof import('../publicOverview')>('../publicOverview')
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ issues: [
+        { id: 'a', title: 'Open one', description: 'internal notes', severity: 'low', status: 'open', area: null, opened_at: null },
+        { id: 'b', title: 'Fixed one', description: null, severity: 'high', status: 'resolved', area: null, opened_at: null },
+      ] }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const issues = await fetchOpenIssues()
+    expect(issues).toEqual([{ id: 'a', title: 'Open one', severity: 'low', status: 'open', area: null, opened_at: null }])
+    expect(fetchMock).toHaveBeenCalledWith('/known-issues')
+    vi.unstubAllGlobals()
+  })
+
+  it('rejects on a non-OK response', async () => {
+    const { fetchUsage } = await vi.importActual<typeof import('../publicOverview')>('../publicOverview')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }))
+    await expect(fetchUsage()).rejects.toThrow('/usage 503')
+    vi.unstubAllGlobals()
+  })
+})
