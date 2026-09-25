@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { KnownIssue } from '../api'
-import { fetchKnownIssues, createKnownIssue, updateKnownIssueStatus, deleteKnownIssue } from '../api'
+import { fetchKnownIssues, createKnownIssue, updateKnownIssueStatus, deleteKnownIssue, setKnownIssuePublic } from '../api'
 import { hasAdminAccess } from '../auth'
 
 /**
@@ -45,6 +45,7 @@ export default function KnownIssuesPage() {
   const [description, setDescription] = useState('')
   const [area, setArea] = useState('')
   const [severity, setSeverity] = useState('medium')
+  const [isPublic, setIsPublic] = useState(false)
   const canManage = hasAdminAccess()
 
   const load = useCallback(async () => {
@@ -62,8 +63,8 @@ export default function KnownIssuesPage() {
   const handleCreate = async () => {
     if (!title.trim()) { alert('Title is required'); return }
     try {
-      await createKnownIssue({ title, description, area, severity })
-      setTitle(''); setDescription(''); setArea('')
+      await createKnownIssue({ title, description, area, severity, public: isPublic })
+      setTitle(''); setDescription(''); setArea(''); setIsPublic(false)
       load()
     } catch (e) {
       alert(`Failed to create issue: ${String(e)}`)
@@ -72,6 +73,10 @@ export default function KnownIssuesPage() {
 
   const handleStatus = async (id: string, status: string) => {
     try { await updateKnownIssueStatus(id, status); load() } catch (e) { alert(`Failed to update issue: ${String(e)}`) }
+  }
+
+  const handlePublic = async (id: string, value: boolean) => {
+    try { await setKnownIssuePublic(id, value); load() } catch (e) { alert(`Failed to update issue: ${String(e)}`) }
   }
 
   const handleDelete = async (id: string) => {
@@ -83,7 +88,10 @@ export default function KnownIssuesPage() {
     <div>
       <div style={{ marginBottom: 24, paddingBottom: 20, borderBottom: '1px solid var(--border)' }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Known Issues</h1>
-        <p style={{ fontSize: 13, color: 'var(--muted)' }}>Tracked platform issues, visible to everyone.</p>
+        <p style={{ fontSize: 13, color: 'var(--muted)' }}>
+          Tracked platform issues. Only issues marked public appear on the public dashboard
+          (control.omnibioai.org), and there without their description.
+        </p>
       </div>
 
       {error && (
@@ -112,6 +120,10 @@ export default function KnownIssuesPage() {
                 <option value="high">high</option>
               </select>
             </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text2)' }}>
+              <input type="checkbox" checked={isPublic} onChange={e => setIsPublic(e.target.checked)} />
+              Show on public dashboard (title, severity, area and date only)
+            </label>
             <button
               onClick={handleCreate}
               style={{
@@ -139,6 +151,7 @@ export default function KnownIssuesPage() {
             <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
               <Badge label={i.severity} cfg={SEV_COLORS[i.severity] ?? SEV_COLORS.low} />
               <Badge label={i.status} cfg={STATUS_COLORS[i.status] ?? STATUS_COLORS.open} />
+              {i.public && <Badge label="public" cfg={STATUS_COLORS.resolved} />}
             </div>
           </div>
           {i.description && <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>{i.description}</div>}
@@ -154,6 +167,10 @@ export default function KnownIssuesPage() {
                 <option value="acknowledged">acknowledged</option>
                 <option value="resolved">resolved</option>
               </select>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text2)' }}>
+                <input type="checkbox" checked={!!i.public} onChange={e => handlePublic(i.id, e.target.checked)} />
+                Public
+              </label>
               <button
                 onClick={() => handleDelete(i.id)}
                 style={{

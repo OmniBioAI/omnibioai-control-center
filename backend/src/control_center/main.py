@@ -71,7 +71,7 @@ from control_center.api.routes_known_issues import router as known_issues_router
 from control_center.api.routes_llm import router as llm_router
 from control_center.api.routes_reference import router as reference_router
 from control_center.api.routes_showcase import router as showcase_router
-from control_center.core import uptime
+from control_center.core import public_cache, uptime
 from control_center.core.settings import load_settings
 from control_center.api.routes_regression_health import router as regression_health_router
 from control_center.api.routes_security_posture import router as security_posture_router
@@ -1083,6 +1083,28 @@ def report_public_stats() -> JSONResponse:
     if not isinstance(raw, dict):
         return JSONResponse(dict(_PUBLIC_STATS_NULL))
     return JSONResponse(_build_public_stats(raw))
+
+
+@app.middleware("http")
+async def _public_cache_header(request, call_next):
+    """Let browsers and the CDN reuse anonymous public GET responses for as
+    long as the server-side cache does (core/public_cache.py); responses to
+    a caller with a token stay private and uncached."""
+    response = await call_next(request)
+    if (request.method == "GET" and request.url.path in _PUBLIC_CACHEABLE_PATHS
+            and "authorization" not in request.headers and response.status_code == 200
+            and public_cache.ttl_seconds() > 0):
+        response.headers["Cache-Control"] = f"public, max-age={int(public_cache.ttl_seconds())}"
+        response.headers["Vary"] = "Authorization"
+    elif "authorization" in request.headers:
+        response.headers.setdefault("Cache-Control", "private, no-store")
+    return response
+
+
+_PUBLIC_CACHEABLE_PATHS = frozenset({
+    "/usage", "/reference", "/showcase", "/uptime", "/dashboard/summary", "/report/public-stats",
+    "/gpu", "/celery", "/database", "/image-freshness", "/gateway-traffic", "/activity", "/integrity",
+})
 
 
 # ==============================================================================

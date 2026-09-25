@@ -682,6 +682,9 @@ export interface KnownIssue {
   status: 'open' | 'acknowledged' | 'resolved' | string
   area: string | null
   opened_at: string | null
+  /** Shown on the public control.omnibioai.org dashboard. Absent on
+   * entries written before the flag existed, which count as private. */
+  public?: boolean
 }
 
 export interface KnownIssuesResponse {
@@ -699,6 +702,7 @@ export interface KnownIssueInput {
   description?: string
   severity?: string
   area?: string
+  public?: boolean
 }
 
 export async function createKnownIssue(body: KnownIssueInput): Promise<KnownIssue> {
@@ -708,6 +712,16 @@ export async function createKnownIssue(body: KnownIssueInput): Promise<KnownIssu
     body: JSON.stringify(body),
   })
   if (!r.ok) throw new Error(`/known-issues ${r.status}`)
+  return r.json()
+}
+
+export async function setKnownIssuePublic(id: string, isPublic: boolean): Promise<KnownIssue> {
+  const r = await apiFetch(`${BASE}/known-issues/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ public: isPublic }),
+  })
+  if (!r.ok) throw new Error(`/known-issues/${id} ${r.status}`)
   return r.json()
 }
 

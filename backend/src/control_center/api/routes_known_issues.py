@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Header, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -14,9 +14,10 @@ from control_center.checks.known_issues import (
     create_known_issue,
     delete_known_issue,
     list_known_issues,
+    public_issues,
     update_known_issue,
 )
-from control_center.core.auth import require_permission
+from control_center.core.auth import has_permission, require_permission
 
 router = APIRouter()
 
@@ -33,6 +34,7 @@ class KnownIssueCreate(BaseModel):
     status: Optional[str] = None
     area: Optional[str] = None
     opened_at: Optional[str] = None
+    public: Optional[bool] = None
 
 
 class KnownIssueUpdate(BaseModel):
@@ -42,16 +44,22 @@ class KnownIssueUpdate(BaseModel):
     status: Optional[str] = None
     area: Optional[str] = None
     opened_at: Optional[str] = None
+    public: Optional[bool] = None
 
 
 @router.get("/known-issues")
-def known_issues_list() -> JSONResponse:
-    """Read-only, open to everyone."""
+def known_issues_list(authorization: Optional[str] = Header(default=None)) -> JSONResponse:
+    """Readable without a login, but anonymous callers (the public
+    dashboard) see only issues an editor marked public, without their
+    description. Operators and content editors see everything."""
+    editor = (has_permission(authorization, "platform.manage_content")
+              or has_permission(authorization, "platform.manage_infra"))
     try:
         issues = list_known_issues(_issues_path())
     except KnownIssueError as e:
-        return JSONResponse({"error": str(e)}, status_code=e.status_code)
-    return JSONResponse({"issues": issues})
+        # The message names the storage file -- operators only.
+        return JSONResponse({"error": str(e) if editor else "known issues unavailable"}, status_code=e.status_code)
+    return JSONResponse({"issues": issues if editor else public_issues(issues)})
 
 
 @router.post("/known-issues")

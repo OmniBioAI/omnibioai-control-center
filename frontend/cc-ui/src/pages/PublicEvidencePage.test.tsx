@@ -65,12 +65,25 @@ describe('PublicEvidencePage', () => {
     expect(screen.getByText(/Reviewed 2026-09-25/)).toBeInTheDocument()
   })
 
-  it('shows "being prepared" for every empty section instead of placeholder numbers', async () => {
+  it('renders only sections that have content -- no placeholder cards', async () => {
+    const po = await import('../publicOverview')
+    vi.mocked(po.fetchShowcase).mockResolvedValue({ ...EMPTY, publications: FULL.publications, limitations: FULL.limitations })
+    render(<PublicEvidencePage refreshKey={0} />)
+    expect(await screen.findByText('Publications')).toBeInTheDocument()
+    expect(screen.getByText('Known limitations')).toBeInTheDocument()
+    for (const hidden of ['Benchmarks', 'Example analyses', 'Tool and database versions', 'Continuous integration',
+      'End-to-end certification', 'Test runs', 'Test coverage by repository', 'Security controls', 'Data handling', 'Releases']) {
+      expect(screen.queryByText(hidden)).not.toBeInTheDocument()
+    }
+    expect(screen.queryByText(/being prepared/)).not.toBeInTheDocument()
+  })
+
+  it('shows one short note when nothing is published yet', async () => {
     const po = await import('../publicOverview')
     vi.mocked(po.fetchShowcase).mockResolvedValue(EMPTY)
     render(<PublicEvidencePage refreshKey={0} />)
-    expect(await screen.findByText(/Benchmark results — being prepared/)).toBeInTheDocument()
-    expect(screen.getAllByText(/— being prepared/)).toHaveLength(12)
+    expect(await screen.findByText('Evidence is being prepared and will appear here as it is published.')).toBeInTheDocument()
+    expect(screen.queryByText('Benchmarks')).not.toBeInTheDocument()
   })
 
   it('flags unavailable curated content and a failed request', async () => {

@@ -15,7 +15,7 @@ from control_center.checks.image_freshness import get_image_freshness
 from control_center.checks.integrity import run_integrity_checks
 from control_center.checks.license_status import get_license_status
 from control_center.checks.usage_status import get_usage_status
-from control_center.core import public_view
+from control_center.core import public_cache, public_view
 from control_center.core.auth import infra_viewer, require_permission
 from control_center.core.settings import load_settings
 
@@ -38,26 +38,30 @@ _require_manage_infra = require_permission("platform.manage_infra")
 
 @router.get("/gpu")
 def gpu(full: bool = Depends(infra_viewer)) -> JSONResponse:
-    data = get_gpu_status()
-    return JSONResponse(data if full else public_view.public_gpu(data))
+    if full:
+        return JSONResponse(get_gpu_status())
+    return JSONResponse(public_cache.cached("gpu", lambda: public_view.public_gpu(get_gpu_status())))
 
 
 @router.get("/celery")
 def celery_status(full: bool = Depends(infra_viewer)) -> JSONResponse:
-    data = get_celery_status()
-    return JSONResponse(data if full else public_view.public_celery(data))
+    if full:
+        return JSONResponse(get_celery_status())
+    return JSONResponse(public_cache.cached("celery_status", lambda: public_view.public_celery(get_celery_status())))
 
 
 @router.get("/database")
 def database_status(full: bool = Depends(infra_viewer)) -> JSONResponse:
-    data = get_database_status()
-    return JSONResponse(data if full else public_view.public_database(data))
+    if full:
+        return JSONResponse(get_database_status())
+    return JSONResponse(public_cache.cached("database_status", lambda: public_view.public_database(get_database_status())))
 
 
 @router.get("/image-freshness")
 def image_freshness(full: bool = Depends(infra_viewer)) -> JSONResponse:
-    data = get_image_freshness()
-    return JSONResponse(data if full else public_view.public_image_freshness(data))
+    if full:
+        return JSONResponse(get_image_freshness())
+    return JSONResponse(public_cache.cached("image_freshness", lambda: public_view.public_image_freshness(get_image_freshness())))
 
 
 @router.get("/license")
@@ -67,13 +71,15 @@ def license_status(_admin: dict = Depends(_require_manage_infra)) -> JSONRespons
 
 @router.get("/usage")
 def usage_status() -> JSONResponse:
-    return JSONResponse(get_usage_status())
+    # Aggregates only, same for every caller -- cached (it scans run dirs).
+    return JSONResponse(public_cache.cached("usage", get_usage_status))
 
 
 @router.get("/gateway-traffic")
 def gateway_traffic(full: bool = Depends(infra_viewer)) -> JSONResponse:
-    data = get_gateway_traffic()
-    return JSONResponse(data if full else public_view.public_gateway_traffic(data))
+    if full:
+        return JSONResponse(get_gateway_traffic())
+    return JSONResponse(public_cache.cached("gateway_traffic", lambda: public_view.public_gateway_traffic(get_gateway_traffic())))
 
 
 @router.get("/audit-trail")
@@ -83,8 +89,9 @@ def audit_trail(_admin: dict = Depends(_require_manage_infra)) -> JSONResponse:
 
 @router.get("/activity")
 def activity(full: bool = Depends(infra_viewer)) -> JSONResponse:
-    data = get_activity_status()
-    return JSONResponse(data if full else public_view.public_activity(data))
+    if full:
+        return JSONResponse(get_activity_status())
+    return JSONResponse(public_cache.cached("activity", lambda: public_view.public_activity(get_activity_status())))
 
 
 @router.get("/integrity")
@@ -94,8 +101,12 @@ def integrity(full: bool = Depends(infra_viewer)) -> JSONResponse:
     except FileNotFoundError as e:
         # The message names the settings path -- operators only.
         return JSONResponse({"error": str(e) if full else "integrity checks unavailable"}, status_code=500)
-    checks = run_integrity_checks(settings)
-    return JSONResponse({
+    if full:
+        return JSONResponse({
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "checks": run_integrity_checks(settings),
+        })
+    return JSONResponse(public_cache.cached("integrity", lambda: {
         "checked_at": datetime.now(timezone.utc).isoformat(),
-        **({"checks": checks} if full else public_view.public_integrity(checks)),
-    })
+        **public_view.public_integrity(run_integrity_checks(settings)),
+    }))

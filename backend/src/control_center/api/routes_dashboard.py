@@ -91,6 +91,7 @@ from fastapi import APIRouter, Header
 from fastapi.responses import JSONResponse
 
 from control_center.api.routes_docker import get_containers_status
+from control_center.core import public_cache
 from control_center.api.routes_llm import get_llms
 from control_center.checks.gpu import get_gpu_status
 from control_center.checks.known_issues import KNOWN_ISSUES_PATH_DEFAULT, list_known_issues
@@ -485,6 +486,15 @@ def _infra_and_ops_section() -> tuple[dict, dict]:
 
 @router.get("/dashboard/summary")
 async def dashboard_summary(authorization: Optional[str] = Header(default=None)) -> JSONResponse:
+    # The anonymous response is identical for every visitor of the public
+    # dashboard -- cache it briefly (core/public_cache.py). Any caller with
+    # a token gets a fresh, caller-specific response.
+    if not authorization:
+        return JSONResponse(await public_cache.cached_async("dashboard_summary", lambda: _summary(None)))
+    return JSONResponse(await _summary(authorization))
+
+
+async def _summary(authorization: Optional[str]) -> dict[str, Any]:
     async with httpx.AsyncClient() as client:
         identity, ai_platform, knowledge, workflow, business = await asyncio.gather(
             _identity_section(client, authorization),
@@ -503,7 +513,7 @@ async def dashboard_summary(authorization: Optional[str] = Header(default=None))
         )}
         operations = {"health": None, "alerts": None, "active_services": None, "uptime": None}
 
-    return JSONResponse({
+    return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "identity": identity,
         "ai_platform": ai_platform,
@@ -512,4 +522,4 @@ async def dashboard_summary(authorization: Optional[str] = Header(default=None))
         "infrastructure": infrastructure,
         "operations": operations,
         "business": business,
-    })
+    }

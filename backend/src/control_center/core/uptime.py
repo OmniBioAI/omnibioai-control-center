@@ -14,21 +14,28 @@ A sample counts as available unless its status is DOWN; WARN (responding
 but degraded) is recorded separately so the page can say so. Days older
 than RETENTION_DAYS are pruned on every write.
 
+Single sampler: every worker process starts run_forever(), but only the
+one holding an exclusive OS lock on `<store>.sampler.lock` samples; the
+others retry each interval and take over if that process exits. Reads and
+writes of the store are serialised across processes by `<store>.lock`.
+
 Public exposure: summarize() only returns services named in the showcase
 config's `uptime_services` allowlist, under their public label -- never
 the internal service name, target URL, or check message.
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 from control_center.core.runner import check_service
 
@@ -45,6 +52,38 @@ def store_path() -> Path:
         return Path(configured)
     workspace = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
     return workspace / "work" / "out" / "uptime" / "uptime.json"
+
+
+def _sibling(suffix: str) -> Path:
+    path = store_path()
+    return path.with_name(path.name + suffix)
+
+
+@contextmanager
+def _store_lock() -> Iterator[None]:
+    """Exclusive lock across threads and processes for a store read-modify-write."""
+    path = _sibling(".lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _lock, open(path, "a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def try_become_sampler() -> IO[str] | None:
+    """Take the sampler role if no other process holds it. Returns the open
+    lock file (keep it open to keep the role) or None."""
+    path = _sibling(".sampler.lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, "a")  # noqa: SIM115 -- held open for the process lifetime
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    return handle
 
 
 def _load() -> dict[str, Any]:
@@ -78,7 +117,7 @@ def record(results: list[dict], today: date | None = None) -> None:
     """Add one sample per result to today's counts and prune old days."""
     day = (today or datetime.now(UTC).date()).isoformat()
     cutoff = ((today or datetime.now(UTC).date()) - timedelta(days=RETENTION_DAYS)).isoformat()
-    with _lock:
+    with _store_lock():
         data = _load()
         services = data["services"]
         for result in results:
@@ -139,9 +178,14 @@ def sample_once(load_settings: Callable[[], Any]) -> None:
 
 def run_forever(load_settings: Callable[[], Any], sleep: Callable[[float], None] = time.sleep,
                 iterations: int | None = None) -> None:
-    """Background sampler loop. `iterations` bounds it for tests."""
+    """Background sampler loop, run by every process; only the lock holder
+    samples (see module docstring). `iterations` bounds it for tests."""
+    role: IO[str] | None = None
     count = 0
     while iterations is None or count < iterations:
-        sample_once(load_settings)
+        if role is None:
+            role = try_become_sampler()
+        if role is not None:
+            sample_once(load_settings)
         count += 1
         sleep(SAMPLE_SECONDS)

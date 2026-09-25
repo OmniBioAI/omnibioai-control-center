@@ -172,7 +172,8 @@ the deployed config directory after changing it.
 | `publications` | Publications |
 | `uptime_services` | Which services appear on the public uptime bars, and their public labels (not returned by `/showcase`) |
 
-Empty sections render as "being prepared", never as placeholder numbers.
+Sections without content are not rendered (no placeholder numbers); when
+nothing is published yet the tab shows a single "being prepared" note.
 `/showcase` also carries a counts-and-date summary of the promoted
 regression certification (`regression_health.py`): phase and capability
 statuses only, no findings text or evidence.
@@ -187,3 +188,25 @@ Set `UPTIME_SAMPLING=0` to disable the sampler. `GET /uptime` shows
 anonymous callers only the `uptime_services` allowlist under its public
 labels; a `platform.manage_infra` caller sees every recorded service.
 History starts accumulating when the sampler first runs.
+
+Every worker process starts the sampler loop, but only the process holding
+an exclusive lock on `<store>.sampler.lock` samples; the others retry each
+interval and take over if it exits, so scaling uvicorn workers or running
+with `--reload` does not double-count. Writes are serialised by
+`<store>.lock`.
+
+This history is measured from inside the deployment: if the whole host is
+down, nothing is sampled and those days show as "no data", not as an
+outage. Pair it with an external uptime monitor (for example UptimeRobot
+or Better Stack checking https://control.omnibioai.org/health) for alerting
+and an outside view.
+
+### Known issues on the public dashboard
+
+`GET /known-issues` is readable without a login, but anonymous callers get
+only issues whose `public` flag is `true` -- and only their id, title,
+severity, status, area and opened date, never the description. New issues
+(including ones filed by cron self-checks) are private by default; editors
+publish one with the "Show on public dashboard" checkbox or the per-issue
+"Public" toggle on the Known Issues page. Callers holding
+`platform.manage_content` or `platform.manage_infra` see every issue.
