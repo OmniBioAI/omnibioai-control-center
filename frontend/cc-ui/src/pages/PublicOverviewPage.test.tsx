@@ -21,6 +21,7 @@ vi.mock('../publicOverview', async (orig) => {
     fetchBackends: vi.fn(),
     fetchOpenIssues: vi.fn(),
     fetchUptime: vi.fn(),
+    fetchKnowledgeBase: vi.fn(),
   }
 })
 
@@ -50,6 +51,13 @@ async function mocks() {
     local: { label: 'Local Docker', configured: true },
     aws: { label: 'AWS Batch', configured: false },
   })
+  vi.mocked(po.fetchKnowledgeBase).mockResolvedValue({
+    rag_status: 'running',
+    abstracts: { total: 28_131_100, domains_with_abstracts: 282 },
+    faiss_index: { domains_indexed: 282, size_gb: 67.1 },
+    readiness: { expected_dimension: 1024, domains_total: 282, domains_ready: 7,
+      domains_by_dimension: { '768': 275, '1024': 7 }, missing_map: 4, unreadable: 0 },
+  })
   vi.mocked(po.fetchUptime).mockResolvedValue({
     window_days: 3, sample_seconds: 300,
     services: [{ label: 'Workbench', overall_pct: 99.8, days: [
@@ -71,7 +79,7 @@ describe('PublicOverviewPage', () => {
     await mocks()
     render(<PublicOverviewPage refreshKey={0} />)
     await waitFor(() => expect(screen.getByText('Control center online')).toBeInTheDocument())
-    await waitFor(() => expect(screen.getByText('5,123,456')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('5.1M')).toBeInTheDocument())
     expect(screen.getByText('Workbench plugins')).toBeInTheDocument()   // catalog snapshot
     expect(screen.getByText('10')).toBeInTheDocument()                  // runs in 30 days
     expect(screen.getByText('92.5%')).toBeInTheDocument()
@@ -102,10 +110,37 @@ describe('PublicOverviewPage', () => {
     expect(await screen.findByText('Uptime history is not being published yet.')).toBeInTheDocument()
   })
 
+  it('shows Literature AI re-indexing progress honestly', async () => {
+    await mocks()
+    render(<PublicOverviewPage refreshKey={0} />)
+    expect(await screen.findByText('Re-indexing: 7 of 282 domains ready to query')).toBeInTheDocument()
+    expect(screen.getByText('28.1M')).toBeInTheDocument()
+    expect(screen.getByText('28,131,100 abstracts')).toBeInTheDocument()
+    expect(screen.getByText('Online')).toBeInTheDocument()
+    const bar = screen.getByRole('progressbar', { name: 'Domains ready to query' })
+    expect(bar).toHaveAttribute('aria-valuenow', '7')
+    expect(screen.getByText('2%')).toBeInTheDocument()
+    expect(screen.getByText(/rebuilt with 1024-dimension embeddings/)).toBeInTheDocument()
+  })
+
+  it('says all domains are ready once re-indexing completes', async () => {
+    const po = await mocks()
+    vi.mocked(po.fetchKnowledgeBase).mockResolvedValue({
+      rag_status: 'degraded', abstracts: { total: 10, domains_with_abstracts: 2 },
+      faiss_index: { domains_indexed: 2, size_gb: 1 },
+      readiness: { expected_dimension: 1024, domains_total: 2, domains_ready: 2,
+        domains_by_dimension: { '1024': 2 }, missing_map: 0, unreadable: 0 },
+    })
+    render(<PublicOverviewPage refreshKey={0} />)
+    expect(await screen.findByText('All 2 domains ready to query')).toBeInTheDocument()
+    expect(screen.getByText('Degraded')).toBeInTheDocument()
+    expect(screen.queryByText(/rebuilt with/)).not.toBeInTheDocument()
+  })
+
   it('does not show a coverage percentage', async () => {
     await mocks()
     render(<PublicOverviewPage refreshKey={0} />)
-    await waitFor(() => expect(screen.getByText('5,123,456')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('5.1M')).toBeInTheDocument())
     expect(screen.queryByText(/90\.1/)).not.toBeInTheDocument()
   })
 

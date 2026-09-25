@@ -1,12 +1,14 @@
 from __future__ import annotations
 import asyncio
 import os
+import struct
 from pathlib import Path
 from typing import Optional
 import httpx
 from fastapi import APIRouter, Header
 from fastapi.responses import JSONResponse
 
+from control_center.core import public_cache
 from control_center.core.jwt_verify import TokenInvalid, verify_token
 
 router = APIRouter()
@@ -131,6 +133,62 @@ def _list_index_domains(index_root: Path) -> list[str]:
 
 INDEX_SCRATCH_PREFIXES = ("embedding_checkpoint",)
 
+# The embedding dimension the retrieval service is configured to query
+# (mixedbread-ai/mxbai-embed-large-v1 -> 1024 in the deployment config).
+# An index built at another dimension cannot be queried until re-embedded.
+EXPECTED_EMBEDDING_DIM = int(os.environ.get("RAG_EMBEDDING_DIM", "1024"))
+# Counting tens of millions of abstract files is slow; the counts change
+# slowly, so they are recomputed at most this often (0 disables caching
+# via PUBLIC_CACHE_SECONDS=0, see core/public_cache.py).
+KNOWLEDGE_BASE_CACHE_SECONDS = float(os.environ.get("KNOWLEDGE_BASE_CACHE_SECONDS", "3600"))
+
+
+def _faiss_dimension(path: Path) -> Optional[int]:
+    """Vector dimension from a FAISS index file header: 4-byte type code,
+    then the dimension as a little-endian int32 (verified against
+    faiss.write_index for flat and HNSW indexes). Reads 8 bytes only."""
+    try:
+        with open(path, "rb") as handle:
+            header = handle.read(8)
+    except OSError:
+        return None
+    if len(header) < 8:
+        return None
+    dim = struct.unpack("<i", header[4:8])[0]
+    return dim if dim > 0 else None
+
+
+def _index_readiness(index_root: Path, expected_dim: int) -> dict:
+    """How many domain indexes the retrieval service can query right now:
+    an index file at the configured dimension plus its PMID map. Counts
+    only -- no domain names or paths."""
+    by_dim: dict[str, int] = {}
+    total = ready = missing_map = unreadable = 0
+    for domain in sorted(_list_index_domains(index_root)):
+        total += 1
+        domain_dir = index_root / domain
+        candidates = sorted(domain_dir.glob("*.faiss"))
+        preferred = domain_dir / "pubmed_index.faiss"
+        index_file = preferred if preferred in candidates else (candidates[0] if candidates else None)
+        dim = _faiss_dimension(index_file) if index_file else None
+        if dim is None:
+            unreadable += 1
+            continue
+        by_dim[str(dim)] = by_dim.get(str(dim), 0) + 1
+        has_map = any(domain_dir.glob("*pmid_map*"))
+        if not has_map:
+            missing_map += 1
+        elif dim == expected_dim:
+            ready += 1
+    return {
+        "expected_dimension": expected_dim,
+        "domains_total": total,
+        "domains_ready": ready,
+        "domains_by_dimension": by_dim,
+        "missing_map": missing_map,
+        "unreadable": unreadable,
+    }
+
 
 def _index_size_bytes(index_root: Path) -> int:
     """
@@ -234,26 +292,38 @@ async def get_knowledge_base(
         except Exception:
             return "unreachable"
 
-    (abstract_count, domains_with_abstracts), indexed_domains, index_size_bytes, rag_status = (
-        await asyncio.gather(
-            count_abstracts(),
-            list_indexed_domains(),
-            get_index_size(),
-            check_rag(),
+    async def get_readiness() -> Optional[dict]:
+        if index_root and index_root.exists():
+            return await loop.run_in_executor(None, _index_readiness, index_root, EXPECTED_EMBEDDING_DIM)
+        return None
+
+    async def scan() -> dict:
+        (abstract_count, domains_with_abstracts), indexed_domains, index_size_bytes, readiness = (
+            await asyncio.gather(count_abstracts(), list_indexed_domains(), get_index_size(), get_readiness())
         )
+        return {
+            "abstracts": {
+                "total": abstract_count,
+                "domains_with_abstracts": len(domains_with_abstracts),
+            },
+            "faiss_index": {
+                "domains_indexed": len(indexed_domains),
+                "size_gb": round(index_size_bytes / 1e9, 2),
+                "domain_list": sorted(indexed_domains)[:20],
+            },
+            "readiness": readiness,
+        }
+
+    # The filesystem scan is the same for every caller and expensive, so it
+    # is cached (core/public_cache.py); the RAG health check stays live.
+    counts, rag_status = await asyncio.gather(
+        public_cache.cached_async("knowledge_base_scan", scan, ttl=KNOWLEDGE_BASE_CACHE_SECONDS),
+        check_rag(),
     )
 
     return JSONResponse({
         "rag_status": rag_status,
-        "abstracts": {
-            "total": abstract_count,
-            "domains_with_abstracts": len(domains_with_abstracts),
-        },
-        "faiss_index": {
-            "domains_indexed": len(indexed_domains),
-            "size_gb": round(index_size_bytes / 1e9, 2),
-            "domain_list": sorted(indexed_domains)[:20],
-        },
+        **counts,
         "pubmed_root": str(pubmed_root) if (pubmed_root and has_infra_permission) else None,
         "index_root": str(index_root) if (index_root and has_infra_permission) else None,
     })

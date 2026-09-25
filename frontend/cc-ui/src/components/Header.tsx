@@ -1,48 +1,22 @@
-export type Tab = 'overview' | 'evidence' | 'health' | 'ecosystem' | 'llms' | 'cloud' | 'integrations' | 'organizations' | 'users'
+// Header of the public control.omnibioai.org build (ControlApp is its only
+// consumer). Three tabs, each with its own URL (see ControlApp's
+// TAB_PATHS). The former Health/LLMs/Cloud/Integrations tabs were operator
+// detail and remain in AdminApp; Docker/Config were removed earlier
+// because their routes require platform.manage_infra.
+export type Tab = 'overview' | 'evidence' | 'ecosystem'
 
 interface Props {
   tab: Tab
   onTab: (t: Tab) => void
   status: 'UP' | 'WARN' | 'DOWN' | null
-  reportExists: boolean
   onRefresh: () => void
-  // Phase 3 PR2: the existing ops tabs stay admin-role-gated exactly as
-  // before; "Organizations" has a broader audience (org_admin/platform_admin
-  // too, not just the global "admin" role) -- see auth.ts's
-  // hasOrganizationsAccess(). Both default true so every existing caller
-  // of Header (App.test.tsx, any future one that doesn't pass these) keeps
-  // seeing today's full tab set unless explicitly told otherwise.
-  showOpsTabs?: boolean
-  showOrganizationsTab?: boolean
-  // Phase 3 PR3A: narrower than showOrganizationsTab -- platform_admin
-  // only (hasPlatformAdminAccess()), since org_admins have no capability
-  // in this cross-tenant user directory at all (their own org's members
-  // stay reachable via the existing, unrelated /orgs/{id}/members).
-  // Defaults true for the same "unaffected caller" reason as above.
-  showUsersTab?: boolean
 }
 
-// Public Read-Only Control Center architecture: Docker/Config are gone
-// from this list -- both call backend routes gated behind
-// platform.manage_infra (docker_router/config_router in main.py), and
-// this Header component's only consumer (ControlApp) is now a always-
-// anonymous build with no way to satisfy that gate. They remain fully
-// available, unchanged, through AdminApp's own Infrastructure section.
-// Integrations is new here -- routes_integrations.py has never required
-// auth (booleans/labels only, see that module's own comment), it just
-// wasn't in ControlApp's tab set before this PR.
-const OPS_TABS: { id: Tab; label: string }[] = [
-  { id: 'overview',     label: 'Overview' },
-  { id: 'evidence',     label: 'Evidence' },
-  { id: 'health',       label: 'Health Dashboard' },
-  { id: 'ecosystem',    label: 'Ecosystem Report' },
-  { id: 'llms',         label: 'LLMs' },
-  { id: 'cloud',        label: 'Cloud' },
-  { id: 'integrations', label: 'Integrations' },
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'overview',  label: 'Overview' },
+  { id: 'evidence',  label: 'Evidence' },
+  { id: 'ecosystem', label: 'Ecosystem Report' },
 ]
-
-const ORGANIZATIONS_TAB: { id: Tab; label: string } = { id: 'organizations', label: 'Organizations' }
-const USERS_TAB: { id: Tab; label: string } = { id: 'users', label: 'Users' }
 
 const STATUS_CFG = {
   // ControlApp derives this from GET /health on the control center itself,
@@ -52,16 +26,9 @@ const STATUS_CFG = {
   DOWN: { label: 'Control center unreachable',bg: 'rgba(239,68,68,0.12)',   color: '#ef4444', border: 'rgba(239,68,68,0.3)',   dot: '#ef4444', pulse: false },
 }
 
-export default function Header({
-  tab, onTab, status, reportExists, onRefresh,
-  showOpsTabs = true, showOrganizationsTab = true, showUsersTab = true,
-}: Props) {
+export default function Header({ tab, onTab, status, onRefresh }: Props) {
   const sc = status ? STATUS_CFG[status] : null
-  const tabs = [
-    ...(showOpsTabs ? OPS_TABS : []),
-    ...(showOrganizationsTab ? [ORGANIZATIONS_TAB] : []),
-    ...(showUsersTab ? [USERS_TAB] : []),
-  ]
+  const tabs = TABS
 
   return (
     <header style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100 }}>
@@ -121,27 +88,6 @@ export default function Header({
             ↺<span className="cc-btn-label">Refresh</span>
           </button>
 
-          {/* Public Read-Only Control Center architecture: the "Generate
-              Report" button (POST /report/generate, platform.manage_content
-              -gated) is gone -- this build has no way to satisfy that gate
-              and no mutation belongs in an always-anonymous surface. "View
-              Report" opens the Ecosystem Report tab: the previous link to
-              `${BASE}/` landed on nginx's SPA fallback, i.e. reopened this
-              same dashboard in a new tab (the backend's own GET / is
-              platform.manage_infra-gated). */}
-          {reportExists && (
-            <button
-              onClick={() => onTab('ecosystem')}
-              style={{
-                fontSize: 13, fontWeight: 600, padding: '7px 15px',
-                border: '1px solid var(--accent-dim2)', borderRadius: 8,
-                background: 'var(--accent-dim)', color: 'var(--accent)',
-                display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
-              }}
-            >
-              View Report
-            </button>
-          )}
         </div>
       </div>
 

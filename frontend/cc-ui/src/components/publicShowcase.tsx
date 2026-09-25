@@ -23,6 +23,10 @@ export function useLoad<T>(fn: () => Promise<T>, refreshKey: number): Load<T> {
   return value
 }
 
+/** 28131100 -> "28.1M"; pair with the exact figure in the tile's note. */
+export const fmtCompact = (n: number | null | undefined) =>
+  typeof n === 'number' ? new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n) : '—'
+
 export const fmt = (n: number | null | undefined) => (typeof n === 'number' ? n.toLocaleString('en-US') : '—')
 
 export function daysAgo(iso: string | null): string {
@@ -48,7 +52,12 @@ export function Grid({ min = 150, children }: { min?: number; children: ReactNod
 export function Tile({ label, value, note, href }: { label: string; value: string; note?: string; href?: string }) {
   const body = (
     <Card style={{ height: '100%' }}>
-      <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--accent)', lineHeight: 1 }}>{value}</div>
+      {/* Long values (e.g. 28,131,100) get a smaller size so they fit a
+          150px tile; overflowWrap is a last-resort guard. */}
+      <div style={{
+        fontSize: value.length > 7 ? 21 : 26, fontWeight: 700, color: 'var(--accent)', lineHeight: 1.1,
+        overflowWrap: 'anywhere',
+      }}>{value}</div>
       <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginTop: 8 }}>{label}</div>
       {note && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4, lineHeight: 1.45 }}>{note}</div>}
     </Card>

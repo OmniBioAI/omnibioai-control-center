@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import struct as _struct
 import tempfile
 import unittest
 from pathlib import Path
@@ -347,3 +348,77 @@ class TestGetKnowledgeBase(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Re-indexing readiness (public Literature AI progress)
+# ---------------------------------------------------------------------------
+
+
+def _write_faiss(path: Path, dim: int, fourcc: bytes = b"IxFI") -> None:
+    path.write_bytes(fourcc + _struct.pack("<i", dim) + _struct.pack("<q", 5) + b"\0" * 16)
+
+
+class TestIndexReadiness(unittest.TestCase):
+    """_index_readiness counts domains the retrieval service can query:
+    an index at the configured dimension plus a PMID map."""
+
+    def test_counts_ready_mismatched_missing_map_and_unreadable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name, dim, with_map in (("ready", 1024, True), ("old", 768, True), ("nomap", 1024, False)):
+                (root / name).mkdir()
+                _write_faiss(root / name / "pubmed_index.faiss", dim)
+                if with_map:
+                    (root / name / "pmid_map.json").write_text("[]")
+            (root / "other_name").mkdir()
+            _write_faiss(root / "other_name" / "custom.faiss", 1024)
+            (root / "other_name" / "pmid_map.json").write_text("[]")
+            (root / "broken").mkdir()
+            (root / "broken" / "pubmed_index.faiss").write_bytes(b"xx")
+            (root / "noindex").mkdir()
+            (root / "noindex" / "pmid_map.json").write_text("[]")
+            result = routes_llm._index_readiness(root, 1024)
+        self.assertEqual(result, {
+            "expected_dimension": 1024,
+            "domains_total": 6,
+            "domains_ready": 2,
+            "domains_by_dimension": {"1024": 3, "768": 1},
+            "missing_map": 1,
+            "unreadable": 2,
+        })
+
+    def test_faiss_dimension_edge_cases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            zero = Path(tmp) / "zero.faiss"
+            _write_faiss(zero, 0)
+            self.assertIsNone(routes_llm._faiss_dimension(zero))
+            self.assertIsNone(routes_llm._faiss_dimension(Path(tmp) / "missing.faiss"))
+
+
+class TestKnowledgeBaseReadinessAndCache(unittest.TestCase):
+    def test_readiness_in_response_and_scan_cached(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            index_root = Path(tmp) / "data" / "PubMed" / "Index"
+            (index_root / "cancer").mkdir(parents=True)
+            _write_faiss(index_root / "cancer" / "pubmed_index.faiss", 1024)
+            (index_root / "cancer" / "pmid_map.json").write_text("[]")
+            env = {"WORKSPACE_ROOT": tmp, "PUBLIC_CACHE_SECONDS": "60"}
+            with patch.dict(os.environ, env), \
+                    patch.object(routes_llm.httpx, "AsyncClient", side_effect=Exception("no rag")):
+                from control_center.core import public_cache
+                public_cache.clear()
+                anonymous = TestClient(app)  # the public dashboard sends no token
+                first = anonymous.get("/knowledge-base")
+                with patch.object(routes_llm, "_index_readiness") as readiness:
+                    second = client.get("/knowledge-base").json()
+                readiness.assert_not_called()
+                public_cache.clear()
+        data = first.json()
+        self.assertEqual(data["readiness"]["domains_ready"], 1)
+        self.assertEqual(data["readiness"]["expected_dimension"], 1024)
+        self.assertEqual(second["readiness"], data["readiness"])
+        self.assertEqual(data["rag_status"], "unreachable")
+        self.assertEqual(first.headers["cache-control"], "public, max-age=60")
+        self.assertIsNone(data["index_root"])        # path stays operator-only
+        self.assertIsNotNone(second["index_root"])
