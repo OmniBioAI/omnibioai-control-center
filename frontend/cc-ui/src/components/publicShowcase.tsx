@@ -78,16 +78,6 @@ export function Badge({ ok, children }: { ok: boolean; children: ReactNode }) {
   )
 }
 
-export function ComingSoon({ what }: { what: string }) {
-  return (
-    <Card>
-      <span style={{ fontSize: 13, color: 'var(--muted)' }}>
-        {what} — being prepared. This section fills in as soon as the results are published.
-      </span>
-    </Card>
-  )
-}
-
 export function ExtLink({ href, children }: { href: string; children: ReactNode }) {
   return <a href={href} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)', textDecoration: 'none' }}>{children}</a>
 }

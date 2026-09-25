@@ -157,7 +157,7 @@ class TestKnownIssuesRoutes(unittest.TestCase):
         self.assertEqual(data["title"], "New bug")
         self.assertIn("id", data)
 
-        get_resp = client.get("/known-issues")
+        get_resp = client.get("/known-issues", headers=_admin_headers())
         self.assertEqual(len(get_resp.json()["issues"]), 1)
 
     def test_put_requires_admin_401(self) -> None:
@@ -212,7 +212,7 @@ class TestKnownIssuesRoutes(unittest.TestCase):
         self._write([{"id": "abc", "title": "x"}])
         resp = client.delete("/known-issues/abc", headers=_admin_headers())
         self.assertEqual(resp.status_code, 204)
-        get_resp = client.get("/known-issues")
+        get_resp = client.get("/known-issues", headers=_admin_headers())
         self.assertEqual(get_resp.json()["issues"], [])
 
     def test_delete_unknown_id_returns_404(self) -> None:
@@ -228,11 +228,48 @@ class TestKnownIssuesRoutes(unittest.TestCase):
             "title": "GPU issue", "description": "d", "severity": "medium",
             "opened_at": "2026-07-24", "status": "acknowledged", "area": "GPU / Infra",
         }])
-        data = client.get("/known-issues").json()
+        data = client.get("/known-issues", headers=_admin_headers()).json()
         issue = data["issues"][0]
         self.assertIn("id", issue)
         self.assertEqual(issue["title"], "GPU issue")
         self.assertEqual(issue["area"], "GPU / Infra")
+
+
+    def test_anonymous_sees_only_public_issues_without_descriptions(self) -> None:
+        """The public dashboard reads this route anonymously: only issues
+        explicitly marked public appear, and never their description; a
+        missing flag counts as private."""
+        self._write([
+            {"id": "a", "title": "Public one", "description": "internal notes", "severity": "low",
+             "opened_at": "2026-09-01", "status": "open", "area": "rag", "public": True},
+            {"id": "b", "title": "Private one", "description": "d", "severity": "high",
+             "opened_at": "2026-09-01", "status": "open", "area": "infra", "public": False},
+            {"id": "c", "title": "Legacy", "description": "d", "severity": "low",
+             "opened_at": "2026-09-01", "status": "open", "area": ""},
+        ])
+        anonymous = client.get("/known-issues").json()["issues"]
+        self.assertEqual(anonymous, [{"id": "a", "title": "Public one", "severity": "low",
+                                      "status": "open", "area": "rag", "opened_at": "2026-09-01"}])
+        editor = client.get("/known-issues", headers=_admin_headers()).json()["issues"]
+        self.assertEqual([i["id"] for i in editor], ["a", "b", "c"])
+        self.assertEqual(editor[0]["description"], "internal notes")
+
+    def test_anonymous_error_hides_storage_detail(self) -> None:
+        self._issues_path.parent.mkdir(parents=True, exist_ok=True)
+        self._issues_path.write_text("not valid json")
+        self.assertEqual(client.get("/known-issues").json(), {"error": "known issues unavailable"})
+        self.assertIn("known_issues.json", client.get("/known-issues", headers=_admin_headers()).json()["error"])
+
+    def test_new_issues_are_private_until_published(self) -> None:
+        self._write([])
+        created = client.post("/known-issues", json={"title": "x"}, headers=_admin_headers()).json()
+        self.assertIs(created["public"], False)
+        self.assertEqual(client.get("/known-issues").json()["issues"], [])
+        updated = client.put(f"/known-issues/{created['id']}", json={"public": True}, headers=_admin_headers()).json()
+        self.assertIs(updated["public"], True)
+        self.assertEqual([i["title"] for i in client.get("/known-issues").json()["issues"]], ["x"])
+        client.put(f"/known-issues/{created['id']}", json={"title": "y"}, headers=_admin_headers())
+        self.assertEqual([i["title"] for i in client.get("/known-issues").json()["issues"]], ["y"])
 
 
 if __name__ == "__main__":

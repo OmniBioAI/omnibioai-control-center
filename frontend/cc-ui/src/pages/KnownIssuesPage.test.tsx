@@ -7,6 +7,7 @@ vi.mock('../api', () => ({
   createKnownIssue: vi.fn(),
   updateKnownIssueStatus: vi.fn(),
   deleteKnownIssue: vi.fn(),
+  setKnownIssuePublic: vi.fn(),
 }))
 vi.mock('../auth', () => ({ hasAdminAccess: vi.fn() }))
 
@@ -20,6 +21,7 @@ describe('KnownIssuesPage', () => {
     vi.mocked(api.createKnownIssue).mockReset()
     vi.mocked(api.updateKnownIssueStatus).mockReset()
     vi.mocked(api.deleteKnownIssue).mockReset()
+    vi.mocked(api.setKnownIssuePublic).mockReset()
     vi.mocked(auth.hasAdminAccess).mockReset().mockReturnValue(true)
   })
 
@@ -53,8 +55,31 @@ describe('KnownIssuesPage', () => {
     fireEvent.change(screen.getByPlaceholderText('title'), { target: { value: 'New thing broke' } })
     fireEvent.click(screen.getByText('Add issue'))
     await waitFor(() => expect(api.createKnownIssue).toHaveBeenCalledWith(
-      expect.objectContaining({ title: 'New thing broke' })
+      expect.objectContaining({ title: 'New thing broke', public: false })
     ))
+  })
+
+  it('creates a public issue only when "Show on public dashboard" is ticked', async () => {
+    const api = await import('../api')
+    vi.mocked(api.createKnownIssue).mockResolvedValue(ISSUE as any)
+    render(<KnownIssuesPage />)
+    await waitFor(() => expect(screen.getByText('New issue')).toBeInTheDocument())
+    fireEvent.change(screen.getByPlaceholderText('title'), { target: { value: 'Visible' } })
+    fireEvent.click(screen.getByLabelText(/Show on public dashboard/))
+    fireEvent.click(screen.getByText('Add issue'))
+    await waitFor(() => expect(api.createKnownIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Visible', public: true })
+    ))
+  })
+
+  it('shows a public badge and toggles the flag per issue', async () => {
+    const api = await import('../api')
+    vi.mocked(api.fetchKnownIssues).mockResolvedValue({ issues: [{ ...ISSUE, public: true }] } as any)
+    vi.mocked(api.setKnownIssuePublic).mockResolvedValue(ISSUE as any)
+    render(<KnownIssuesPage />)
+    expect(await screen.findByText('public')).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('Public'))
+    await waitFor(() => expect(api.setKnownIssuePublic).toHaveBeenCalledWith('i1', false))
   })
 
   it('calls deleteKnownIssue when Delete is confirmed', async () => {

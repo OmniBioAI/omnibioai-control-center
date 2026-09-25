@@ -122,6 +122,10 @@ def create_known_issue(path: Path, data: dict[str, Any]) -> dict[str, Any]:
         "opened_at": data.get("opened_at") or date.today().isoformat(),
         "status": status,
         "area": data.get("area") or "",
+        # Shown on the public control.omnibioai.org dashboard only when an
+        # editor sets this explicitly -- new issues (including ones filed by
+        # cron self-checks) stay internal by default.
+        "public": bool(data.get("public")),
     }
 
     issues, _ = _backfill_ids(_load_issues(path))
@@ -156,10 +160,21 @@ def update_known_issue(path: Path, issue_id: str, data: dict[str, Any]) -> dict[
     for field in ("title", "description", "severity", "opened_at", "status", "area"):
         if field in data and data[field] is not None:
             updated[field] = data[field]
+    if data.get("public") is not None:
+        updated["public"] = bool(data["public"])
 
     issues[idx] = updated
     _save_issues(path, issues)
     return updated
+
+
+_PUBLIC_ISSUE_FIELDS = ("id", "title", "severity", "status", "area", "opened_at")
+
+
+def public_issues(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """What an anonymous visitor may see: issues explicitly marked public
+    (a missing flag counts as private), without their description."""
+    return [{k: issue.get(k) for k in _PUBLIC_ISSUE_FIELDS} for issue in issues if issue.get("public") is True]
 
 
 def delete_known_issue(path: Path, issue_id: str) -> None:
