@@ -2,6 +2,22 @@ import { useState, useEffect, useCallback } from 'react'
 import { fetchHealth, fetchReportStatus } from '../api'
 import { clearToken } from '../auth'
 import Header from '../components/Header'
+// Website palette and layout rules, scoped to .public-brand (see the file).
+import '../public-brand.css'
+
+const BRAND_FONTS_HREF = 'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Playfair+Display:wght@700&display=swap'
+
+// Loaded at runtime rather than via a CSS @import so the admin bundle,
+// which also receives public-brand.css, never downloads these fonts.
+function useBrandFonts() {
+  useEffect(() => {
+    if (document.querySelector(`link[href="${BRAND_FONTS_HREF}"]`)) return
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.href = BRAND_FONTS_HREF
+    document.head.appendChild(link)
+  }, [])
+}
 import type { Tab } from '../components/Header'
 import PublicOverviewPage from '../pages/PublicOverviewPage'
 import PublicEvidencePage from '../pages/PublicEvidencePage'
@@ -53,6 +69,7 @@ export default function ControlApp() {
 }
 
 function ControlDashboard() {
+  useBrandFonts()
   const [tab, setTab] = useState<Tab>('overview')
   const [overallStatus, setOverallStatus] = useState<'UP' | 'WARN' | 'DOWN' | null>(null)
   const [reportExists, setReportExists] = useState(false)
@@ -98,7 +115,7 @@ function ControlDashboard() {
   useEffect(() => { pollReport() }, [pollReport])
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', fontFamily: 'var(--sans)' }}>
+    <div className="public-brand" style={{ minHeight: '100vh', background: 'var(--bg)', fontFamily: 'var(--sans)' }}>
       <Header
         tab={tab}
         onTab={setTab}

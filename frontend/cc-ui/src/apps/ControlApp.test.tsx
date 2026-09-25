@@ -103,6 +103,16 @@ describe('ControlApp page set: only the endpoints confirmed safe for anonymous a
     await waitFor(() => expect(screen.getByTestId('PublicEcosystemPage')).toBeInTheDocument())
   })
 
+  it('applies the public brand and loads the website fonts once', async () => {
+    const { container, unmount } = render(<ControlApp />)
+    await waitFor(() => expect(screen.getByTestId('PublicOverviewPage')).toBeInTheDocument())
+    expect(container.querySelector('.public-brand')).not.toBeNull()
+    unmount()
+    render(<ControlApp />)
+    await waitFor(() => expect(screen.getByTestId('PublicOverviewPage')).toBeInTheDocument())
+    expect(document.head.querySelectorAll('link[href*="Space+Grotesk"]')).toHaveLength(1)
+  })
+
   it('opens on the Overview tab and still reaches the Health tab', async () => {
     render(<ControlApp />)
     await waitFor(() => expect(screen.getByTestId('PublicOverviewPage')).toBeInTheDocument())

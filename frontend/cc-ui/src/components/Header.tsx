@@ -72,28 +72,30 @@ export default function Header({
         borderBottom: '1px solid var(--border)',
         boxShadow: 'var(--shadow-header)',
         display: 'flex', alignItems: 'center',
-        padding: '0 28px', gap: 12,
-      }}>
+        gap: 12,
+      }} className="cc-header-row">
         {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 34" width="34" height="34" style={{ flexShrink: 0 }}>
-            <polygon points="16,2 28,8 28,22 16,28 4,22 4,8" fill="none" stroke="#00e5a0" strokeWidth="1.8" />
-            <path d="M11 9 C16 13,14 17,20 20 M20 9 C15 13,17 17,11 20"
-              stroke="#00e5a0" strokeWidth="1.6" fill="none" strokeLinecap="round" />
-            <circle cx="16" cy="15" r="2.2" fill="#00e5a0" />
-          </svg>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 18, color: '#00e5a0', letterSpacing: '-0.01em', lineHeight: 1.2 }}>
-              Omni<span style={{ fontWeight: 400, color: 'var(--text)' }}>BioAI</span>
+          {/* Same hexagon mark and wordmark as omnibioai.org. */}
+          <a href="https://omnibioai.org" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="30" height="30" fill="none" style={{ flexShrink: 0 }} aria-hidden="true">
+              <path d="M20 4L34 12V28L20 36L6 28V12L20 4Z" stroke="var(--accent)" strokeWidth="1.5" fill="rgba(0,212,170,0.06)" />
+              <circle cx="20" cy="20" r="5" fill="rgba(0,212,170,0.2)" stroke="var(--accent)" strokeWidth="1" />
+              <path d="M20 15V9M20 31V25M15 20H9M31 20H25" stroke="var(--accent)" strokeWidth="1.2" strokeLinecap="round" />
+            </svg>
+            <div>
+              <div style={{ fontFamily: 'var(--mono)', fontWeight: 500, fontSize: 16, color: 'var(--accent)', lineHeight: 1.2 }}>
+                OmniBioAI
+              </div>
+              <div className="cc-subtitle" style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>Control Center</div>
             </div>
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>Control Center</div>
-          </div>
+          </a>
         </div>
 
         {/* Right: status chip + buttons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div className="cc-header-actions" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           {sc && (
-            <div style={{
+            <div className="cc-status-chip" title={sc.label} aria-label={sc.label} style={{
               display: 'inline-flex', alignItems: 'center', gap: 6,
               background: sc.bg, border: `1px solid ${sc.border}`,
               borderRadius: 99, padding: '5px 13px',
@@ -102,12 +104,13 @@ export default function Header({
                 width: 7, height: 7, borderRadius: '50%', background: sc.dot, flexShrink: 0,
                 ...(sc.pulse ? { animation: 'pulse-dot 2s ease-in-out infinite' } : {}),
               }} />
-              <span style={{ fontSize: 12, fontWeight: 600, color: sc.color }}>{sc.label}</span>
+              <span className="cc-status-label" style={{ fontSize: 12, fontWeight: 600, color: sc.color }}>{sc.label}</span>
             </div>
           )}
 
           <button
             onClick={onRefresh}
+            aria-label="Refresh"
             style={{
               fontSize: 13, fontWeight: 600, padding: '7px 15px',
               border: '1px solid var(--border)', borderRadius: 8,
@@ -115,7 +118,7 @@ export default function Header({
               display: 'inline-flex', alignItems: 'center', gap: 6,
             }}
           >
-            ↺ Refresh
+            ↺<span className="cc-btn-label">Refresh</span>
           </button>
 
           {/* Public Read-Only Control Center architecture: the "Generate
@@ -131,8 +134,8 @@ export default function Header({
               onClick={() => onTab('ecosystem')}
               style={{
                 fontSize: 13, fontWeight: 600, padding: '7px 15px',
-                border: '1px solid rgba(0,229,160,0.3)', borderRadius: 8,
-                background: 'rgba(0,229,160,0.08)', color: '#00e5a0',
+                border: '1px solid var(--accent-dim2)', borderRadius: 8,
+                background: 'var(--accent-dim)', color: 'var(--accent)',
                 display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer',
               }}
             >
@@ -148,19 +151,20 @@ export default function Header({
         background: 'var(--surface)',
         borderBottom: '1px solid var(--border)',
         display: 'flex', alignItems: 'stretch',
-        padding: '0 28px',
-      }}>
+      }} className="cc-tabbar" role="tablist">
         {tabs.map(t => (
           <button
             key={t.id}
+            role="tab"
+            aria-selected={tab === t.id}
             onClick={() => onTab(t.id)}
             style={{
               padding: '0 18px',
               fontSize: 13,
               fontWeight: tab === t.id ? 600 : 400,
-              color: tab === t.id ? '#00e5a0' : 'var(--muted)',
+              color: tab === t.id ? 'var(--accent)' : 'var(--muted)',
               background: 'none', border: 'none',
-              borderBottom: tab === t.id ? '2px solid #00e5a0' : '2px solid transparent',
+              borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
               cursor: 'pointer',
               transition: 'color 0.1s',
               marginBottom: -1,
