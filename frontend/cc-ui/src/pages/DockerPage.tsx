@@ -558,7 +558,7 @@ export default function DockerPage({ refreshKey }: { refreshKey: number }) {
   return (
     <div>
       {/* Hero */}
-      <div style={{ marginBottom: 24, paddingBottom: 20, borderBottom: '1px solid var(--border)' }}>
+      <div style={{ marginBottom: 20 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Docker Images</h1>
         <p style={{ fontSize: 13, color: 'var(--muted)' }}>
           Platform containers, tool SIF images, and plugin Docker images

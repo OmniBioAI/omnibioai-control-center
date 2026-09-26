@@ -52,6 +52,7 @@ export default function AppShell({ active, onNavigate, user, onSignOut, extraAct
           user={user}
           onSignOut={onSignOut}
           onMenuToggle={() => setMobileNavOpen(o => !o)}
+          onNavigate={handleNavigate}
           extraActions={extraActions}
         />
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>

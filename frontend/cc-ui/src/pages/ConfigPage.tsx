@@ -133,7 +133,7 @@ export default function ConfigPage({ refreshKey }: { refreshKey: number }) {
   return (
     <div>
       {/* Hero */}
-      <div style={{ marginBottom: 24, paddingBottom: 20, borderBottom: '1px solid var(--border)' }}>
+      <div style={{ marginBottom: 20 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Configuration</h1>
         <p style={{ fontSize: 13, color: 'var(--muted)' }}>Live configuration served from the backend</p>
       </div>
