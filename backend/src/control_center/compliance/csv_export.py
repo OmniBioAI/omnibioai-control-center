@@ -63,7 +63,7 @@ def render_report_csv(context: dict[str, Any]) -> str:
     buffer = io.StringIO()
     writer = csv.writer(buffer)
 
-    _writerow(writer, ["HIPAA Basic Compliance Report"])
+    _writerow(writer, ["HIPAA Organization Audit Report"])
     _writerow(writer, ["Organization", f"{context['organization_name']} (org #{context['organization_id']})"])
     _writerow(writer, ["Period", f"{context['from_date']} to {context['to_date']}"])
     _writerow(writer, ["Generated", f"{context['generated_at']} by {context['generated_by']}"])

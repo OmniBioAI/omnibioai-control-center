@@ -55,6 +55,15 @@ def test_render_report_html_includes_org_and_period():
     assert "alice@kumc.edu" in html
 
 
+def test_render_report_html_title_matches_the_admin_page_name():
+    """The PDF's document title and cover use the same name as the
+    admin console page, not the old "HIPAA Readiness Report"."""
+    html = render_report_html(_MINIMAL_CONTEXT)
+    assert "<title>HIPAA Organization Audit Report</title>" in html
+    assert '<div class="cover-title">HIPAA Organization Audit Report</div>' in html
+    assert "HIPAA Readiness Report" not in html
+
+
 def test_render_report_html_includes_omnibioai_logo_mark():
     """The rendered HTML includes the inline SVG hexagon logo mark
     shared with main.py's own header/AdminLogo.tsx."""
