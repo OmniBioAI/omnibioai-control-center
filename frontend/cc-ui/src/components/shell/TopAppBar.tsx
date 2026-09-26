@@ -2,7 +2,7 @@ import { Menu } from 'lucide-react'
 import type { SessionUser } from '../../auth'
 import type { PageKey } from '../../navigation'
 import Breadcrumb from './Breadcrumb'
-import GlobalSearch from './GlobalSearch'
+import GlobalSearch, { type RecordKind } from './GlobalSearch'
 import NotificationsMenu from './NotificationsMenu'
 import OrgSelector from './OrgSelector'
 import ProfileMenu from './ProfileMenu'
@@ -16,6 +16,7 @@ interface Props {
   onMenuToggle: () => void
   /** Opens a page from the global search. */
   onNavigate: (key: PageKey) => void
+  onOpenRecord?: (kind: RecordKind, id: number) => void
   /** Page-contextual extra actions (e.g. the pre-existing status chip +
    * Refresh/Generate Report controls, relocated from the old Header.tsx
    * unchanged in behavior) -- optional so most pages don't need it. */
@@ -31,7 +32,7 @@ interface Props {
  * (non-placeholder) context switcher here -- OrgSelector next to it
  * remains its own documented placeholder.
  */
-export default function TopAppBar({ breadcrumb, user, onSignOut, onMenuToggle, onNavigate, extraActions }: Props) {
+export default function TopAppBar({ breadcrumb, user, onSignOut, onMenuToggle, onNavigate, onOpenRecord, extraActions }: Props) {
   return (
     <header style={header}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
@@ -52,7 +53,7 @@ export default function TopAppBar({ breadcrumb, user, onSignOut, onMenuToggle, o
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
         {extraActions && <div className="shell-topbar-extra" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>{extraActions}</div>}
-        <GlobalSearch onNavigate={onNavigate} />
+        <GlobalSearch onNavigate={onNavigate} onOpenRecord={onOpenRecord} />
         <OrgSelector user={user} />
         <TeamSwitcher user={user} />
         <ThemeToggle />
