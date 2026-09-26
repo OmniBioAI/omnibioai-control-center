@@ -253,16 +253,6 @@ export const NAVIGATION: NavSection[] = [
       // whether the nav entry renders.
       { key: 'audit-logs', label: 'Audit Logs', functional: true, visible: hasPlatformAdminAccess },
       { key: 'audit-explorer', label: 'Audit Explorer', functional: true, visible: hasOrganizationsAccess },
-      // HIPAA Basic Compliance Report v0.8.0. Same hasPlatformAdminAccess
-      // gate 'audit-logs' immediately above uses, for the identical
-      // reason -- GET /compliance/hipaa-report is manage_all_orgs-gated
-      // (compliance/router.py), not org-scoped; org_admin access is
-      // deferred to v0.9.0 (see compliance/service.py's own module
-      // docstring for why no org-scoped read path exists yet for two of
-      // the report's four sections). Placed next to Audit Logs/
-      // Interactions -- its closest technical precedent (platform-admin-
-      // only, date-ranged, reads the same underlying audit ledger).
-      { key: 'compliance-report', label: 'HIPAA Readiness Report', functional: true, visible: hasPlatformAdminAccess },
       // PR-C (Control Center Sessions Integration): promoted from Coming
       // Soon to a real page (SessionsPage). Unlike 'audit-logs' above
       // (platform-admin-only backend data), this is self-service --
@@ -305,17 +295,15 @@ export const NAVIGATION: NavSection[] = [
     ],
   },
   {
-    // Admin Console HIPAA Compliance Report (V1): a new top-level
-    // section, deliberately distinct from Security > "Compliance
-    // Report" above (the pre-existing HIPAA Basic Compliance Report
-    // v0.8.0 -- an org-scoped usage/access-log export). This section
-    // tracks a completely different thing: the platform's own HIPAA
-    // *engineering* remediation history (which PRs closed which control
-    // gaps, with what verification evidence) -- not org data at all.
-    // Placed as its own section (task brief: "Admin Console > Compliance
-    // > HIPAA Compliance"), not nested under Security, so the two
-    // "compliance" concepts don't visually collide as if one were a
-    // subset of the other.
+    // Compliance: every HIPAA page lives here, each named for what it
+    // covers so the two are never confused:
+    // - HIPAA Readiness: the platform's own HIPAA controls (which PRs
+    //   closed which control gaps, with what verification evidence) --
+    //   platform-wide, not org data.
+    // - HIPAA Audit Report: the HIPAA Basic Compliance Report v0.8.0, a
+    //   per-organization export of user access, RAG queries and security
+    //   events for a date range (PDF/CSV). Formerly under Security as
+    //   "HIPAA Readiness Report", which collided with the page above.
     key: 'compliance',
     label: 'Compliance',
     items: [
@@ -325,6 +313,10 @@ export const NAVIGATION: NavSection[] = [
       // (routes_hipaa_compliance.py's own _require_platform_admin),
       // reads included, not just writes.
       { key: 'hipaa-compliance', label: 'HIPAA Readiness', functional: true, visible: hasPlatformAdminAccess },
+      // GET /compliance/hipaa-report is manage_all_orgs-gated
+      // (compliance/router.py), not org-scoped; org_admin access is
+      // deferred to v0.9.0 (see compliance/service.py's module docstring).
+      { key: 'compliance-report', label: 'HIPAA Audit Report', functional: true, visible: hasPlatformAdminAccess },
     ],
   },
   {

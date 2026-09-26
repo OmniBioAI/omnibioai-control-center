@@ -163,7 +163,7 @@ function AdminDashboard() {
   // Security Dashboard reads) are all manage_all_orgs-gated.
   const canSeeSecurityOverview = hasPlatformAdminAccess()
   const canSeeSecurityPosture = hasPlatformAdminAccess()
-  // HIPAA Readiness Report v0.8.0: same reasoning as
+  // HIPAA Audit Report (Basic Compliance Report v0.8.0): same reasoning as
   // canSeeAuditLogs -- GET /compliance/hipaa-report is manage_all_orgs-
   // gated, not org-scoped (org_admin access deferred to v0.9.0).
   const canSeeComplianceReport = hasPlatformAdminAccess()
@@ -181,6 +181,7 @@ function AdminDashboard() {
     if (window.location.pathname === '/integration-health') return 'integration-health'
     if (window.location.pathname === '/security-posture') return 'security-posture'
     if (window.location.pathname === '/hipaa-compliance') return 'hipaa-compliance'
+    if (window.location.pathname === '/hipaa-audit-report') return 'compliance-report'
     if (window.location.pathname === '/workflows') return 'workflows'
     if (window.location.pathname.startsWith('/organizations')) return 'organizations'
     if (window.location.pathname.startsWith('/users')) return 'users'
@@ -273,6 +274,7 @@ function AdminDashboard() {
       : active === 'integration-health' ? '/integration-health'
       : active === 'security-posture' ? '/security-posture'
       : active === 'hipaa-compliance' ? '/hipaa-compliance'
+      : active === 'compliance-report' ? '/hipaa-audit-report'
       : active === 'audit-explorer' ? '/audit-explorer'
       : active === 'audit-logs' ? '/audit-logs'
       : active === 'workflows' ? '/workflows'
@@ -298,6 +300,8 @@ function AdminDashboard() {
         setActive('security-posture')
       } else if (window.location.pathname === '/hipaa-compliance') {
         setActive('hipaa-compliance')
+      } else if (window.location.pathname === '/hipaa-audit-report') {
+        setActive('compliance-report')
       } else if (window.location.pathname === '/workflows') {
         setActive('workflows')
       } else if (window.location.pathname.startsWith('/organizations')) {
@@ -568,7 +572,7 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
       if (!ctx.canSeeAuditExplorer) return null
       return <AuditExplorerPage />
 
-    // HIPAA Readiness Report v0.8.0: flat platform-wide page, no
+    // HIPAA Audit Report (Basic Compliance Report v0.8.0): flat platform-wide page, no
     // org-picker/deep-link -- same shape as 'audit-logs' immediately
     // above (the page itself offers an in-page organization select,
     // since org_id is a required report parameter, not an optional
