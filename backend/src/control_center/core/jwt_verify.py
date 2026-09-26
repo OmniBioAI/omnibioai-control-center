@@ -65,7 +65,7 @@ JWKS_CACHE_TTL_SECONDS = int(os.environ.get("JWKS_CACHE_TTL_SECONDS", "300"))
 
 # Same Redis instance and key convention as omnibioai-auth's own
 # token_revocation.py::_blacklist ("blacklist:jti:{jti}", checked via
-# .exists(), fail-open on Redis errors). Defaults to the in-network
+# .exists(), fail-closed on Redis errors). Defaults to the in-network
 # hostname docker-compose-release.yml's other services already resolve
 # (redis://redis:6379) -- this repo's compose block does not wire
 # REDIS_URL explicitly yet (out of this PR's scope; a natural follow-up,
@@ -198,11 +198,10 @@ def verify_token(token: str | None) -> dict[str, Any]:
         try:
             revoked = bool(_blacklist.exists(f"blacklist:jti:{jti}"))
         except Exception:
-            # Fail open on Redis specifically -- matches
-            # omnibioai-auth/app/core/token_revocation.py's own documented
-            # "never block on a Redis blip" philosophy for this exact
-            # blacklist.
-            revoked = False
+            # Revocation state is part of the authorization decision. An
+            # unavailable or authentication-rejected Redis must not be
+            # treated as an empty blacklist.
+            raise TokenInvalid("revocation state unavailable")
         if revoked:
             raise TokenInvalid("revoked")
 

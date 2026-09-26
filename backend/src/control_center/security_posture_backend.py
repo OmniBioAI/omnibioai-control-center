@@ -212,7 +212,7 @@ def assemble_security_posture(
     controls["docker.raw_socket_protection"] = replace(controls["docker.raw_socket_protection"], live_status=LiveStatus.PARTIAL, limitations=("Proxy deployment evidence is present but implementation evidence is incomplete",))
     controls["docker.proxy_allowlist"] = replace(controls["docker.proxy_allowlist"], live_status=LiveStatus.PARTIAL, limitations=("Proxy allowlist implementation evidence is unavailable",))
     controls["audit.correlation"] = replace(controls["audit.correlation"], certification_status=CertificationStatus.PARTIAL, live_status=LiveStatus.PARTIAL, limitations=("Correlation evidence is partial",))
-    controls["auth.revocation"] = replace(controls["auth.revocation"], limitations=("Redis blacklist errors intentionally fail open; database and user-state checks remain enforced",))
+    controls["auth.revocation"] = replace(controls["auth.revocation"], limitations=("Redis blacklist availability is an authorization dependency; requests are rejected when revocation state cannot be checked",))
     controls["secrets.scanning"] = replace(controls["secrets.scanning"], limitations=("Credential-scan evidence is not normalized across repositories",))
     source_statuses["docker_proxy"] = DataSourceStatus.PARTIAL
     source_statuses["secret_scan"] = DataSourceStatus.PARTIAL
