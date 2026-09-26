@@ -100,8 +100,8 @@ export default function ComplianceReport() {
   return (
     <div>
       <SectionHeader
-        title="HIPAA Readiness Report"
-        description="Organization-scoped control evidence report: user access, RAG query log, and security events for a selected date range. Additional controls and evidence are tracked as readiness work continues."
+        title="HIPAA Organization Audit Report"
+        description="One organization's HIPAA audit evidence for a selected date range: user access, RAG query log, and security events. The platform's own HIPAA controls are tracked on the HIPAA Readiness page."
       />
 
       <Card style={{ marginBottom: 16 }}>

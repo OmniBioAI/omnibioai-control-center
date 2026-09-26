@@ -93,7 +93,7 @@ describe('navigation: Interactions placement', () => {
   })
 })
 
-// HIPAA Readiness Report v0.8.0. Same reasoning as the
+// HIPAA Audit Report (Basic Compliance Report v0.8.0). Same reasoning as the
 // Sessions/Interactions blocks above.
 
 describe('navigation: Compliance Report placement', () => {
@@ -110,22 +110,30 @@ describe('navigation: Compliance Report placement', () => {
     expect(found).toHaveLength(1)
   })
 
-  it('places "compliance-report" under the Security section, functional and gated', () => {
-    const securitySection = NAVIGATION.find(s => s.key === 'security')
-    expect(securitySection).toBeDefined()
+  it('places "compliance-report" under the Compliance section as "HIPAA Audit Report", functional and gated', () => {
+    const complianceSection = NAVIGATION.find(s => s.key === 'compliance')
+    expect(complianceSection).toBeDefined()
 
-    const complianceItem = securitySection!.items.find(i => i.key === 'compliance-report')
+    const complianceItem = complianceSection!.items.find(i => i.key === 'compliance-report')
     expect(complianceItem).toBeDefined()
+    expect(complianceItem!.label).toBe('HIPAA Audit Report')
     expect(complianceItem!.functional).toBe(true)
     // Same gate audit-logs uses -- GET /compliance/hipaa-report is
     // manage_all_orgs-gated, not org-scoped.
     expect(complianceItem!.visible).toBeDefined()
   })
 
-  it('is a top-level Security item alongside Audit Logs, not nested under it', () => {
-    const securitySection = NAVIGATION.find(s => s.key === 'security')!
-    const complianceItem = securitySection.items.find(i => i.key === 'compliance-report')!
+  it('is a top-level Compliance item, not nested, and no longer under Security', () => {
+    const complianceSection = NAVIGATION.find(s => s.key === 'compliance')!
+    const complianceItem = complianceSection.items.find(i => i.key === 'compliance-report')!
     expect(complianceItem.children).toBeUndefined()
+    const securitySection = NAVIGATION.find(s => s.key === 'security')!
+    expect(securitySection.items.some(i => i.key === 'compliance-report')).toBe(false)
+  })
+
+  it('never gives two HIPAA entries the same label', () => {
+    const labels = NAVIGATION.flatMap(s => s.items).map(i => i.label).filter(l => /hipaa/i.test(l))
+    expect(labels).toEqual(['HIPAA Readiness', 'HIPAA Audit Report'])
   })
 })
 
@@ -209,12 +217,10 @@ describe('navigation: Integrations placement', () => {
   })
 })
 
-// Admin Console HIPAA Readiness Report (V1): "Admin Console > Compliance
-// > HIPAA Readiness" -- a dedicated Compliance section, deliberately
-// distinct from the pre-existing 'compliance-report' item under
-// Security (a different feature: HIPAA Readiness Report v0.8.0,
-// an org-scoped usage/access-log export -- see this item's own comment
-// in navigation.ts).
+// "Admin Console > Compliance > HIPAA Readiness" -- the platform's own
+// HIPAA controls, next to (and distinct from) 'compliance-report', the
+// per-organization HIPAA Audit Report (see the Compliance section's
+// comment in navigation.ts).
 
 describe('navigation: HIPAA Readiness placement', () => {
   it('has exactly one "hipaa-compliance" entry across the entire tree', () => {
@@ -245,11 +251,9 @@ describe('navigation: HIPAA Readiness placement', () => {
     expect(securitySection.items.some(i => i.key === 'hipaa-compliance')).toBe(false)
   })
 
-  it('is a distinct entry from the pre-existing "compliance-report" item', () => {
-    const securitySection = NAVIGATION.find(s => s.key === 'security')!
-    const legacyReportItem = securitySection.items.find(i => i.key === 'compliance-report')
-    expect(legacyReportItem).toBeDefined()
-    expect(legacyReportItem!.key).not.toBe('hipaa-compliance')
+  it('is a distinct entry from the "compliance-report" item beside it', () => {
+    const complianceSection = NAVIGATION.find(s => s.key === 'compliance')!
+    expect(complianceSection.items.map(i => i.key)).toEqual(['hipaa-compliance', 'compliance-report'])
   })
 
   it('is gated (not always-visible like "sessions"/"overview")', () => {

@@ -571,7 +571,7 @@ function ReportsTab({ data }: { data: LoadState }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <Card>
-        <SectionTitle title="HIPAA Readiness Report" note="Control Evidence Report for the initial bounded catalog." />
+        <SectionTitle title="Readiness Summary" note="Control Evidence Report for the initial bounded catalog." />
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12 }}>
           <MiniMetric label="Catalog Scope" value="Initial bounded catalog" />
           <MiniMetric label="Generated" value={formatDate(new Date().toISOString())} />

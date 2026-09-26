@@ -292,7 +292,7 @@ describe('HipaaCompliancePage Phase D readiness UI', () => {
     render(<HipaaCompliancePage />)
     await user.click(await screen.findByRole('tab', { name: 'Reports' }))
 
-    expect(screen.getByText('HIPAA Readiness Report')).toBeInTheDocument()
+    expect(screen.getByText('Readiness Summary')).toBeInTheDocument()
     expect(screen.getByText('Control Evidence Report for the initial bounded catalog.')).toBeInTheDocument()
     expect(screen.getByText('Initial bounded catalog')).toBeInTheDocument()
     expect(screen.getByText('Known Unknowns')).toBeInTheDocument()

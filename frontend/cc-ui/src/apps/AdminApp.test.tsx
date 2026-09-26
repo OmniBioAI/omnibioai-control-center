@@ -51,6 +51,7 @@ vi.mock('../pages/EcosystemPage', () => ({ default: () => <div data-testid="Ecos
 vi.mock('../pages/ConfigPage', () => ({ default: () => <div data-testid="ConfigPage" /> }))
 vi.mock('../pages/LlmPage', () => ({ default: () => <div data-testid="LlmPage" /> }))
 vi.mock('../pages/CloudPage', () => ({ default: () => <div data-testid="CloudPage" /> }))
+vi.mock('../pages/ComplianceReport', () => ({ default: () => <div data-testid="ComplianceReport" /> }))
 vi.mock('../pages/IntegrationsPage', () => ({ default: () => <div data-testid="IntegrationsPage" /> }))
 // OrganizationsPage's onSelect is exercised (not just its presence) --
 // PR11.3 reuses this exact component as the org picker for the 'iam'
@@ -1140,6 +1141,26 @@ describe('AdminApp auth gate', () => {
     expect(await screen.findByTestId('HipaaCompliancePage')).toBeInTheDocument()
     await waitFor(() => expect(window.location.pathname).toBe('/hipaa-compliance'))
     expect(screen.queryByText('Coming soon')).not.toBeInTheDocument()
+  })
+
+  it('reaches the HIPAA Audit Report via the sidebar and deep-links to it', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-hipaa-audit')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(true)
+
+    const { unmount } = render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+    clickNav('HIPAA Audit Report')
+    expect(await screen.findByTestId('ComplianceReport')).toBeInTheDocument()
+    await waitFor(() => expect(window.location.pathname).toBe('/hipaa-audit-report'))
+    unmount()
+
+    render(<AdminApp />)
+    expect(await screen.findByTestId('ComplianceReport')).toBeInTheDocument()
+    expect(screen.queryByTestId('DashboardPage')).not.toBeInTheDocument()
   })
 
   it("deep-links directly to HIPAA Readiness and preserves the path", async () => {
