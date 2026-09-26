@@ -55,7 +55,7 @@ export default function CloudPage({ refreshKey }: { refreshKey: number }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 24, paddingBottom: 20, borderBottom: '1px solid var(--border)' }}>
+      <div style={{ marginBottom: 20 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Execution Backends</h1>
         <p style={{ fontSize: 13, color: 'var(--muted)' }}>
           Cloud and HPC execution backend configuration status

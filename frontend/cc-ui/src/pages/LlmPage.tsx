@@ -41,7 +41,7 @@ export default function LlmPage({ refreshKey }: { refreshKey: number }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 24, paddingBottom: 20, borderBottom: '1px solid var(--border)' }}>
+      <div style={{ marginBottom: 20 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>LLMs</h1>
         <p style={{ fontSize: 13, color: 'var(--muted)' }}>
           Local Ollama models and cloud API key status

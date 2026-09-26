@@ -124,8 +124,8 @@ export default function UsersPage({ onSelect }: Props) {
 
   return (
     <div>
-      <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Users</h2>
-      <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 20 }}>
+      <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Users</h1>
+      <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 20 }}>
         Every user in the system. This view is only reachable with platform-admin permissions,
         enforced by the backend on every request.
       </p>

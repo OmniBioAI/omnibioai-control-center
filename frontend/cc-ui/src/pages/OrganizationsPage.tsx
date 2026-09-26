@@ -303,8 +303,8 @@ export default function OrganizationsPage({ onSelect, title, description }: Prop
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 4 }}>
         <div>
-          <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>{title ?? 'Organizations'}</h2>
-          <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)' }}>{title ?? 'Organizations'}</h1>
+          <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>
             {description ?? (isPlatformAdmin
               ? 'Every organization in the system. This view is only reachable with platform-admin permissions, enforced by the backend on every request.'
               : 'Organizations you belong to.')}

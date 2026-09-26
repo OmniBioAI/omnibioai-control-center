@@ -17,7 +17,7 @@ export default function SectionHeader({ title, description, actions }: Props) {
       gap: 16, marginBottom: 20,
     }}>
       <div>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)', letterSpacing: '-0.01em' }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', letterSpacing: '-0.01em' }}>
           {title}
         </h1>
         {description && (
