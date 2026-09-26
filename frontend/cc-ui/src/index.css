@@ -150,6 +150,12 @@ select option { background: var(--surface); color: var(--text); }
   .shell-org-selector-label { display: none; }
   .shell-profile-label { display: none; }
 }
+/* The top-bar search is a disabled "coming soon" placeholder; below
+   this width it crowded the breadcrumb down to "Administrat… › Us…".
+   The breadcrumb tells the admin where they are, so it wins. */
+@media (max-width: 1700px) {
+  .shell-topbar-search { display: none !important; }
+}
 @media (max-width: 560px) {
   .shell-content { padding: 16px !important; }
   .shell-stat-grid { grid-template-columns: 1fr 1fr !important; }

@@ -5,6 +5,7 @@ import { findNavItem, NAVIGATION } from '../../navigation'
 import SidebarNav from './SidebarNav'
 import TopAppBar from './TopAppBar'
 import Footer from './Footer'
+import PageErrorBoundary from '../ui/PageErrorBoundary'
 
 interface Props {
   active: PageKey
@@ -54,7 +55,12 @@ export default function AppShell({ active, onNavigate, user, onSignOut, extraAct
           extraActions={extraActions}
         />
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ flex: 1 }}>{children}</div>
+          {/* Every page's padding comes from here, once, so no page can
+              render flush against the sidebar or top bar. Full width and
+              left-aligned: tables and card grids use the space. */}
+          <main className="shell-content" style={{ flex: 1, width: '100%', padding: '24px 32px 48px' }}>
+            <PageErrorBoundary key={active}>{children}</PageErrorBoundary>
+          </main>
           <Footer />
         </div>
       </div>

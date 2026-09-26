@@ -1,18 +1,12 @@
 import type { ReactNode } from 'react'
 
 /**
- * Admin Console Phase 2 design system: the max-width/centering/padding
- * wrapper every page's content sits in. Extracted from what AdminApp.tsx
- * already inlined once (`maxWidth: 1280, margin: '0 auto', padding: '24px
- * 28px 48px'`) -- new pages (Overview, ComingSoon destinations) use this;
- * existing pages are untouched and keep their own markup exactly as
- * before, since AppShell still wraps the same content area they already
- * rendered into.
+ * Admin Console Phase 2 design system: groups a page's content. Padding
+ * now comes from AppShell's <main>, which wraps every page, so this adds
+ * none of its own -- it used to center content in a 1280px box, which
+ * made the pages using it (ComingSoon) sit differently from every other
+ * page.
  */
 export default function PageContainer({ children }: { children: ReactNode }) {
-  return (
-    <div className="shell-content" style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 48px' }}>
-      {children}
-    </div>
-  )
+  return <div>{children}</div>
 }
