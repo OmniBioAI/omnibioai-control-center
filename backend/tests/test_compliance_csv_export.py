@@ -35,6 +35,14 @@ _CONTEXT = {
 }
 
 
+def test_title_matches_the_admin_page_name():
+    """The CSV's first row names the report the way the admin console
+    does (Compliance > HIPAA Audit Report, page heading "HIPAA
+    Organization Audit Report")."""
+    first_row = next(csv.reader(io.StringIO(render_report_csv(_CONTEXT))))
+    assert first_row == ["HIPAA Organization Audit Report"]
+
+
 def test_includes_org_and_period_header():
     """The CSV output includes the organization name and the reporting
     period's dates."""

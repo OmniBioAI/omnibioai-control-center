@@ -4,6 +4,7 @@ import type { PageKey } from '../../navigation'
 import { findNavItem, NAVIGATION } from '../../navigation'
 import SidebarNav from './SidebarNav'
 import TopAppBar from './TopAppBar'
+import type { RecordKind } from './GlobalSearch'
 import Footer from './Footer'
 import PageErrorBoundary from '../ui/PageErrorBoundary'
 
@@ -13,6 +14,8 @@ interface Props {
   user: SessionUser | null
   onSignOut: () => void
   extraActions?: ReactNode
+  /** Opens a user's or organization's detail page from the global search. */
+  onOpenRecord?: (kind: RecordKind, id: number) => void
   children: ReactNode
 }
 
@@ -30,7 +33,7 @@ function breadcrumbFor(key: PageKey): string[] {
  * into via `children`. Wraps AdminApp only; ControlApp is unaffected
  * (still Header.tsx's flat tab strip, unchanged).
  */
-export default function AppShell({ active, onNavigate, user, onSignOut, extraActions, children }: Props) {
+export default function AppShell({ active, onNavigate, user, onSignOut, extraActions, onOpenRecord, children }: Props) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
   const handleNavigate = (key: PageKey) => {
@@ -53,6 +56,7 @@ export default function AppShell({ active, onNavigate, user, onSignOut, extraAct
           onSignOut={onSignOut}
           onMenuToggle={() => setMobileNavOpen(o => !o)}
           onNavigate={handleNavigate}
+          onOpenRecord={onOpenRecord && ((kind, id) => { onOpenRecord(kind, id); setMobileNavOpen(false) })}
           extraActions={extraActions}
         />
         <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>

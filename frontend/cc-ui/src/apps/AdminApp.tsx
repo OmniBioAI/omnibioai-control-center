@@ -356,6 +356,17 @@ function AdminDashboard() {
     if (key !== 'roles') setRolesOrgHint(null)
   }
 
+  // Global search: open an organization's or user's detail page directly.
+  const handleOpenRecord = (kind: 'user' | 'org', id: number) => {
+    if (kind === 'user') {
+      handleNavigate('users')
+      setSelectedUserId(id)
+    } else {
+      handleNavigate('organizations')
+      setSelectedOrgId(id)
+    }
+  }
+
   const handleViewTeams = (orgId: number) => {
     setTeamsOrgHint(orgId)
     setActive('teams')
@@ -402,6 +413,7 @@ function AdminDashboard() {
       onNavigate={handleNavigate}
       user={user}
       onSignOut={handleSignOut}
+      onOpenRecord={canSeeUsers ? handleOpenRecord : undefined}
       extraActions={<div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         {hasPlatformAdminAccess() && <button type="button" onClick={handleOpenLims} disabled={limsOpening} className="shell-action-button">
           {limsOpening ? 'Opening LIMS…' : 'Open LIMS'}
