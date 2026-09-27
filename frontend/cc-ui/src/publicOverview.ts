@@ -1,10 +1,11 @@
+import { apiBase } from './basePath'
 // Public Platform Overview (control.omnibioai.org): data for the anonymous
 // showcase page. Every call here goes to a route that answers without a
 // token and returns the anonymous-safe shape (core/public_view.py and each
 // route's own public contract) -- no Authorization header is sent, same
 // as the rest of the ControlApp build.
 
-const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
+const BASE = apiBase()
 
 async function getJson<T>(path: string): Promise<T> {
   const r = await fetch(`${BASE}${path}`)

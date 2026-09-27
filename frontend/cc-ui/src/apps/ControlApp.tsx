@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { fetchHealth } from '../api'
 import { clearToken } from '../auth'
+import { appBase, appPath, localPath } from '../basePath'
 import Header from '../components/Header'
 // Website palette and layout rules, scoped to .public-brand (see the file).
 import '../public-brand.css'
@@ -75,7 +76,7 @@ const TAB_TITLES: Record<Tab, string> = {
 
 /** '/', unknown paths and trailing slashes all resolve to a real tab. */
 export function tabFromPath(pathname: string): Tab {
-  const path = pathname.replace(/\/+$/, '') || '/'
+  const path = localPath(pathname).replace(/\/+$/, '') || '/'
   const match = (Object.keys(TAB_PATHS) as Tab[]).find(t => TAB_PATHS[t] === path)
   return match ?? 'overview'
 }
@@ -94,7 +95,7 @@ function ControlDashboard() {
   // between tabs.
   const setTab = (next: Tab) => {
     if (next === tab) return
-    window.history.pushState(null, '', TAB_PATHS[next])
+    window.history.pushState(null, '', appPath(TAB_PATHS[next]))
     setTabState(next)
     window.scrollTo(0, 0)
   }
@@ -109,17 +110,11 @@ function ControlDashboard() {
     document.title = `OmniBioAI — ${TAB_TITLES[tab]}`
   }, [tab])
 
-  // This build never operates in an authenticated mode -- there is no
-  // login screen to reach one from. Clearing unconditionally on mount
-  // (rather than simply never reading it) means every fetch below runs
-  // with zero chance of forwarding a token that happens to be sitting in
-  // this origin's storage (e.g. a stale value from a build served on a
-  // shared origin in local dev) -- "do not send a JWT merely because one
-  // happens to exist" holds even in that edge case, not just in the
-  // normal cross-origin-isolated control.omnibioai.org/admin.omnibioai.org
-  // production topology where it couldn't happen anyway.
+  // Standalone retains its anonymous-session cleanup. A mounted build
+  // shares Studio's storage, so it must never clear the host's session.
+  // api.ts independently omits bearer headers in every control build.
   useEffect(() => {
-    clearToken()
+    if (!appBase()) clearToken()
   }, [])
 
   useEffect(() => {

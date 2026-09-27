@@ -1,6 +1,7 @@
+import { apiBase } from './basePath'
 import { authHeaders, reportUnauthorized } from './auth'
 
-const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
+const BASE = apiBase()
 
 // Wraps fetch() with the admin Authorization header and centralizes the
 // 401 handling (main.py's require_admin gate) so every call site doesn't
@@ -8,9 +9,9 @@ const BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
 async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const r = await fetch(path, {
     ...init,
-    headers: { ...authHeaders(), ...(init.headers ?? {}) },
+    headers: { ...(import.meta.env.VITE_APP_MODE === 'control' ? {} : authHeaders()), ...(init.headers ?? {}) },
   })
-  if (r.status === 401) {
+  if (r.status === 401 && import.meta.env.VITE_APP_MODE !== 'control') {
     reportUnauthorized()
   }
   return r

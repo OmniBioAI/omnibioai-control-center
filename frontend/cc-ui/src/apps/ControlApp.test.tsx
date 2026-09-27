@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import ControlApp, { tabFromPath } from './ControlApp'
 import * as auth from '../auth'
 
@@ -167,5 +167,27 @@ describe('ControlApp page set: only the endpoints confirmed safe for anonymous a
     ]) {
       expect(importLines).not.toContain(forbidden)
     }
+  })
+})
+
+
+describe('Studio mount', () => {
+  beforeEach(() => {
+    vi.stubEnv('BASE_URL', '/_svc/control/')
+    vi.mocked(auth.clearToken).mockReset()
+    window.history.replaceState(null, '', '/_svc/control/evidence')
+  })
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('opens deep links, keeps navigation/history beneath the prefix and preserves Studio session', async () => {
+    render(<ControlApp />)
+    await waitFor(() => expect(screen.getByTestId('PublicEvidencePage')).toBeInTheDocument())
+    expect(auth.clearToken).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByText('Ecosystem Report'))
+    expect(window.location.pathname).toBe('/_svc/control/ecosystem')
+    window.history.replaceState(null, '', '/_svc/control/overview/')
+    fireEvent(window, new PopStateEvent('popstate'))
+    expect(screen.getByTestId('PublicOverviewPage')).toBeInTheDocument()
+    expect(tabFromPath('/_svc/control/ecosystem/')).toBe('ecosystem')
   })
 })

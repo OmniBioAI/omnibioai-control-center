@@ -17,7 +17,7 @@ RUN npm ci
 COPY frontend/cc-ui/ ./
 ARG VITE_LIMS_SSO_CLIENT_ID
 ARG VITE_LIMS_SSO_REDIRECT_URI
-RUN npm run build && npm run build:admin && npm run build:control
+RUN npm run build && npm run build:admin && npm run build:control && npm run build:control:studio
 
 # ── Stage 2: Python backend ────────────────────────────────────────────────────
 FROM ghcr.io/omnibioai/omnibioai-base:latest AS backend
@@ -62,6 +62,7 @@ CMD ["uvicorn", "control_center.main:app", "--host", "0.0.0.0", "--port", "7070"
 # this PR either (see docs/admin-console-build.md).
 FROM nginx:alpine AS frontend
 COPY --from=frontend-builder /frontend/dist-control /usr/share/nginx/html/control
+COPY --from=frontend-builder /frontend/dist-control-studio /usr/share/nginx/html/_svc/control
 COPY --from=frontend-builder /frontend/dist-admin /usr/share/nginx/html/admin
 COPY docker/nginx/api-proxy.conf /etc/nginx/api-proxy.conf
 COPY docker/nginx/control-center.conf /etc/nginx/conf.d/default.conf
