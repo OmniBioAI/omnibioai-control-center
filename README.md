@@ -1189,3 +1189,13 @@ Most tests are self-contained (in-process HTTP servers, real temp-dir filesystem
 ## License
 
 Apache License 2.0
+
+## Authoritative Sources
+
+Backend route behavior is implemented in the FastAPI modules under `app/`;
+proxy relationships are defined by the `routes_*_proxy.py` modules and the
+repository configuration files. The Admin Console is a client of those
+upstream services and does not replace their authorization or entity
+registries. Health/report snapshots and certification tables in this README
+are dated evidence; current availability must be checked against the live
+service and its configured checks.
