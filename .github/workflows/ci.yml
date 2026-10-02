@@ -11,6 +11,8 @@ jobs:
   lint-and-test:
     name: Lint & Test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -69,70 +71,387 @@ jobs:
             echo "No tests directory found, skipping pytest"
           fi
 
-  # The Dockerfile has two deployable stages, and a build without a
-  # `target` produces only the last one (the nginx frontend). Pushing that
-  # as omnibioai-control-center:latest would replace the backend that
-  # omnibioai-studio's release compose files run from that name, so each
-  # stage is built explicitly and pushed under its own image name:
-  #   backend  -> ghcr.io/omnibioai/omnibioai-control-center      (:7070)
-  #   frontend -> ghcr.io/omnibioai/omnibioai-control-center-web  (:5174)
-  #
-  # Runs on an arm64 runner: omnibioai-base (the backend's FROM) is
-  # published for arm64 only, matching the aarch64 deployment host, so on
-  # the default amd64 runner the backend's first RUN fails with
-  # "exec format error" and the frontend comes out amd64-only.
-  docker:
-    name: Build & Push Docker image (${{ matrix.target }})
-    runs-on: ubuntu-24.04-arm
+  # Resolves and validates (once, for every downstream job) the exact
+  # release version and the exact source commit SHA being published.
+  # Fails closed if the tag isn't vX.Y.Z or if GITHUB_SHA is ever
+  # anything other than a genuine 40-character hex SHA -- no short SHA,
+  # no branch name, no tag text is ever accepted as OCI revision.
+  resolve-version:
+    name: Resolve release version and source SHA
+    runs-on: ubuntu-24.04
     needs: lint-and-test
     if: startsWith(github.ref, 'refs/tags/v')
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      sha: ${{ steps.resolve.outputs.sha }}
+    permissions:
+      contents: read
+    steps:
+      - name: Resolve and validate
+        id: resolve
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::release tag '$TAG' is not a valid vX.Y.Z semver tag" >&2
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          SHA="${GITHUB_SHA}"
+          if [[ ! "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::GITHUB_SHA '$SHA' is not an exact 40-character hex SHA" >&2
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+
+  # ── Native per-architecture builds ──────────────────────────────────
+  # Each of these 4 jobs builds and pushes exactly ONE architecture of
+  # ONE image to its own collision-safe staging tag (never a mutable
+  # version/latest tag -- see build-native-arch-image/action.yml). They
+  # are intentionally 4 explicit jobs, not one matrix: a matrix job's
+  # per-cell `outputs` are not reliably addressable downstream (the last
+  # matrix cell to finish silently wins), which is exactly the kind of
+  # architecture-write collision this design has to avoid.
+  #
+  # Runs on native GitHub-hosted arm64/amd64 runners. No QEMU, no
+  # `platform:` emulation override anywhere in this file.
+  build-backend-amd64:
+    name: Build backend (linux/amd64)
+    runs-on: ubuntu-24.04
+    needs: resolve-version
     permissions:
       contents: read
       packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: backend
-            image: ghcr.io/${{ github.repository }}
-          - target: frontend
-            image: ghcr.io/${{ github.repository }}-web
-
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
+      - id: build
+        uses: ./.github/actions/build-native-arch-image
+        with:
+          target: backend
+          image: ghcr.io/${{ github.repository }}
+          arch: amd64
+          expect-uname: x86_64
+          version: ${{ needs.resolve-version.outputs.version }}
+          source-sha: ${{ needs.resolve-version.outputs.sha }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+  build-backend-arm64:
+    name: Build backend (linux/arm64)
+    runs-on: ubuntu-24.04-arm
+    needs: resolve-version
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: build
+        uses: ./.github/actions/build-native-arch-image
+        with:
+          target: backend
+          image: ghcr.io/${{ github.repository }}
+          arch: arm64
+          expect-uname: aarch64
+          version: ${{ needs.resolve-version.outputs.version }}
+          source-sha: ${{ needs.resolve-version.outputs.sha }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  build-frontend-amd64:
+    name: Build frontend (linux/amd64)
+    runs-on: ubuntu-24.04
+    needs: resolve-version
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: build
+        uses: ./.github/actions/build-native-arch-image
+        with:
+          target: frontend
+          image: ghcr.io/${{ github.repository }}-web
+          arch: amd64
+          expect-uname: x86_64
+          version: ${{ needs.resolve-version.outputs.version }}
+          source-sha: ${{ needs.resolve-version.outputs.sha }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  build-frontend-arm64:
+    name: Build frontend (linux/arm64)
+    runs-on: ubuntu-24.04-arm
+    needs: resolve-version
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: build
+        uses: ./.github/actions/build-native-arch-image
+        with:
+          target: frontend
+          image: ghcr.io/${{ github.repository }}-web
+          arch: arm64
+          expect-uname: aarch64
+          version: ${{ needs.resolve-version.outputs.version }}
+          source-sha: ${{ needs.resolve-version.outputs.sha }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Deterministic OCI index assembly ────────────────────────────────
+  # Only after BOTH architecture builds for an image have succeeded:
+  # assemble a STAGING index directly from the two immutable
+  # per-architecture digests (never from a mutable tag). This is
+  # deliberately NOT the public :X.Y.Z tag yet -- it is itself a
+  # collision-safe, per-commit staging ref, so that neither :X.Y.Z nor
+  # :latest is ever written until verification AND every native runtime
+  # smoke for that image has passed (see publish-version-* / promote-
+  # latest-* below). This closes the gap a simpler "assemble straight to
+  # :X.Y.Z" design would leave: a public version tag existing before it
+  # has been proven to satisfy the release contract.
+  assemble-backend:
+    name: Assemble backend staging index
+    runs-on: ubuntu-24.04
+    needs: [resolve-version, build-backend-amd64, build-backend-arm64]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Assemble staging index from immutable per-arch digests
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${{ github.repository }}"
+          SHA="${{ needs.resolve-version.outputs.sha }}"
+          docker buildx imagetools create \
+            --tag "${IMAGE}:staging-index-${SHA}" \
+            "${IMAGE}@${{ needs.build-backend-amd64.outputs.digest }}" \
+            "${IMAGE}@${{ needs.build-backend-arm64.outputs.digest }}"
+          docker buildx imagetools inspect "${IMAGE}:staging-index-${SHA}"
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
+  assemble-frontend:
+    name: Assemble frontend staging index
+    runs-on: ubuntu-24.04
+    needs: [resolve-version, build-frontend-amd64, build-frontend-arm64]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/login-action@v3
         with:
-          images: ${{ matrix.image }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=raw,value=latest
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Assemble staging index from immutable per-arch digests
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${{ github.repository }}-web"
+          SHA="${{ needs.resolve-version.outputs.sha }}"
+          docker buildx imagetools create \
+            --tag "${IMAGE}:staging-index-${SHA}" \
+            "${IMAGE}@${{ needs.build-frontend-amd64.outputs.digest }}" \
+            "${IMAGE}@${{ needs.build-frontend-arm64.outputs.digest }}"
+          docker buildx imagetools inspect "${IMAGE}:staging-index-${SHA}"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+  # ── Structured remote verification (fails closed) ───────────────────
+  # Re-derives every release-contract fact from the REAL staging index
+  # -- runtime-manifest count/arch, OCI source/revision/version, SBOM and
+  # provenance subject-binding -- never from what the build jobs merely
+  # claim to have pushed. Nothing public (:X.Y.Z or :latest) can be
+  # written unless this passes.
+  verify-backend:
+    name: Verify staged backend release contract
+    runs-on: ubuntu-24.04
+    needs: [resolve-version, assemble-backend]
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          scripts/ci/verify_release_image.sh \
+            "ghcr.io/${{ github.repository }}" \
+            "staging-index-${{ needs.resolve-version.outputs.sha }}" \
+            "https://github.com/${{ github.repository }}" \
+            "${{ needs.resolve-version.outputs.sha }}"
 
-      # The VITE_LIMS_SSO_* values are public OAuth client settings (the
-      # same defaults omnibioai-studio/docker-compose.yml passes), not
-      # secrets; the backend stage ignores them.
-      - name: Build and push
-        uses: docker/build-push-action@v5
+  verify-frontend:
+    name: Verify staged frontend release contract
+    runs-on: ubuntu-24.04
+    needs: [resolve-version, assemble-frontend]
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          scripts/ci/verify_release_image.sh \
+            "ghcr.io/${{ github.repository }}-web" \
+            "staging-index-${{ needs.resolve-version.outputs.sha }}" \
+            "https://github.com/${{ github.repository }}" \
+            "${{ needs.resolve-version.outputs.sha }}"
+
+  # ── Native runtime smoke (per architecture, against the staging index) ──
+  # Each job resolves its OWN architecture's exact digest fresh from the
+  # just-verified staging index, pulls by that digest, and proves the
+  # smallest meaningful safe contract for that image. Gated on verify-*
+  # so a smoke job never runs against unverified metadata. Still never
+  # touches :X.Y.Z or :latest.
+  smoke-backend-amd64:
+    name: Native runtime smoke - backend (linux/amd64)
+    runs-on: ubuntu-24.04
+    needs: [resolve-version, verify-backend]
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          scripts/ci/native_runtime_smoke.sh backend \
+            "ghcr.io/${{ github.repository }}" \
+            "staging-index-${{ needs.resolve-version.outputs.sha }}" \
+            x86_64
+
+  smoke-backend-arm64:
+    name: Native runtime smoke - backend (linux/arm64)
+    runs-on: ubuntu-24.04-arm
+    needs: [resolve-version, verify-backend]
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          scripts/ci/native_runtime_smoke.sh backend \
+            "ghcr.io/${{ github.repository }}" \
+            "staging-index-${{ needs.resolve-version.outputs.sha }}" \
+            aarch64
+
+  smoke-frontend-amd64:
+    name: Native runtime smoke - frontend (linux/amd64)
+    runs-on: ubuntu-24.04
+    needs: [resolve-version, verify-frontend]
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          scripts/ci/native_runtime_smoke.sh frontend \
+            "ghcr.io/${{ github.repository }}-web" \
+            "staging-index-${{ needs.resolve-version.outputs.sha }}" \
+            x86_64
+
+  smoke-frontend-arm64:
+    name: Native runtime smoke - frontend (linux/arm64)
+    runs-on: ubuntu-24.04-arm
+    needs: [resolve-version, verify-frontend]
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          scripts/ci/native_runtime_smoke.sh frontend \
+            "ghcr.io/${{ github.repository }}-web" \
+            "staging-index-${{ needs.resolve-version.outputs.sha }}" \
+            aarch64
+
+  # ── Publish the public version tag (only after full verification + smoke) ──
+  # This is the ONLY place that ever writes the public :X.Y.Z tag, and it
+  # does so by retagging the already-assembled, already-verified,
+  # already-smoke-tested staging index -- never by building or
+  # assembling anything new. :X.Y.Z therefore can never be observably
+  # single-architecture, unverified, or unsmoked at the moment it first
+  # appears.
+  publish-version-backend:
+    name: Publish backend :X.Y.Z
+    runs-on: ubuntu-24.04
+    needs: [resolve-version, verify-backend, smoke-backend-amd64, smoke-backend-arm64]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/login-action@v3
         with:
-          context: .
-          target: ${{ matrix.target }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            VITE_LIMS_SSO_CLIENT_ID=omnibioai-lims
-            VITE_LIMS_SSO_REDIRECT_URI=https://lims.omnibioai.org/sso/callback
-          cache-from: type=gha,scope=${{ matrix.target }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${{ github.repository }}"
+          SHA="${{ needs.resolve-version.outputs.sha }}"
+          VERSION="${{ needs.resolve-version.outputs.version }}"
+          docker buildx imagetools create --tag "${IMAGE}:${VERSION}" "${IMAGE}:staging-index-${SHA}"
+
+  publish-version-frontend:
+    name: Publish frontend :X.Y.Z
+    runs-on: ubuntu-24.04
+    needs: [resolve-version, verify-frontend, smoke-frontend-amd64, smoke-frontend-arm64]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${{ github.repository }}-web"
+          SHA="${{ needs.resolve-version.outputs.sha }}"
+          VERSION="${{ needs.resolve-version.outputs.version }}"
+          docker buildx imagetools create --tag "${IMAGE}:${VERSION}" "${IMAGE}:staging-index-${SHA}"
+
+  # ── latest promotion (gated last, atomic retag of the published version) ──
+  # Never builds anything new: retags the just-published :X.Y.Z to
+  # :latest, so :latest can never observably point at a partially
+  # completed release either.
+  promote-latest-backend:
+    name: Promote backend :latest
+    runs-on: ubuntu-24.04
+    needs: [resolve-version, publish-version-backend]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${{ github.repository }}"
+          VERSION="${{ needs.resolve-version.outputs.version }}"
+          docker buildx imagetools create --tag "${IMAGE}:latest" "${IMAGE}:${VERSION}"
+
+  promote-latest-frontend:
+    name: Promote frontend :latest
+    runs-on: ubuntu-24.04
+    needs: [resolve-version, publish-version-frontend]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${{ github.repository }}-web"
+          VERSION="${{ needs.resolve-version.outputs.version }}"
+          docker buildx imagetools create --tag "${IMAGE}:latest" "${IMAGE}:${VERSION}"

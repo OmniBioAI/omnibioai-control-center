@@ -1,0 +1,106 @@
+name: Build native architecture image
+description: >
+  Builds and pushes exactly ONE architecture of one Control Center image to
+  an immutable, collision-safe staging tag (never a mutable version/latest
+  tag). Asserts it is actually running on its declared native architecture
+  first -- no QEMU, no cross-arch emulation anywhere in this path. The
+  caller is responsible for assembling the final multi-arch OCI index from
+  this action's digest output once both architectures for an image have
+  succeeded.
+
+inputs:
+  target:
+    description: Dockerfile build target (backend|frontend)
+    required: true
+  image:
+    description: Fully-qualified image repository, e.g. ghcr.io/org/name
+    required: true
+  arch:
+    description: Docker platform architecture segment (amd64|arm64)
+    required: true
+  expect-uname:
+    description: Expected `uname -m` on this runner (x86_64|aarch64)
+    required: true
+  version:
+    description: Normalized release version, e.g. 1.2.3 (no leading v)
+    required: true
+  source-sha:
+    description: Exact 40-character source commit SHA being released
+    required: true
+  github-token:
+    description: Token used to authenticate to GHCR for this push
+    required: true
+
+outputs:
+  digest:
+    description: Exact immutable digest of the pushed single-architecture image
+    value: ${{ steps.build.outputs.digest }}
+
+runs:
+  using: composite
+  steps:
+    - name: Assert native architecture (no QEMU)
+      shell: bash
+      run: |
+        set -euo pipefail
+        actual="$(uname -m)"
+        expected="${{ inputs.expect-uname }}"
+        if [ "$actual" != "$expected" ]; then
+          echo "::error::Expected native '$expected', runner reports '$actual' -- refusing to build under emulation" >&2
+          exit 1
+        fi
+        echo "Native architecture confirmed: $actual"
+
+    - name: Assert exact 40-character source SHA
+      shell: bash
+      run: |
+        set -euo pipefail
+        sha="${{ inputs.source-sha }}"
+        if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+          echo "::error::source-sha '$sha' is not an exact 40-character hex SHA" >&2
+          exit 1
+        fi
+
+    - name: Log in to GHCR
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.github-token }}
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Extract OCI labels
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ inputs.image }}
+        tags: type=raw,value=${{ inputs.version }}
+        labels: |
+          org.opencontainers.image.revision=${{ inputs.source-sha }}
+          org.opencontainers.image.version=${{ inputs.version }}
+
+    - name: Build and push architecture-staged image
+      id: build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        target: ${{ inputs.target }}
+        platforms: linux/${{ inputs.arch }}
+        push: true
+        # Collision-safe: unique per (arch, commit) -- two concurrent
+        # releases, or a re-run of the same release, never fight over this
+        # tag the way two architectures racing on :latest/:X.Y.Z would.
+        # This is intentionally NEVER a mutable version/latest tag; only
+        # the assemble-* jobs (operating on the immutable digest output
+        # below) are allowed to write those.
+        tags: ${{ inputs.image }}:staging-${{ inputs.arch }}-${{ inputs.source-sha }}
+        labels: ${{ steps.meta.outputs.labels }}
+        provenance: true
+        sbom: true
+        build-args: |
+          VITE_LIMS_SSO_CLIENT_ID=omnibioai-lims
+          VITE_LIMS_SSO_REDIRECT_URI=https://lims.omnibioai.org/sso/callback
+        cache-from: type=gha,scope=${{ inputs.target }}-${{ inputs.arch }}
+        cache-to: type=gha,mode=max,scope=${{ inputs.target }}-${{ inputs.arch }}
