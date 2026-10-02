@@ -14,6 +14,13 @@ sentry_sdk.init(
         FastApiIntegration(),
         StarletteIntegration(),
     ],
+    # Sentry's own default-integration auto-discovery (iter_default_integrations)
+    # imports every instrumentable library it finds installed, including
+    # botocore -> urllib3.contrib.pyopenssl -> OpenSSL.SSL; that import SIGILLs
+    # on native linux/arm64 (OpenSSL/cryptography's ARM capability probe),
+    # crashing the process before it can serve a single request. This app
+    # doesn't use botocore, so only the two integrations above are needed.
+    default_integrations=False,
     traces_sample_rate=0.1,
     environment=os.environ.get("SENTRY_ENVIRONMENT", "beta"),
     release=os.environ.get("SENTRY_RELEASE", "0.2.0-beta"),

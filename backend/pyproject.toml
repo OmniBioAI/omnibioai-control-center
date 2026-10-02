@@ -17,6 +17,13 @@ dependencies = [
   "neo4j>=5.0",
   "pip-audit>=2.7",
   "PyJWT[crypto]>=2.8",
+  # cryptography>=48,<=50 ships an aarch64 wheel (_rust.abi3.so) that SIGILLs
+  # on native linux/arm64 at import time -- confirmed upstream wheel defect
+  # (reproduces with cryptography alone on a clean base, independent of this
+  # app or any OmniBioAI image), already root-caused and corrected the same
+  # way elsewhere on this platform. 46.0.3 is the latest version confirmed to
+  # import and run cleanly on native ARM64.
+  "cryptography==46.0.3",
   # HIPAA Basic Compliance Report v0.8.0: PDF generation (compliance/pdf.py).
   # Jinja2 renders templates/hipaa_report.html to a string; WeasyPrint
   # renders that HTML/CSS string to a PDF. Neither was a dependency of any
