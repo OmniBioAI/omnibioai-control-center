@@ -20,8 +20,8 @@ ARG VITE_LIMS_SSO_REDIRECT_URI
 RUN npm run build && npm run build:admin && npm run build:control && npm run build:control:studio
 
 # ── Stage 2: Python backend ────────────────────────────────────────────────────
-FROM ghcr.io/omnibioai/omnibioai-base:latest AS backend
-LABEL org.opencontainers.image.source=https://github.com/man4ish/omnibioai
+FROM ghcr.io/omnibioai/omnibioai-base:1.0.0 AS backend
+LABEL org.opencontainers.image.source=https://github.com/OmniBioAI/omnibioai-control-center
 WORKDIR /app
 
 # Rust needed for gseapy compilation.
