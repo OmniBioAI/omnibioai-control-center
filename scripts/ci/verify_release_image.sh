@@ -97,7 +97,7 @@ echo "linux/arm64 runtime digest: ${ARM64_DIGEST}"
 verify_runtime_labels() {
   local arch="$1" digest="$2"
   local labels
-  labels="$(docker buildx imagetools inspect "${IMAGE}@${digest}" --format '{{json .Image.config.Labels}}')" \
+  labels="$(docker buildx imagetools inspect "${IMAGE}@${digest}" --format '{{json .Image.Config.Labels}}')" \
     || fail "could not inspect config for ${arch} runtime digest ${digest}"
 
   local source revision version
