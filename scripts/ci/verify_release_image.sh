@@ -174,9 +174,12 @@ while IFS= read -r entry; do
   done <<<"$predicate_types"
 done <<<"$ATTESTATION_ENTRIES"
 
-for pair in "amd64:${AMD64_DIGEST}" "arm64:${ARM64_DIGEST}"; do
-  arch="${pair%%:*}"
-  digest="${pair##*:}"
+# Explicit per-architecture calls (no arch:digest packing/splitting) --
+# AMD64_DIGEST/ARM64_DIGEST are already distinct variables holding the
+# complete "sha256:<hex>" digest; passing each straight through avoids
+# ever having to split a string that itself contains a colon.
+verify_subject_binding() {
+  local arch="$1" digest="$2"
 
   [ "${HAS_SBOM[$digest]:-0}" = "1" ] \
     || fail "${arch} (${digest}): no SPDX SBOM attestation subject-bound to this runtime digest"
@@ -184,6 +187,9 @@ for pair in "amd64:${AMD64_DIGEST}" "arm64:${ARM64_DIGEST}"; do
     || fail "${arch} (${digest}): no SLSA provenance attestation subject-bound to this runtime digest"
 
   echo "${arch}: SBOM and provenance subject-binding OK"
-done
+}
+
+verify_subject_binding amd64 "$AMD64_DIGEST"
+verify_subject_binding arm64 "$ARM64_DIGEST"
 
 echo "PASS: ${REF} satisfies structured remote verification (both architectures, source/revision/version, SBOM + provenance subject-binding)"
