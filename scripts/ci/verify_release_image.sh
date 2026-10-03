@@ -21,28 +21,45 @@
 # This script intentionally has no "warn and continue" path -- partial
 # evidence is not accepted as PASS anywhere in this file.
 #
-# Usage:
-#   verify_release_image.sh <image-repo> <version> <expected-source-url> <expected-revision-sha>
+# REF_TAG (the registry tag actually inspected) and EXPECTED_VERSION (the
+# org.opencontainers.image.version label value asserted on each runtime
+# manifest) are deliberately independent arguments. They are the SAME
+# string only when verifying an already-published :X.Y.Z tag; they differ
+# when verifying a pre-publication staging-index-<sha> tag, whose runtime
+# images are already labeled with the real target version even though the
+# tag itself is not that version. Do not collapse these back into one
+# argument.
 #
-# Example:
+# Usage:
+#   verify_release_image.sh <image-repo> <ref-tag> <expected-source-url> <expected-revision-sha> <expected-version>
+#
+# Example (verifying an already-published version tag, where ref-tag and
+# expected-version happen to be the same string):
 #   verify_release_image.sh ghcr.io/OmniBioAI/omnibioai-control-center \
 #     1.2.3 https://github.com/OmniBioAI/omnibioai-control-center \
-#     cafef00dcafef00dcafef00dcafef00dcafef00d
+#     cafef00dcafef00dcafef00dcafef00dcafef00d 1.2.3
+#
+# Example (verifying a pre-publication staging index, where they differ):
+#   verify_release_image.sh ghcr.io/OmniBioAI/omnibioai-control-center \
+#     staging-index-cafef00dcafef00dcafef00dcafef00dcafef00d \
+#     https://github.com/OmniBioAI/omnibioai-control-center \
+#     cafef00dcafef00dcafef00dcafef00dcafef00d 1.2.3
 #
 # Requires: docker buildx, jq.
 
 set -euo pipefail
 
-if [ "$#" -ne 4 ]; then
-  echo "usage: $0 <image-repo> <version> <expected-source-url> <expected-revision-sha>" >&2
+if [ "$#" -ne 5 ]; then
+  echo "usage: $0 <image-repo> <ref-tag> <expected-source-url> <expected-revision-sha> <expected-version>" >&2
   exit 2
 fi
 
 IMAGE="$1"
-VERSION="$2"
+REF_TAG="$2"
 EXPECTED_SOURCE="$3"
 EXPECTED_REVISION="$4"
-REF="${IMAGE}:${VERSION}"
+EXPECTED_VERSION="$5"
+REF="${IMAGE}:${REF_TAG}"
 
 if ! [[ "$EXPECTED_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
   echo "FAIL: expected-revision-sha argument '$EXPECTED_REVISION' is not an exact 40-character hex SHA" >&2
@@ -111,8 +128,8 @@ verify_runtime_labels() {
     || fail "${arch}: org.opencontainers.image.revision='${revision}' is not an exact 40-character hex SHA"
   [ "$revision" = "$EXPECTED_REVISION" ] \
     || fail "${arch}: org.opencontainers.image.revision='${revision}', expected '${EXPECTED_REVISION}'"
-  [ "$version" = "$VERSION" ] \
-    || fail "${arch}: org.opencontainers.image.version='${version}', expected '${VERSION}'"
+  [ "$version" = "$EXPECTED_VERSION" ] \
+    || fail "${arch}: org.opencontainers.image.version='${version}', expected '${EXPECTED_VERSION}'"
 
   echo "${arch}: OCI source/revision/version OK"
 }

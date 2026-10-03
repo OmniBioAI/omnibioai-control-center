@@ -294,7 +294,8 @@ jobs:
             "ghcr.io/${{ needs.resolve-version.outputs.repo }}" \
             "staging-index-${{ needs.resolve-version.outputs.sha }}" \
             "https://github.com/${{ github.repository }}" \
-            "${{ needs.resolve-version.outputs.sha }}"
+            "${{ needs.resolve-version.outputs.sha }}" \
+            "${{ needs.resolve-version.outputs.version }}"
 
   verify-frontend:
     name: Verify staged frontend release contract
@@ -310,7 +311,8 @@ jobs:
             "ghcr.io/${{ needs.resolve-version.outputs.repo }}-web" \
             "staging-index-${{ needs.resolve-version.outputs.sha }}" \
             "https://github.com/${{ github.repository }}" \
-            "${{ needs.resolve-version.outputs.sha }}"
+            "${{ needs.resolve-version.outputs.sha }}" \
+            "${{ needs.resolve-version.outputs.version }}"
 
   # ── Native runtime smoke (per architecture, against the staging index) ──
   # Each job resolves its OWN architecture's exact digest fresh from the
