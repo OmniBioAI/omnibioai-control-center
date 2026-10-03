@@ -84,6 +84,7 @@ jobs:
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       sha: ${{ steps.resolve.outputs.sha }}
+      repo: ${{ steps.resolve.outputs.repo }}
     permissions:
       contents: read
     steps:
@@ -102,8 +103,18 @@ jobs:
             echo "::error::GITHUB_SHA '$SHA' is not an exact 40-character hex SHA" >&2
             exit 1
           fi
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          # Single authoritative lowercasing point: GHCR/OCI repository names
+          # must be all-lowercase, but github.repository preserves the GitHub
+          # org's actual configured case (OmniBioAI/...). Every downstream
+          # job consumes this output instead of touching github.repository
+          # directly, so there is exactly one place this normalization can
+          # ever drift.
+          REPO_LOWER="$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          {
+            echo "version=${VERSION}"
+            echo "sha=${SHA}"
+            echo "repo=${REPO_LOWER}"
+          } >> "$GITHUB_OUTPUT"
 
   # ── Native per-architecture builds ──────────────────────────────────
   # Each of these 4 jobs builds and pushes exactly ONE architecture of
@@ -131,7 +142,7 @@ jobs:
         uses: ./.github/actions/build-native-arch-image
         with:
           target: backend
-          image: ghcr.io/${{ github.repository }}
+          image: ghcr.io/${{ needs.resolve-version.outputs.repo }}
           arch: amd64
           expect-uname: x86_64
           version: ${{ needs.resolve-version.outputs.version }}
@@ -153,7 +164,7 @@ jobs:
         uses: ./.github/actions/build-native-arch-image
         with:
           target: backend
-          image: ghcr.io/${{ github.repository }}
+          image: ghcr.io/${{ needs.resolve-version.outputs.repo }}
           arch: arm64
           expect-uname: aarch64
           version: ${{ needs.resolve-version.outputs.version }}
@@ -175,7 +186,7 @@ jobs:
         uses: ./.github/actions/build-native-arch-image
         with:
           target: frontend
-          image: ghcr.io/${{ github.repository }}-web
+          image: ghcr.io/${{ needs.resolve-version.outputs.repo }}-web
           arch: amd64
           expect-uname: x86_64
           version: ${{ needs.resolve-version.outputs.version }}
@@ -197,7 +208,7 @@ jobs:
         uses: ./.github/actions/build-native-arch-image
         with:
           target: frontend
-          image: ghcr.io/${{ github.repository }}-web
+          image: ghcr.io/${{ needs.resolve-version.outputs.repo }}-web
           arch: arm64
           expect-uname: aarch64
           version: ${{ needs.resolve-version.outputs.version }}
@@ -231,7 +242,7 @@ jobs:
       - name: Assemble staging index from immutable per-arch digests
         run: |
           set -euo pipefail
-          IMAGE="ghcr.io/${{ github.repository }}"
+          IMAGE="ghcr.io/${{ needs.resolve-version.outputs.repo }}"
           SHA="${{ needs.resolve-version.outputs.sha }}"
           docker buildx imagetools create \
             --tag "${IMAGE}:staging-index-${SHA}" \
@@ -255,7 +266,7 @@ jobs:
       - name: Assemble staging index from immutable per-arch digests
         run: |
           set -euo pipefail
-          IMAGE="ghcr.io/${{ github.repository }}-web"
+          IMAGE="ghcr.io/${{ needs.resolve-version.outputs.repo }}-web"
           SHA="${{ needs.resolve-version.outputs.sha }}"
           docker buildx imagetools create \
             --tag "${IMAGE}:staging-index-${SHA}" \
@@ -280,7 +291,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           scripts/ci/verify_release_image.sh \
-            "ghcr.io/${{ github.repository }}" \
+            "ghcr.io/${{ needs.resolve-version.outputs.repo }}" \
             "staging-index-${{ needs.resolve-version.outputs.sha }}" \
             "https://github.com/${{ github.repository }}" \
             "${{ needs.resolve-version.outputs.sha }}"
@@ -296,7 +307,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           scripts/ci/verify_release_image.sh \
-            "ghcr.io/${{ github.repository }}-web" \
+            "ghcr.io/${{ needs.resolve-version.outputs.repo }}-web" \
             "staging-index-${{ needs.resolve-version.outputs.sha }}" \
             "https://github.com/${{ github.repository }}" \
             "${{ needs.resolve-version.outputs.sha }}"
@@ -318,7 +329,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           scripts/ci/native_runtime_smoke.sh backend \
-            "ghcr.io/${{ github.repository }}" \
+            "ghcr.io/${{ needs.resolve-version.outputs.repo }}" \
             "staging-index-${{ needs.resolve-version.outputs.sha }}" \
             x86_64
 
@@ -333,7 +344,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           scripts/ci/native_runtime_smoke.sh backend \
-            "ghcr.io/${{ github.repository }}" \
+            "ghcr.io/${{ needs.resolve-version.outputs.repo }}" \
             "staging-index-${{ needs.resolve-version.outputs.sha }}" \
             aarch64
 
@@ -348,7 +359,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           scripts/ci/native_runtime_smoke.sh frontend \
-            "ghcr.io/${{ github.repository }}-web" \
+            "ghcr.io/${{ needs.resolve-version.outputs.repo }}-web" \
             "staging-index-${{ needs.resolve-version.outputs.sha }}" \
             x86_64
 
@@ -363,7 +374,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           scripts/ci/native_runtime_smoke.sh frontend \
-            "ghcr.io/${{ github.repository }}-web" \
+            "ghcr.io/${{ needs.resolve-version.outputs.repo }}-web" \
             "staging-index-${{ needs.resolve-version.outputs.sha }}" \
             aarch64
 
@@ -389,7 +400,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - run: |
           set -euo pipefail
-          IMAGE="ghcr.io/${{ github.repository }}"
+          IMAGE="ghcr.io/${{ needs.resolve-version.outputs.repo }}"
           SHA="${{ needs.resolve-version.outputs.sha }}"
           VERSION="${{ needs.resolve-version.outputs.version }}"
           docker buildx imagetools create --tag "${IMAGE}:${VERSION}" "${IMAGE}:staging-index-${SHA}"
@@ -409,7 +420,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - run: |
           set -euo pipefail
-          IMAGE="ghcr.io/${{ github.repository }}-web"
+          IMAGE="ghcr.io/${{ needs.resolve-version.outputs.repo }}-web"
           SHA="${{ needs.resolve-version.outputs.sha }}"
           VERSION="${{ needs.resolve-version.outputs.version }}"
           docker buildx imagetools create --tag "${IMAGE}:${VERSION}" "${IMAGE}:staging-index-${SHA}"
@@ -433,7 +444,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - run: |
           set -euo pipefail
-          IMAGE="ghcr.io/${{ github.repository }}"
+          IMAGE="ghcr.io/${{ needs.resolve-version.outputs.repo }}"
           VERSION="${{ needs.resolve-version.outputs.version }}"
           docker buildx imagetools create --tag "${IMAGE}:latest" "${IMAGE}:${VERSION}"
 
@@ -452,6 +463,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - run: |
           set -euo pipefail
-          IMAGE="ghcr.io/${{ github.repository }}-web"
+          IMAGE="ghcr.io/${{ needs.resolve-version.outputs.repo }}-web"
           VERSION="${{ needs.resolve-version.outputs.version }}"
           docker buildx imagetools create --tag "${IMAGE}:latest" "${IMAGE}:${VERSION}"
