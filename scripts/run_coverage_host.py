@@ -292,6 +292,49 @@ def _pytest_cwd(repo: Path) -> Path:
     return repo
 
 
+def _uses_source_tree_for_tests(cwd: Path) -> bool:
+    """Return whether a repository's test contract runs from its checkout.
+
+    TES deliberately does not use an editable install in CI: its repository
+    ``setup.py`` is a separately invoked Cython production-build entry point,
+    not the test installation path.  Keep host coverage aligned with that
+    documented contract instead of invoking the Cython build backend.
+
+    Workbench's documented coverage commands likewise invoke pytest directly
+    from the repository root.  Its pytest configuration adds that root to
+    ``sys.path``, so an editable install is unnecessary and only introduces a
+    network-dependent isolated-build step.
+    """
+    return bool(
+        (
+            cwd.name == "omnibioai-tes"
+            and (cwd / "src" / "omnibioai_tool_exec").is_dir()
+        )
+        or (
+            cwd.name == "omnibioai-workbench"
+            and (cwd / "omnibioai").is_dir()
+            and (cwd / "plugins").is_dir()
+        )
+        or (
+            cwd.name == "omnibioai-lims"
+            and (cwd / "manage.py").is_file()
+            and (cwd / "core").is_dir()
+            and (cwd / "lab_data_manager").is_dir()
+        )
+        or (
+            cwd.name == "backend"
+            and cwd.parent.name == "omnibioai-control-center"
+            and (cwd / "src" / "control_center").is_dir()
+        )
+    )
+
+
+def _coverage_python(repo: Path) -> Path:
+    """Use a cached isolated interpreter when one exists for the repository."""
+    candidate = repo.parent / "work" / "coverage-envs" / repo.name / "bin" / "python"
+    return candidate if candidate.is_file() else Path(sys.executable)
+
+
 def _normalize_coverage_sources(value: str) -> List[str]:
     return [
         source.strip()
@@ -336,6 +379,58 @@ def _cov_source_args(cwd: Path) -> List[str]:
 
 def _subprocess_env(cwd: Path) -> dict:
     env = os.environ.copy()
+    # Do not leak another checkout's source path into this repository's
+    # imports (for example, ``from scripts import ...`` is common in tests).
+    # Repository-specific source layouts are added explicitly below.
+    env.pop("PYTHONPATH", None)
+    if cwd.name == "omnibioai-tes" and _uses_source_tree_for_tests(cwd):
+        source_dir = str(cwd / "src")
+        existing = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = (
+            source_dir + os.pathsep + existing if existing else source_dir
+        )
+    if cwd.name == "backend" and _uses_source_tree_for_tests(cwd):
+        source_dir = str(cwd / "src")
+        existing = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = (
+            source_dir + os.pathsep + existing if existing else source_dir
+        )
+    if cwd.name == "omnibioai-workbench":
+        env.setdefault("DJANGO_SECRET_KEY", "coverage-test-only-not-for-production")
+        # Keep native numerical libraries from spawning unrestricted worker
+        # pools on the host.  Workbench imports NumPy/Torch/FAISS extensions;
+        # their combined thread pools can otherwise trigger a macOS SIGSEGV
+        # during the broad test collection.
+        for name in (
+            "OMP_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "VECLIB_MAXIMUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+        ):
+            env.setdefault(name, "1")
+        env.setdefault("TOKENIZERS_PARALLELISM", "false")
+        # The application defaults this read-only test cache to /app/work,
+        # which only exists inside the production container.  Keep coverage
+        # runs host-safe by redirecting it to the external work area.
+        cache_root = cwd.parent / "work" / "test-cache" / cwd.name
+        env.setdefault(
+            "OMNIBIOAI_INTELLIGENCE_CACHE",
+            str(cache_root / "intelligence_cache"),
+        )
+        # Several read-only service tests use the container defaults
+        # ``/app/work/objects`` and ``/app/work/object_registry.json``.
+        # Redirect all object/data roots to the same disposable host area.
+        env.setdefault("OMNIBIOAI_DATA_ROOT", str(cache_root / "data"))
+        env.setdefault("OMNI_OBJECT_STORAGE_DIR", str(cache_root / "objects"))
+        env.setdefault(
+            "OMNI_OBJECT_REGISTRY_FILE",
+            str(cache_root / "object_registry.json"),
+        )
+        env.setdefault(
+            "OMNI_OBJECT_REGISTRY_PATH",
+            str(cache_root / "object_registry.json"),
+        )
     for cfg_path in [
         cwd / "pytest.ini", cwd / "setup.cfg",
         cwd.parent / "pytest.ini", cwd.parent / "setup.cfg",
@@ -575,13 +670,14 @@ def run_repo(repo: Path, timeout_override: int | None = None) -> Dict[str, Any]:
     cwd      = _pytest_cwd(repo)
     cov_args = _cov_source_args(cwd)
     env      = _subprocess_env(cwd)
+    python   = _coverage_python(repo)
 
     # Install the package in editable mode so its own imports resolve.
     # --no-deps: host already has deps; we just need the importable package.
-    if (cwd / "pyproject.toml").exists():
+    if (cwd / "pyproject.toml").exists() and not _uses_source_tree_for_tests(cwd):
         print(f"    pip install -e . --no-deps …", end=" ", flush=True)
         pip = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-e", ".", "--quiet", "--no-deps"],
+            [str(python), "-m", "pip", "install", "-e", ".", "--quiet", "--no-deps"],
             cwd=str(cwd), capture_output=True, timeout=120,
         )
         result["install_returncode"] = pip.returncode
@@ -589,14 +685,19 @@ def run_repo(repo: Path, timeout_override: int | None = None) -> Dict[str, Any]:
         pip_stderr = pip.stderr.decode(errors="replace") if isinstance(pip.stderr, bytes) else (pip.stderr or "")
         result["install_stderr_tail"] = "\n".join(pip_stderr.strip().splitlines()[-10:]) or None
         print("ok" if pip.returncode == 0 else f"WARN rc={pip.returncode}")
+    elif _uses_source_tree_for_tests(cwd):
+        result["install_status"] = "skipped_source_tree"
 
     junit_handle = tempfile.NamedTemporaryFile(
         prefix=f"{repo.name}-", suffix=".junit.xml", delete=False
     )
     junit_path = Path(junit_handle.name)
     junit_handle.close()
+    # Never interpret a previous run's coverage JSON as the current result if
+    # pytest exits before it can create a fresh report.
+    (cwd / "coverage.json").unlink(missing_ok=True)
     cmd = [
-        sys.executable, "-m", "pytest",
+        str(python), "-m", "pytest",
         *cov_args,
         "--cov-report=term-missing", "--cov-report=json",
         "--junitxml", str(junit_path),

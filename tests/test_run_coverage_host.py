@@ -103,3 +103,40 @@ source = api
         "--cov=control_center",
         "--cov=scripts",
     ]
+
+
+def test_tes_uses_source_tree_test_contract(tmp_path: Path, monkeypatch) -> None:
+    repo = tmp_path / "omnibioai-tes"
+    (repo / "src" / "omnibioai_tool_exec").mkdir(parents=True)
+    monkeypatch.setenv("PYTHONPATH", "/existing/path")
+
+    assert run_coverage_host._uses_source_tree_for_tests(repo) is True
+    assert run_coverage_host._subprocess_env(repo)["PYTHONPATH"] == str(repo / "src")
+
+
+def test_non_tes_src_layout_does_not_bypass_editable_install(tmp_path: Path) -> None:
+    repo = tmp_path / "another-repo"
+    (repo / "src" / "omnibioai_tool_exec").mkdir(parents=True)
+
+    assert run_coverage_host._uses_source_tree_for_tests(repo) is False
+
+
+def test_workbench_uses_isolated_source_tree_contract(tmp_path: Path) -> None:
+    repo = tmp_path / "omnibioai-workbench"
+    (repo / "omnibioai").mkdir(parents=True)
+    (repo / "plugins").mkdir()
+
+    assert run_coverage_host._uses_source_tree_for_tests(repo) is True
+    assert run_coverage_host._subprocess_env(repo)["DJANGO_SECRET_KEY"] == (
+        "coverage-test-only-not-for-production"
+    )
+
+
+def test_coverage_python_prefers_cached_repo_environment(tmp_path: Path) -> None:
+    repo = tmp_path / "omnibioai-workbench"
+    repo.mkdir()
+    python = tmp_path / "work" / "coverage-envs" / repo.name / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.touch()
+
+    assert run_coverage_host._coverage_python(repo) == python

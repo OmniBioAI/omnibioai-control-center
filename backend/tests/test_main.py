@@ -970,15 +970,13 @@ class TestReportPublicStats(unittest.TestCase):
         self.assertEqual(set(resp.json().keys()), _PUBLIC_STATS_KEYS)
 
     def test_values_from_fixture(self):
-        """The aggregate values are correctly derived from report_data.json, using statement-weighted (not unweighted-mean) coverage."""
+        """The aggregate values match the unweighted mean shown by Control Center."""
         body = self._get_with_data(_FULL_REPORT_DATA).json()
         self.assertEqual(body["generated_at"], "2026-09-02T04:00:00+00:00")
         self.assertEqual(body["total_lines"], 1863200)
         self.assertEqual(body["total_files"], 14820)
-        # statement-weighted: (4000-300)+(2000-780) = 4920 covered of
-        # 6000 total stmts -> 82.0%. NOT the unweighted mean of
-        # (92.5, 61.0) = 76.75 the HTML report would show.
-        self.assertEqual(body["ecosystem_coverage_percent"], 82.0)
+        # Match the HTML report's per-repository mean: (92.5 + 61.0) / 2.
+        self.assertEqual(body["ecosystem_coverage_percent"], 76.75)
         # two rows have a non-null pct; the third (pct=None) does not.
         self.assertEqual(body["repos_measured"], 2)
 
@@ -1066,7 +1064,7 @@ class TestReportPublicStats(unittest.TestCase):
         body = self._get_with_data(data).json()
         self.assertIsNone(body["total_lines"])
         self.assertIsNone(body["total_files"])
-        self.assertEqual(body["ecosystem_coverage_percent"], 82.0)
+        self.assertEqual(body["ecosystem_coverage_percent"], 76.75)
 
     def test_registered_directly_on_app_not_report_router(self):
         """report_router carries a platform.manage_infra include-time gate;

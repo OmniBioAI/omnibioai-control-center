@@ -137,13 +137,25 @@ Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 # defaults cover both production domains (docs/admin-console-build.md)
 # and this app's own local dev ports (5173 `npm run dev`, 5174 the
 # nginx-fronted prod-like local build).
+#
+# https://omnibioai.org added deliberately (not same-origin, unlike
+# admin/control.omnibioai.org): the public landing page fetches this
+# backend's DELIBERATELY UNAUTHENTICATED endpoints client-side (GET
+# /health, GET /report/public-stats -- see that route's own docstring
+# below for the explicit-allowlist contract) to show live platform
+# status. Most other routes in this file are gated behind
+# Depends(require_permission(...)) regardless of CORS -- confirmed live,
+# a direct curl to one of those still 401s with this origin -- so this
+# origin addition only actually unlocks the routes that were already
+# built to be public.
 CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.environ.get(
         "CORS_ALLOWED_ORIGINS",
         "http://localhost:5173,http://127.0.0.1:5173,"
         "http://localhost:5174,http://127.0.0.1:5174,"
-        "https://admin.omnibioai.org,https://control.omnibioai.org",
+        "https://admin.omnibioai.org,https://control.omnibioai.org,"
+        "https://omnibioai.org",
     ).split(",")
     if origin.strip()
 ]
@@ -989,18 +1001,11 @@ def _build_public_stats(raw: dict) -> dict:
     """Construct the /report/public-stats response from a parsed
     report_data.json, naming every output key explicitly.
 
-    ecosystem_coverage_percent is a STATEMENT-WEIGHTED average:
-
-        100 * sum(stmts - missed) / sum(stmts)
-
-    over coverage[] rows that have a non-null `pct` AND numeric
-    `stmts`/`missed`. This is deliberately NOT the figure the HTML
-    report's Code Coverage tab shows -- that one
-    (scripts/sections/coverage.py: `valid["coverage_pct"].mean()`) is an
-    UNWEIGHTED mean of per-repo percentages, which over-weights small
-    repos. Weighted-by-statements is the more statistically honest
-    ecosystem-wide number; the two definitions are kept distinct on
-    purpose, so don't "reconcile" them.
+    ecosystem_coverage_percent is the unweighted mean of the per-repository
+    percentages, matching the Code Coverage tab in the generated Control
+    Center report (`valid["coverage_pct"].mean()`). This keeps the public
+    landing-page statistic consistent with the value users see in Control
+    Center rather than presenting a second aggregation definition.
 
     Only aggregate scalars are read here: grand.code, grand.files,
     generated_at, and (stmts, missed, pct) off each coverage row. The
@@ -1014,8 +1019,7 @@ def _build_public_stats(raw: dict) -> dict:
     coverage_rows = raw.get("coverage")
     coverage_rows = coverage_rows if isinstance(coverage_rows, list) else []
 
-    total_stmts = 0.0
-    covered_stmts = 0.0
+    percentages = []
     repos_measured = 0
     for row in coverage_rows:
         if not isinstance(row, dict):
@@ -1027,20 +1031,10 @@ def _build_public_stats(raw: dict) -> dict:
         # coverage percentage, matching the "with data" figure the HTML
         # report shows.
         repos_measured += 1
-        stmts = row.get("stmts")
-        missed = row.get("missed")
-        if (
-            isinstance(stmts, (int, float))
-            and not isinstance(stmts, bool)
-            and stmts > 0
-            and isinstance(missed, (int, float))
-            and not isinstance(missed, bool)
-        ):
-            total_stmts += stmts
-            covered_stmts += max(stmts - missed, 0)
+        percentages.append(float(pct))
 
     ecosystem_coverage_percent = (
-        round(100.0 * covered_stmts / total_stmts, 2) if total_stmts > 0 else None
+        round(sum(percentages) / len(percentages), 2) if percentages else None
     )
 
     total_lines = grand.get("code")
