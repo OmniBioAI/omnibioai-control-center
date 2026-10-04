@@ -395,6 +395,19 @@ def _subprocess_env(cwd: Path) -> dict:
         env["PYTHONPATH"] = (
             source_dir + os.pathsep + existing if existing else source_dir
         )
+    # Auth and Billing keep importable maintenance modules under ``scripts/``
+    # rather than installing them as a package.  The host runner deliberately
+    # clears inherited PYTHONPATH to prevent cross-repository imports, so add
+    # the current repository root back explicitly for these two source-tree
+    # projects.  Without this, tests importing ``scripts.backfill_default_org``
+    # and ``scripts.import_legacy_licenses`` can resolve an unrelated ambient
+    # ``scripts`` package and fail during collection, understating coverage.
+    if cwd.name in {"omnibioai-auth", "omnibioai-billing"}:
+        source_dir = str(cwd)
+        existing = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = (
+            source_dir + os.pathsep + existing if existing else source_dir
+        )
     if cwd.name == "omnibioai-workbench":
         env.setdefault("DJANGO_SECRET_KEY", "coverage-test-only-not-for-production")
         # Keep native numerical libraries from spawning unrestricted worker
