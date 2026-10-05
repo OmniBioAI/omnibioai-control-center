@@ -1,3 +1,7 @@
+# OmniBioAI — Control Center
+# Purpose: Build the React consoles, Python backend stage, and nginx frontend.
+# Author: Manish Kumar <manish@omnibioai.org>
+
 # ── Stage 1: Build React frontend (dual build: admin + control) ───────────────
 # Admin Console dual build architecture: produces two separate build
 # outputs from the same source -- dist-admin/ (admin.omnibioai.org,
@@ -14,7 +18,9 @@ FROM --platform=$BUILDPLATFORM node:20-bookworm-slim AS frontend-builder
 WORKDIR /frontend
 COPY frontend/cc-ui/package*.json ./
 RUN npm ci
+# Application source
 COPY frontend/cc-ui/ ./
+# Build arguments
 ARG VITE_LIMS_SSO_CLIENT_ID
 ARG VITE_LIMS_SSO_REDIRECT_URI
 RUN npm run build && npm run build:admin && npm run build:control && npm run build:control:studio
@@ -37,6 +43,7 @@ WORKDIR /app
 # are needed here even though nothing else in this image did before.
 RUN apt-get update && apt-get install -y --no-install-recommends     build-essential gcc g++ pkg-config libssl-dev libffi-dev curl ca-certificates cloc nodejs npm     libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-xlib-2.0-0 libcairo2 shared-mime-info fonts-liberation     && curl https://sh.rustup.rs -sSf | sh -s -- -y     && rm -rf /var/lib/apt/lists/*
 
+# Build configuration
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Copy source BEFORE pip install

@@ -1,7 +1,13 @@
+# OmniBioAI — Control Center Backend
+# Purpose: Build the Python control center API with Rust and PDF-rendering dependencies.
+# Author: Manish Kumar <manish@omnibioai.org>
+
+# Base image
 FROM python:3.12-slim
 
 WORKDIR /app
 
+# Runtime configuration
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
@@ -72,4 +78,5 @@ ENV PYTHONPATH=/app/src
 
 EXPOSE 7070
 
+# Entrypoint and default command
 CMD ["uvicorn", "control_center.main:app", "--host", "0.0.0.0", "--port", "7070"]
