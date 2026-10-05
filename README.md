@@ -567,14 +567,32 @@ Every genuinely new **high**-severity known issue (create only — never on upda
 `CONTROL_CENTER_ACCESS_TOKEN` — Short-lived IAM-issued operator access token used
 for protected Control Center report sections. The token must contain a user `sub`
 and the `platform.manage_infra` permission, and correspond to an authorized user.
-Supply it securely through the process environment after completing your
-environment's supported IAM login/SSO workflow. Do not put tokens in command-line
-arguments, shell history, source files, or `.env` files. This CLI does not acquire
-tokens or reuse browser sessions; no supported operator CLI login helper exists.
+If supplied through the environment, the CLI uses it without prompting or logging
+in. Otherwise, run the command in a terminal: it prompts for operator email and
+a password using `getpass` (no echo), then an MFA code without echo when IAM
+requires it. It calls IAM's `/auth/login` and `/users/me/mfa/challenge` contracts,
+then verifies the user's authorization through the protected `/license` endpoint
+before expensive report work. Login does not grant permissions. SSO-enforced
+accounts must use their supported IAM SSO workflow and supply an access token;
+this password login cannot bypass SSO or MFA enrollment policy.
+
+The CLI reuses `IAM_URL` when set. Otherwise it reads the Auth service address
+from `CONTROL_CENTER_CONFIG` or this repository's `config/control_center.yaml`.
+The Compose `auth-service` hostname maps to loopback on the host using its
+configured port; it stays internal in a container. Credential requests require
+HTTPS, loopback HTTP, or the container's configured `auth-service` endpoint.
+Redirects are rejected. The Studio `.env` fallback is resolved relative to the
+script's repository, not a machine-specific home directory.
+
+Passwords, MFA challenges/codes, and tokens remain in memory; the interactive
+access token is cleared when the run ends and is never exported to child process
+environments. No refresh token cache is created and no browser storage is read.
+Do not put tokens in command-line arguments, shell history, source files, or
+`.env` files. Non-interactive runs require `CONTROL_CENTER_ACCESS_TOKEN`.
 
 The CLI checks for the token before cloc, coverage, or report work begins.
 `--skip-health` and `--skip-coverage` still include protected sections and require
-the token. Missing tokens fail immediately; HTTP 401 means authentication failed,
+authentication. Missing tokens initiate terminal login; HTTP 401 means authentication failed,
 and HTTP 403 means the operator lacks permission. Unavailable/unimplemented
 endpoints are reported separately.
 

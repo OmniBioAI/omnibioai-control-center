@@ -14,6 +14,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -52,8 +53,15 @@ class ReportAuthenticationError(RuntimeError):
     """A protected report section requires operator authentication."""
 
 
+operator_access_token: ContextVar[str] = ContextVar("operator_access_token", default="")
+
+
+def _access_token() -> str:
+    return os.environ.get("CONTROL_CENTER_ACCESS_TOKEN", "").strip() or operator_access_token.get()
+
+
 def require_access_token() -> None:
-    if not os.environ.get("CONTROL_CENTER_ACCESS_TOKEN", "").strip():
+    if not _access_token():
         raise ReportAuthenticationError(
             "CONTROL_CENTER_ACCESS_TOKEN is required for protected report sections. "
             "Supply a short-lived IAM-issued operator access token containing "
@@ -64,7 +72,7 @@ def require_access_token() -> None:
 def _admin_header() -> Dict[str, str]:
     # Use an IAM-issued access token; the report must not mint its own
     # identity or permissions. Public endpoints also work without a token.
-    token = os.environ.get("CONTROL_CENTER_ACCESS_TOKEN", "").strip()
+    token = _access_token()
     return {"Authorization": f"Bearer {token}"} if token else {}
 
 def _overall_status(payload: Dict[str, Any]) -> str:
@@ -104,9 +112,9 @@ def fetch_health(base_url: str, timeout_s: float = 5.0) -> EcosystemHealth:
             overall_status=_overall_status(payload),
             generated_at=str(payload.get("generated_at", "")),
             services=services, disk=disk)
-    except urllib.error.URLError as e:
+    except urllib.error.URLError:
         return EcosystemHealth(overall_status="UNREACHABLE", generated_at="",
-                               error=f"Control Center unreachable: {e.reason}")
-    except Exception as e:
+                               error="Control Center unreachable")
+    except Exception:
         return EcosystemHealth(overall_status="UNREACHABLE", generated_at="",
-                               error=f"{type(e).__name__}: {e}")
+                               error="Control Center health response could not be read")

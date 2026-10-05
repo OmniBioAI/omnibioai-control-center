@@ -47,6 +47,7 @@ import pandas as pd
 
 from shared.cloc import Totals, ensure_cloc, run_cloc, validate_paths, _resolve_target_paths
 from shared.health_fetch import EcosystemHealth, fetch_health, require_access_token
+from shared.operator_login import operator_session
 from shared.css import SHARED_CSS, _CHARTJS, misc_section_html, sidebar_nav_html
 from shared.pagination_js import PAGINATION_JS
 from shared.helpers import fmt_int
@@ -113,15 +114,11 @@ def _default_compose_path() -> Path:
     env_path = os.environ.get("OMNIBIOAI_COMPOSE_PATH")
     if env_path:
         return Path(env_path)
-    # Two fallbacks because this script runs in two different contexts:
-    # inside the control-center container, ${MACHINE_DIR} on the host is
-    # mounted to /workspace (see docker-compose.yml), so the compose file
-    # lives under /workspace there; run directly on the host instead, it's
-    # still at its normal Desktop/machine location.
+    # Prefer the container mount, then discover the host path beside this repo.
     container_path = Path("/workspace/omnibioai-studio/docker-compose.yml")
     if container_path.exists():
         return container_path
-    return Path("/home/manish/Desktop/machine/omnibioai-studio/docker-compose.yml")
+    return Path(__file__).resolve().parents[2] / "omnibioai-studio" / "docker-compose.yml"
 
 DEFAULT_COMPOSE_PATH = _default_compose_path()
 
@@ -549,7 +546,9 @@ def parse_args() -> argparse.Namespace:
         epilog=("CONTROL_CENTER_ACCESS_TOKEN: Short-lived IAM-issued operator access "
                 "token used for protected Control Center report sections. Must correspond "
                 "to a user authorized for platform.manage_infra. Supply through the "
-                "environment; --skip-health does not skip protected sections."),
+                "environment to skip login; otherwise interactive IAM login (with MFA "
+                "when required). IAM_URL overrides the configured Auth service URL. "
+                "--skip-health does not skip protected sections."),
     )
     p.add_argument("--root", type=Path, default=None)
     p.add_argument("--targets", nargs="+", default=None)
@@ -654,15 +653,16 @@ def main() -> int:
             cwd = Path.cwd()
             ecosystem_root = cwd.parent if (cwd / "manage.py").exists() else cwd
     try:
-        out = generate_report(
-            ecosystem_root=ecosystem_root,
-            targets=args.targets,
-            out_relpath=args.out,
-            title=args.title,
-            control_center_url=args.control_center_url,
-            skip_health=args.skip_health,
-            skip_coverage=args.skip_coverage,
-            compose_path=args.compose_path)
+        with operator_session(args.control_center_url):
+            out = generate_report(
+                ecosystem_root=ecosystem_root,
+                targets=args.targets,
+                out_relpath=args.out,
+                title=args.title,
+                control_center_url=args.control_center_url,
+                skip_health=args.skip_health,
+                skip_coverage=args.skip_coverage,
+                compose_path=args.compose_path)
         print(f"\n✓ Report written: {out}")
         return 0
     except Exception as e:
