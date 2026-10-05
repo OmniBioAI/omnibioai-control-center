@@ -10,11 +10,15 @@ Author:
 
 from __future__ import annotations
 
-from shared.health_fetch import _admin_header
+import urllib.error
+
+from shared.health_fetch import _admin_header, ReportAuthenticationError, require_access_token
 
 def license_section_html(control_center_url: str) -> str:
     import urllib.request, json
+    require_access_token()
     data: dict = {}
+    unavailable = "/license returned no data."
     try:
         request = urllib.request.Request(
             f"{control_center_url.rstrip('/')}/license",
@@ -22,20 +26,35 @@ def license_section_html(control_center_url: str) -> str:
         )
         with urllib.request.urlopen(request, timeout=10) as r:
             data = json.loads(r.read())
-    except Exception as e:
-        print(f"[report] license_section_html failed: {type(e).__name__}: {e}", flush=True)
+    except urllib.error.HTTPError as e:
+        # Never include response bodies, URLs, or exception text in diagnostics.
+        if e.code == 401:
+            raise ReportAuthenticationError(
+                "/license: HTTP 401 authentication failure. Supply a valid, unexpired "
+                "short-lived IAM-issued operator access token through CONTROL_CENTER_ACCESS_TOKEN."
+            ) from None
+        if e.code == 403:
+            raise ReportAuthenticationError(
+                "/license: HTTP 403 insufficient permission. The user corresponding to "
+                "CONTROL_CENTER_ACCESS_TOKEN must be authorized for platform.manage_infra."
+            ) from None
+        if e.code in (404, 501):
+            unavailable = f"/license endpoint unavailable or not implemented (HTTP {e.code})."
+        else:
+            unavailable = f"/license endpoint unavailable (HTTP {e.code})."
+    except (urllib.error.URLError, TimeoutError):
+        unavailable = "/license endpoint unavailable (connection failed or timed out)."
+    except Exception:
+        unavailable = "/license response could not be read."
 
     if not data:
-        return """
+        print(f"[report] {unavailable}", flush=True)
+        return f"""
 <div class="tab-section">
 <div class="section">
   <div class="sec-title">license</div>
   <div style="font-size:12px;color:var(--color-text-muted)">
-    /license endpoint not implemented yet. Expected JSON shape:
-    <pre style="font-size:11px;color:var(--color-text-muted);margin-top:8px;white-space:pre-wrap">{
-  "seats_used": int, "seats_total": int,
-  "licenses": [{"org": str, "expires_at": str, "status": str}, ...]
-}</pre>
+    {unavailable}
   </div>
 </div>
 </div>"""

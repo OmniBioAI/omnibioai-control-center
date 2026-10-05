@@ -48,6 +48,19 @@ def _parse_disk(raw: Dict[str, Any]) -> DiskHealth:
                       status=str(raw.get("status", "WARN")).upper(),
                       message=str(raw.get("message", "")))
 
+class ReportAuthenticationError(RuntimeError):
+    """A protected report section requires operator authentication."""
+
+
+def require_access_token() -> None:
+    if not os.environ.get("CONTROL_CENTER_ACCESS_TOKEN", "").strip():
+        raise ReportAuthenticationError(
+            "CONTROL_CENTER_ACCESS_TOKEN is required for protected report sections. "
+            "Supply a short-lived IAM-issued operator access token containing "
+            "platform.manage_infra for an authorized user."
+        )
+
+
 def _admin_header() -> Dict[str, str]:
     # Use an IAM-issued access token; the report must not mint its own
     # identity or permissions. Public endpoints also work without a token.

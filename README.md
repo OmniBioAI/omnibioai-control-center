@@ -564,12 +564,26 @@ Every genuinely new **high**-severity known issue (create only — never on upda
 
 ### Generate
 
+`CONTROL_CENTER_ACCESS_TOKEN` — Short-lived IAM-issued operator access token used
+for protected Control Center report sections. The token must contain a user `sub`
+and the `platform.manage_infra` permission, and correspond to an authorized user.
+Supply it securely through the process environment after completing your
+environment's supported IAM login/SSO workflow. Do not put tokens in command-line
+arguments, shell history, source files, or `.env` files. This CLI does not acquire
+tokens or reuse browser sessions; no supported operator CLI login helper exists.
+
+The CLI checks for the token before cloc, coverage, or report work begins.
+`--skip-health` and `--skip-coverage` still include protected sections and require
+the token. Missing tokens fail immediately; HTTP 401 means authentication failed,
+and HTTP 403 means the operator lacks permission. Unavailable/unimplemented
+endpoints are reported separately.
+
 ```bash
 # From the ecosystem root — with live health data
 python omnibioai-control-center/scripts/generate_report.py \
     --root ~/Desktop/machine
 
-# Skip health check (faster, offline)
+# Skip health check (protected sections still require authentication)
 python omnibioai-control-center/scripts/generate_report.py \
     --root ~/Desktop/machine \
     --skip-health

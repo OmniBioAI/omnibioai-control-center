@@ -28,8 +28,9 @@ Options
 
 Authentication
 --------------
-CONTROL_CENTER_ACCESS_TOKEN  IAM-issued access token with platform.manage_infra
-                             for protected report sections (supplied via environment)
+CONTROL_CENTER_ACCESS_TOKEN  Short-lived IAM-issued operator access token used for
+                             protected Control Center report sections. Must correspond
+                             to a user authorized for platform.manage_infra.
 """
 
 from __future__ import annotations
@@ -45,7 +46,7 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from shared.cloc import Totals, ensure_cloc, run_cloc, validate_paths, _resolve_target_paths
-from shared.health_fetch import EcosystemHealth, fetch_health
+from shared.health_fetch import EcosystemHealth, fetch_health, require_access_token
 from shared.css import SHARED_CSS, _CHARTJS, misc_section_html, sidebar_nav_html
 from shared.pagination_js import PAGINATION_JS
 from shared.helpers import fmt_int
@@ -543,7 +544,13 @@ window.addEventListener('hashchange', function(){{ sbnavApplyHash(); }});
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Generate OmniBioAI ecosystem report")
+    p = argparse.ArgumentParser(
+        description="Generate OmniBioAI ecosystem report",
+        epilog=("CONTROL_CENTER_ACCESS_TOKEN: Short-lived IAM-issued operator access "
+                "token used for protected Control Center report sections. Must correspond "
+                "to a user authorized for platform.manage_infra. Supply through the "
+                "environment; --skip-health does not skip protected sections."),
+    )
     p.add_argument("--root", type=Path, default=None)
     p.add_argument("--targets", nargs="+", default=None)
     p.add_argument("--out", default=str(DEFAULT_OUT_PATH))
@@ -565,6 +572,8 @@ def generate_report(ecosystem_root: Path,
                     skip_health: bool = False,
                     skip_coverage: bool = False,
                     compose_path: str = str(DEFAULT_COMPOSE_PATH)) -> Path:
+    # /license is always included, even when health or coverage is skipped.
+    require_access_token()
     ensure_cloc()
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if not targets:
