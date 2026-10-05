@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.shared.pagination_js.
+
+Purpose:
+    Defines the JavaScript fragment used for report-table pagination.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 PAGINATION_JS = """

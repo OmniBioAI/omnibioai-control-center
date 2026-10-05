@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.sections.misc.storage.
+
+Purpose:
+    Builds report HTML through storage_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 def storage_section_html(control_center_url: str) -> str:

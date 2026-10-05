@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.sections.docker_images.
+
+Purpose:
+    Builds report HTML through docker_containers_section_html, docker_sif_section_html and docker_plugins_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 def docker_section_html_UNUSED(control_center_url: str) -> str:  # kept for reference; not included in report (duplicate of React DockerPage)

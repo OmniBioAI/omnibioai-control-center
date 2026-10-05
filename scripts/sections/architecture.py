@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.sections.architecture.
+
+Purpose:
+    Builds report HTML through architecture_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 from typing import Dict, Optional

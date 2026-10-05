@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.sections.misc.backup_status.
+
+Purpose:
+    Builds report HTML through backup_status_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import json

@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.shared.health_fetch.
+
+Purpose:
+    Defines ServiceHealth, DiskHealth, EcosystemHealth and fetch_health for scripts.shared.health_fetch.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import json

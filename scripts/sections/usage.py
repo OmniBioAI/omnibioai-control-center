@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.sections.usage.
+
+Purpose:
+    Builds report HTML through usage_section_html and gateway_traffic_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 from shared.helpers import _jsl, _jsn, fmt_int

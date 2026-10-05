@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.shared.colors.
+
+Purpose:
+    Defines named hexadecimal fill, stroke and text colors for control-center reports.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 COLORS = {

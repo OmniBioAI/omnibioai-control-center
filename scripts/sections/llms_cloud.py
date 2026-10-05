@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.sections.llms_cloud.
+
+Purpose:
+    Builds report HTML through llm_section_html, cloud_section_html and cost_tracking_placeholder_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 def llm_section_html(control_center_url: str) -> str:

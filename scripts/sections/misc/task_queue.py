@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.sections.misc.task_queue.
+
+Purpose:
+    Builds report HTML through task_queue_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 def task_queue_section_html(control_center_url: str) -> str:

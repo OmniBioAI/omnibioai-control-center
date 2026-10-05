@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.sections.projects.
+
+Purpose:
+    Builds report HTML through projects_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import json

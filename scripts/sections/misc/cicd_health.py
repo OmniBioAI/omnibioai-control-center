@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.sections.misc.cicd_health.
+
+Purpose:
+    Builds report HTML through cicd_health_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import json

@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.sections.misc.image_freshness.
+
+Purpose:
+    Builds report HTML through image_freshness_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 def image_freshness_section_html(control_center_url: str) -> str:

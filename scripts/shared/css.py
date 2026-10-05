@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.shared.css.
+
+Purpose:
+    Builds report HTML through misc_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 from typing import List, Optional, Tuple

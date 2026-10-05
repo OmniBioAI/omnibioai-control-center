@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.sections.coverage.
+
+Purpose:
+    Builds report HTML through coverage_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import json

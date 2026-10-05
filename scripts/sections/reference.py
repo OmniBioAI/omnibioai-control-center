@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.sections.reference.
+
+Purpose:
+    Builds report HTML through reference_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 def reference_section_html(control_center_url: str) -> str:

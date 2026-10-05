@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.sections.misc.cve_trend.
+
+Purpose:
+    Builds report HTML through cve_trend_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import json

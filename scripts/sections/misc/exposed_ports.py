@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.sections.misc.exposed_ports.
+
+Purpose:
+    Builds report HTML through exposed_ports_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 from pathlib import Path

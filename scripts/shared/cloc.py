@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.shared.cloc.
+
+Purpose:
+    Defines Totals, ensure_cloc, validate_paths and run_cloc for scripts.shared.cloc.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import json

@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.sections.health.
+
+Purpose:
+    Builds report HTML through error_aggregation_section_html, _health_overview_section_html, _health_services_section_html and _health_storage_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import json

@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.shared.helpers.
+
+Purpose:
+    Defines fmt_int and safe_div for scripts.shared.helpers.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import json

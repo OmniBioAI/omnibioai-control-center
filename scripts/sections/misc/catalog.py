@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.sections.misc.catalog.
+
+Purpose:
+    Builds report HTML through catalog_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import json

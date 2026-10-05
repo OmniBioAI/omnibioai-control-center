@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.sections.misc.active_runs.
+
+Purpose:
+    Builds report HTML through active_runs_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import json

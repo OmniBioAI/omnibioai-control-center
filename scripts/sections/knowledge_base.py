@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.sections.knowledge_base.
+
+Purpose:
+    Builds report HTML through knowledge_base_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 def knowledge_base_section_html(control_center_url: str) -> str:

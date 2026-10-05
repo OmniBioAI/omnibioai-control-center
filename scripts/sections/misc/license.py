@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.sections.misc.license.
+
+Purpose:
+    Builds report HTML through license_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 from shared.health_fetch import _admin_header

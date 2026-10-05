@@ -1,3 +1,13 @@
+"""
+OmniBioAI scripts.sections.misc.audit_trail.
+
+Purpose:
+    Builds report HTML through _health_audit_trail_section_html for the control center.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 def _health_audit_trail_section_html() -> str:
