@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_cloud.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_cloud, including get_cloud.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

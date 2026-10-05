@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.checks.disk.
+
+Purpose:
+    Defines run_disk_checks for backend.src.control_center.checks.disk.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

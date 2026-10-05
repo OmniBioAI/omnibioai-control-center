@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.checks.activity.
+
+Purpose:
+    Defines get_activity_status for backend.src.control_center.checks.activity.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

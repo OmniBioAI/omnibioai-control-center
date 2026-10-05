@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_cron.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_cron, including cron_jobs, cron_job_log, cron_job_pause and cron_job_resume.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

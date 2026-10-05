@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.hipaa_compliance.models.
+
+Purpose:
+    Defines HipaaComplianceChange, HipaaControl, HipaaControlEvidence and HipaaControlRisk for backend.src.control_center.hipaa_compliance.models.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 from sqlalchemy import JSON, Boolean, Column, Date, DateTime, ForeignKey, Integer, String, Text, event

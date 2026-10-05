@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_auth_proxy.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_auth_proxy, including auth_login_proxy, auth_validate_proxy, auth_first_party_authorize_proxy and auth_refresh_proxy.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import json

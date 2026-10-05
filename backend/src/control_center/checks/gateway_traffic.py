@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.checks.gateway_traffic.
+
+Purpose:
+    Defines get_gateway_traffic for backend.src.control_center.checks.gateway_traffic.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import datetime

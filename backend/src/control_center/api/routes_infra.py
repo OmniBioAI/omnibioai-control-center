@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_infra.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_infra, including gpu, celery_status, database_status and image_freshness.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone

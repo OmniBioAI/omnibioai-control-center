@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.checks.known_issues.
+
+Purpose:
+    Defines KnownIssueError, list_known_issues, create_known_issue and update_known_issue for backend.src.control_center.checks.known_issues.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import json

@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.core.settings.
+
+Purpose:
+    Defines Settings and load_settings for backend.src.control_center.core.settings.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

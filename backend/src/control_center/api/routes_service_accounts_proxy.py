@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_service_accounts_proxy.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_service_accounts_proxy, including list_api_keys_proxy, create_api_key_proxy, revoke_api_key_proxy and list_oauth_clients_proxy.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

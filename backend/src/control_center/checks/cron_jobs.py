@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.checks.cron_jobs.
+
+Purpose:
+    Defines get_job_log, CronMutationError, get_cron_jobs and pause_job for backend.src.control_center.checks.cron_jobs.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import re

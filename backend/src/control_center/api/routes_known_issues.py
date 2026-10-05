@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_known_issues.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_known_issues, including known_issues_list, known_issues_create, known_issues_update and known_issues_delete.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

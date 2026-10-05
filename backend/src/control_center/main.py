@@ -1,5 +1,15 @@
 # backend/src/control_center/main.py
 
+"""
+OmniBioAI backend.src.control_center.main.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.main, including report_generate, report_status, coverage_generate and coverage_status.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

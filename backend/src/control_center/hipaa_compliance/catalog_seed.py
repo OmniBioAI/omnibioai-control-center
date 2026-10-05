@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.hipaa_compliance.catalog_seed.
+
+Purpose:
+    Defines CatalogEvidence, CatalogRisk, CatalogControl and seed_initial_catalog for backend.src.control_center.hipaa_compliance.catalog_seed.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_security_audit_proxy.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_security_audit_proxy, including list_security_audit_events.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

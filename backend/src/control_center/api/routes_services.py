@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_services.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_services, including services.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 from fastapi import APIRouter

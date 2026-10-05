@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.hipaa_compliance.schemas.
+
+Purpose:
+    Defines ComplianceStatus, ComplianceControlCategory, EvidenceType and EvidenceRef for backend.src.control_center.hipaa_compliance.schemas.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 from datetime import date, datetime

@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_docker.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_docker, including get_containers, get_sif_images and get_plugin_images.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import json

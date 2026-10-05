@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_hipaa_readiness.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_hipaa_readiness, including list_controls, create_control, get_control and update_control.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query

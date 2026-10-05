@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_team_proxy.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_team_proxy, including list_teams_proxy, create_team_proxy, update_team_members_proxy and delete_team_proxy.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

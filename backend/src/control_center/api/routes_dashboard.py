@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_dashboard.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_dashboard, including dashboard_summary.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 """PR10: Live Platform Dashboard.

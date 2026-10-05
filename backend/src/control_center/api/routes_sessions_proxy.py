@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_sessions_proxy.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_sessions_proxy, including list_my_sessions_proxy, get_my_session_proxy and revoke_my_session_proxy.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

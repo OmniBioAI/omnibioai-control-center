@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.core.auth.
+
+Purpose:
+    Defines require_permission, has_permission and infra_viewer for backend.src.control_center.core.auth.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 from fastapi import Header, HTTPException

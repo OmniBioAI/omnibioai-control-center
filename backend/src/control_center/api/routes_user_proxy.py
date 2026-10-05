@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_user_proxy.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_user_proxy, including list_platform_users_proxy, get_platform_user_proxy, update_platform_user_proxy and reset_platform_user_mfa_proxy.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

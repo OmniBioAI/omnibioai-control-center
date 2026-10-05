@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_reference.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_reference, including get_reference.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

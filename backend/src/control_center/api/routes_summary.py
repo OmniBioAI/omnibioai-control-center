@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_summary.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_summary, including summary.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone

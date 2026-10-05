@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.checks.gpu.
+
+Purpose:
+    Defines check_gpu_temperature and get_gpu_status for backend.src.control_center.checks.gpu.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_role_proxy.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_role_proxy, including list_platform_roles_proxy, get_platform_user_roles_proxy, assign_platform_user_role_proxy and remove_platform_user_role_proxy.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

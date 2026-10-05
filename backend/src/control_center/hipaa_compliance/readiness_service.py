@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.hipaa_compliance.readiness_service.
+
+Purpose:
+    Defines ControlAlreadyExistsError, ControlNotFoundError, actor_from_claims and derive_overall_status for backend.src.control_center.hipaa_compliance.readiness_service.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 from typing import Any

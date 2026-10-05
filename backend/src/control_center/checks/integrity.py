@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.checks.integrity.
+
+Purpose:
+    Defines run_integrity_checks for backend.src.control_center.checks.integrity.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

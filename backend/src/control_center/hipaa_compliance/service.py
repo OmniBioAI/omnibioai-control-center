@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.hipaa_compliance.service.
+
+Purpose:
+    Defines ChangeAlreadyExistsError, ChangeNotFoundError, list_changes and get_change for backend.src.control_center.hipaa_compliance.service.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 from sqlalchemy.orm import Session

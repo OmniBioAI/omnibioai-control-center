@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_agent_orchestrator_proxy.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_agent_orchestrator_proxy, including list_agent_graphs_proxy.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

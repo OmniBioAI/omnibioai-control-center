@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_storage.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_storage, including get_storage.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 import os
 import subprocess
 import threading

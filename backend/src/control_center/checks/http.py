@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.checks.http.
+
+Purpose:
+    Defines check_http for backend.src.control_center.checks.http.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import time

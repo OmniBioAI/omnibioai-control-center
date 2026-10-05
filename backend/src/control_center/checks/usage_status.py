@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.checks.usage_status.
+
+Purpose:
+    Defines get_usage_status for backend.src.control_center.checks.usage_status.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import datetime

@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_workflow_bundles_proxy.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_workflow_bundles_proxy, including list_workflows_proxy, get_workflow_versions_proxy, list_categories_proxy and get_workflow_inputs_proxy.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

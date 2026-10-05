@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_tes_proxy.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_tes_proxy, including list_tools_proxy, tools_capabilities_proxy, list_runs_proxy and get_run_proxy.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

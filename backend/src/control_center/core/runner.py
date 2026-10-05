@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.core.runner.
+
+Purpose:
+    Defines check_service and run_all_checks for backend.src.control_center.core.runner.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

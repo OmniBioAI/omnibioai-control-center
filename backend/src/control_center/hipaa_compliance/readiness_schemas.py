@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.hipaa_compliance.readiness_schemas.
+
+Purpose:
+    Defines Domain, ApplicabilityStatus, ImplementationStatus and TestingStatus for backend.src.control_center.hipaa_compliance.readiness_schemas.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import re

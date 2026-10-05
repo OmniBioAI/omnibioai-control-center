@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_billing_proxy.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_billing_proxy, including get_organization_usage_proxy, get_organization_billing_summary_proxy, list_organization_invoices_proxy and get_organization_cost_breakdown_proxy.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

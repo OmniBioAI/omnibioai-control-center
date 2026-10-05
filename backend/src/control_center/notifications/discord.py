@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.notifications.discord.
+
+Purpose:
+    Defines notify for backend.src.control_center.notifications.discord.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

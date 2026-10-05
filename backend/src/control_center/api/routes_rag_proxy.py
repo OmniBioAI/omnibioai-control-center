@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_rag_proxy.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_rag_proxy, including list_studies_proxy, cache_stats_proxy and health_proxy.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os

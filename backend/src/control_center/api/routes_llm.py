@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.api.routes_llm.
+
+Purpose:
+    Defines HTTP route handlers for backend.src.control_center.api.routes_llm, including get_llms and get_knowledge_base.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import logging

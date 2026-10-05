@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.checks.audit_trail.
+
+Purpose:
+    Defines verify_audit_event, classify_event_integrity and get_audit_trail for backend.src.control_center.checks.audit_trail.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import datetime

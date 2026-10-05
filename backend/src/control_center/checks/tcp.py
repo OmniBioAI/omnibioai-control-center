@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.checks.tcp.
+
+Purpose:
+    Defines check_tcp for backend.src.control_center.checks.tcp.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import socket

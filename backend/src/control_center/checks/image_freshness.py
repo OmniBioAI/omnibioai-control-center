@@ -1,3 +1,13 @@
+"""
+OmniBioAI backend.src.control_center.checks.image_freshness.
+
+Purpose:
+    Defines get_image_freshness for backend.src.control_center.checks.image_freshness.
+
+Author:
+    Manish Kumar <manish@omnibioai.org>
+"""
+
 from __future__ import annotations
 
 import os
