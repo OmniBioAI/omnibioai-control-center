@@ -17,8 +17,6 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-import jwt
-
 @dataclass
 class ServiceHealth:
     name: str; type: str; target: str; status: str
@@ -51,23 +49,10 @@ def _parse_disk(raw: Dict[str, Any]) -> DiskHealth:
                       message=str(raw.get("message", "")))
 
 def _admin_header() -> Dict[str, str]:
-    # Keep the standard report request headers in one place. The public
-    # /health endpoint ignores the admin token; richer deployments may use it.
-    secret = (
-        os.environ.get("AUTH_SECRET_KEY")
-        or os.environ.get("JWT_SECRET")
-        or "change-me"
-    )
-    token = jwt.encode(
-        {
-            "sub": "generate-report",
-            "roles": ["admin"],
-            "permissions": ["platform.manage_infra"],
-        },
-        secret,
-        algorithm="HS256",
-    )
-    return {"Authorization": f"Bearer {token}"}
+    # Use an IAM-issued access token; the report must not mint its own
+    # identity or permissions. Public endpoints also work without a token.
+    token = os.environ.get("CONTROL_CENTER_ACCESS_TOKEN", "").strip()
+    return {"Authorization": f"Bearer {token}"} if token else {}
 
 def _overall_status(payload: Dict[str, Any]) -> str:
     raw = str(payload.get("overall_status") or payload.get("status") or "UNKNOWN").upper()

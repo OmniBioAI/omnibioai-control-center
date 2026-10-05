@@ -25,6 +25,11 @@ Options
 --skip-health            skip live health fetch
 --skip-coverage          skip pytest coverage collection
 --compose-path PATH      docker-compose.yml used by the Secrets Audit / Exposed Ports tabs
+
+Authentication
+--------------
+CONTROL_CENTER_ACCESS_TOKEN  IAM-issued access token with platform.manage_infra
+                             for protected report sections (supplied via environment)
 """
 
 from __future__ import annotations
