@@ -12,11 +12,30 @@ from __future__ import annotations
 
 import urllib.error
 
-from shared.health_fetch import _admin_header, ReportAuthenticationError, require_access_token
+from shared.health_fetch import _admin_header, ReportAuthenticationError
+
+
+def _unavailable_html(message: str) -> str:
+    return f"""
+<div class="tab-section">
+<div class="section">
+  <div class="sec-title">license</div>
+  <div style="font-size:12px;color:var(--color-text-muted)">
+    {message}
+  </div>
+</div>
+</div>"""
 
 def license_section_html(control_center_url: str) -> str:
     import urllib.request, json
-    require_access_token()
+    # Local report generation is useful without IAM. Do not prompt for a
+    # username/password or contact the protected endpoint unless the caller
+    # explicitly supplied a short-lived token through the environment.
+    if not _admin_header():
+        return _unavailable_html(
+            "Protected license data skipped. Set CONTROL_CENTER_ACCESS_TOKEN "
+            "to include it."
+        )
     data: dict = {}
     unavailable = "/license returned no data."
     try:
@@ -49,15 +68,7 @@ def license_section_html(control_center_url: str) -> str:
 
     if not data:
         print(f"[report] {unavailable}", flush=True)
-        return f"""
-<div class="tab-section">
-<div class="section">
-  <div class="sec-title">license</div>
-  <div style="font-size:12px;color:var(--color-text-muted)">
-    {unavailable}
-  </div>
-</div>
-</div>"""
+        return _unavailable_html(unavailable)
 
     seats_used = data.get("seats_used", 0)
     seats_total = data.get("seats_total", 0)

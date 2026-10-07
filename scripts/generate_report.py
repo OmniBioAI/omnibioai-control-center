@@ -29,8 +29,9 @@ Options
 Authentication
 --------------
 CONTROL_CENTER_ACCESS_TOKEN  Short-lived IAM-issued operator access token used for
-                             protected Control Center report sections. Must correspond
-                             to a user authorized for platform.manage_infra.
+                             protected Control Center report sections. Optional; when
+                             omitted, those sections show an unavailable state and the
+                             report is generated without an interactive login prompt.
 """
 
 from __future__ import annotations
@@ -46,8 +47,7 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from shared.cloc import Totals, ensure_cloc, run_cloc, validate_paths, _resolve_target_paths
-from shared.health_fetch import EcosystemHealth, fetch_health, require_access_token
-from shared.operator_login import operator_session
+from shared.health_fetch import EcosystemHealth, fetch_health
 from shared.css import SHARED_CSS, _CHARTJS, misc_section_html, sidebar_nav_html
 from shared.pagination_js import PAGINATION_JS
 from shared.helpers import fmt_int
@@ -543,12 +543,11 @@ window.addEventListener('hashchange', function(){{ sbnavApplyHash(); }});
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Generate OmniBioAI ecosystem report",
-        epilog=("CONTROL_CENTER_ACCESS_TOKEN: Short-lived IAM-issued operator access "
-                "token used for protected Control Center report sections. Must correspond "
-                "to a user authorized for platform.manage_infra. Supply through the "
-                "environment to skip login; otherwise interactive IAM login (with MFA "
-                "when required). IAM_URL overrides the configured Auth service URL. "
-                "--skip-health does not skip protected sections."),
+        epilog=("CONTROL_CENTER_ACCESS_TOKEN: Optional short-lived IAM-issued operator "
+                "access token for protected Control Center report sections. Without it, "
+                "the report is generated non-interactively and protected sections show "
+                "an unavailable state. The token must be authorized for "
+                "platform.manage_infra."),
     )
     p.add_argument("--root", type=Path, default=None)
     p.add_argument("--targets", nargs="+", default=None)
@@ -571,8 +570,6 @@ def generate_report(ecosystem_root: Path,
                     skip_health: bool = False,
                     skip_coverage: bool = False,
                     compose_path: str = str(DEFAULT_COMPOSE_PATH)) -> Path:
-    # /license is always included, even when health or coverage is skipped.
-    require_access_token()
     ensure_cloc()
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if not targets:
@@ -653,16 +650,15 @@ def main() -> int:
             cwd = Path.cwd()
             ecosystem_root = cwd.parent if (cwd / "manage.py").exists() else cwd
     try:
-        with operator_session(args.control_center_url):
-            out = generate_report(
-                ecosystem_root=ecosystem_root,
-                targets=args.targets,
-                out_relpath=args.out,
-                title=args.title,
-                control_center_url=args.control_center_url,
-                skip_health=args.skip_health,
-                skip_coverage=args.skip_coverage,
-                compose_path=args.compose_path)
+        out = generate_report(
+            ecosystem_root=ecosystem_root,
+            targets=args.targets,
+            out_relpath=args.out,
+            title=args.title,
+            control_center_url=args.control_center_url,
+            skip_health=args.skip_health,
+            skip_coverage=args.skip_coverage,
+            compose_path=args.compose_path)
         print(f"\n✓ Report written: {out}")
         return 0
     except Exception as e:

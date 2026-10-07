@@ -601,7 +601,7 @@ endpoints are reported separately.
 python omnibioai-control-center/scripts/generate_report.py \
     --root ~/Desktop/machine
 
-# Skip health check (protected sections still require authentication)
+# Skip health check
 python omnibioai-control-center/scripts/generate_report.py \
     --root ~/Desktop/machine \
     --skip-health
@@ -618,6 +618,10 @@ python omnibioai-control-center/scripts/generate_report.py \
     --out out/reports/omnibioai_ecosystem_report.html \
     --title "OmniBioAI Ecosystem Report"
 ```
+
+No login is required for local report generation. Protected sections show an
+unavailable state unless `CONTROL_CENTER_ACCESS_TOKEN` contains a short-lived
+IAM token authorized for `platform.manage_infra`.
 
 ### Requirements
 
