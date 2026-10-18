@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
+from shared.cloc import REPORT_EXCLUDE_DIRS
 from shared.helpers import _read_text_if_exists
 
 def _cov_source_args(cwd: Path) -> List[str]:
@@ -45,7 +46,8 @@ def _coverage_cmd(cov_args, noconftest=False):
     cmd = [sys.executable, "-m", "pytest", *cov_args,
            "--cov-report=term-missing", "--cov-report=json",
            "--tb=no", "-q", "-p", "no:cacheprovider",
-           "--continue-on-collection-errors", "--ignore=node_modules"]
+           "--continue-on-collection-errors",
+           *(f"--ignore={name}" for name in REPORT_EXCLUDE_DIRS)]
     if noconftest: cmd.append("--noconftest")
     return cmd
 
