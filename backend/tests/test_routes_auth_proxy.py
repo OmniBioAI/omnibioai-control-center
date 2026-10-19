@@ -33,6 +33,7 @@ def _mock_response(
     json_body=None,
     raise_json_error: bool = False,
     set_cookies: list[str] | None = None,
+    retry_after: str | None = None,
 ) -> MagicMock:
     """A mock httpx.Response with the given status/json body/Set-Cookie headers, optionally raising on .json()."""
     resp = MagicMock()
@@ -43,6 +44,7 @@ def _mock_response(
         resp.json.return_value = json_body
     resp.headers = MagicMock()
     resp.headers.get_list.return_value = set_cookies or []
+    resp.headers.get.return_value = retry_after
     return resp
 
 
@@ -92,11 +94,12 @@ class TestAuthLoginProxy(unittest.TestCase):
         self.assertIn("auth-service unreachable", resp.json()["error"])
 
     def test_non_json_upstream_response_handled(self) -> None:
-        """A non-JSON upstream response body is handled gracefully, surfacing a "non-JSON" error message."""
-        upstream = _mock_response(500, raise_json_error=True)
+        """A non-JSON upstream response is always a JSON gateway error, even if upstream said 200."""
+        upstream = _mock_response(200, raise_json_error=True)
         with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
             resp = client.post("/auth/login", json={"email": "a@b.com", "password": "x"})
-        self.assertEqual(resp.status_code, 500)
+        self.assertEqual(resp.status_code, 502)
+        self.assertEqual(resp.headers["content-type"], "application/json")
         self.assertIn("non-JSON", resp.json()["error"])
 
     def test_forwards_request_body_unchanged(self) -> None:
@@ -136,6 +139,44 @@ class TestAuthValidateProxy(unittest.TestCase):
         ):
             resp = client.post("/auth/validate", json={"token": "x"})
         self.assertEqual(resp.status_code, 503)
+
+
+class TestAuthMFAChallengeProxy(unittest.TestCase):
+    """The Admin SPA completes MFA through control-center, never directly."""
+
+    def test_forwards_challenge_to_auth_service(self) -> None:
+        upstream = _mock_response(200, {"access_token": "tok", "refresh_token": "rtok"})
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.post(
+                "/auth/mfa/challenge",
+                json={"challenge_token": "isolated-test-challenge", "code": "000000"},
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        call_args = mock_ctx.__aenter__.return_value.post.call_args
+        self.assertEqual(call_args.args[0], "http://auth-service:8001/users/me/mfa/challenge")
+        self.assertNotIn("Authorization", call_args.kwargs["headers"])
+
+    def test_invalid_challenge_status_is_preserved(self) -> None:
+        upstream = _mock_response(401, {"detail": "Invalid or expired MFA challenge"})
+        with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=_mock_async_client(upstream)):
+            resp = client.post(
+                "/auth/mfa/challenge",
+                json={"challenge_token": "isolated-test-challenge", "code": "000000"},
+            )
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(resp.headers["content-type"], "application/json")
+
+    def test_resend_forwards_to_auth_and_preserves_retry_after(self) -> None:
+        upstream = _mock_response(429, {"error": "resend_limited"}, retry_after="42")
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_auth_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.post("/auth/mfa/resend", json={"challenge_token": "isolated-test-challenge"})
+        self.assertEqual(resp.status_code, 429)
+        self.assertEqual(resp.headers["retry-after"], "42")
+        call_args = mock_ctx.__aenter__.return_value.post.call_args
+        self.assertEqual(call_args.args[0], "http://auth-service:8001/users/me/mfa/email/resend")
 
 
 class TestAuthRefreshProxy(unittest.TestCase):
