@@ -80,9 +80,18 @@ async def _proxy_to_auth(path: str, request: Request, body: bytes | None = None)
     try:
         payload = r.json()
     except ValueError:
-        payload = {"error": "auth-service returned a non-JSON response"}
+        # An HTML fallback or upstream gateway page is not a login result,
+        # even if that upstream incorrectly labels it 2xx. Report a proper
+        # gateway failure so the Admin client never treats it as bad
+        # credentials or a successful-but-empty session.
+        return JSONResponse(
+            {"error": "auth-service returned a non-JSON response"},
+            status_code=502,
+        )
 
     resp = JSONResponse(payload, status_code=r.status_code)
+    if retry_after := r.headers.get("retry-after"):
+        resp.headers["Retry-After"] = retry_after
     for set_cookie_value in r.headers.get_list("set-cookie"):
         resp.headers.append("set-cookie", set_cookie_value)
     return resp
@@ -91,6 +100,23 @@ async def _proxy_to_auth(path: str, request: Request, body: bytes | None = None)
 @router.post("/auth/login")
 async def auth_login_proxy(request: Request) -> JSONResponse:
     return await _proxy_to_auth("/auth/login", request)
+
+
+@router.post("/auth/mfa/challenge")
+async def auth_mfa_challenge_proxy(request: Request) -> JSONResponse:
+    """Complete the second step of an auth-service MFA login challenge.
+
+    The browser stays on the Control Center origin.  Only this narrowly
+    scoped, pre-authentication MFA endpoint is exposed here; enrollment and
+    device-management APIs remain on their existing authenticated routes.
+    """
+    return await _proxy_to_auth("/users/me/mfa/challenge", request)
+
+
+@router.post("/auth/mfa/resend")
+async def auth_mfa_resend_proxy(request: Request) -> JSONResponse:
+    """Request a replacement email OTP through the existing Auth flow."""
+    return await _proxy_to_auth("/users/me/mfa/email/resend", request)
 
 
 @router.post("/auth/validate")

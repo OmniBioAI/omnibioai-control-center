@@ -705,19 +705,40 @@ class TestReportData(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"projects": 3, "languages": ["python"]})
 
-    def test_500_on_malformed_json(self):
-        """A report_data.json file that isn't valid JSON returns 500 with an "error" key."""
+    def _get_with_report(self, content: str):
         with tempfile.TemporaryDirectory() as tmp:
             reports_dir = Path(tmp) / "work" / "out" / "reports"
             reports_dir.mkdir(parents=True)
-            (reports_dir / "report_data.json").write_text("not-json{")
+            (reports_dir / "report_data.json").write_text(content)
             os.environ["WORKSPACE_ROOT"] = tmp
             try:
-                resp = client.get("/report/data")
+                return client.get("/report/data")
             finally:
                 del os.environ["WORKSPACE_ROOT"]
-        self.assertEqual(resp.status_code, 500)
+
+    def test_503_on_malformed_json(self):
+        """A report_data.json file that isn't valid JSON returns 503 with a clear "error", never a 500."""
+        resp = self._get_with_report("not-json{")
+        self.assertEqual(resp.status_code, 503)
+        self.assertEqual(resp.json(), {"error": "Report data is unreadable. Regenerate the report."})
+
+    def test_503_when_top_level_is_not_an_object(self):
+        """A report_data.json holding a JSON array (not an object) returns 503, never a 500."""
+        resp = self._get_with_report('[{"projects": 3}]')
+        self.assertEqual(resp.status_code, 503)
         self.assertIn("error", resp.json())
+
+    def test_non_finite_numbers_become_null_instead_of_500(self):
+        """Regression: the generator wrote pandas' missing values as bare NaN, which
+        JSONResponse cannot encode -- /report/data was a 500 until they were read as null."""
+        resp = self._get_with_report(
+            '{"coverage": [{"repo": "a", "testFramework": NaN, "pct": Infinity,'
+            ' "missed": -Infinity, "stmts": 1e999, "branches": 2.5}]}'
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"coverage": [{
+            "repo": "a", "testFramework": None, "pct": None, "missed": None, "stmts": None, "branches": 2.5,
+        }]})
 
 
 class TestSchedulerLoop(unittest.TestCase):

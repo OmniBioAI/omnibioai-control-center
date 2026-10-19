@@ -38,6 +38,7 @@ sentry_sdk.init(
 )
 import json as _json_mod
 import logging
+import math
 import subprocess
 import threading
 import time as _time_mod
@@ -903,6 +904,33 @@ def coverage_status(_admin: dict = Depends(require_permission("platform.manage_i
     return JSONResponse(state)
 
 
+_REPORT_DATA_UNREADABLE = "Report data is unreadable. Regenerate the report."
+
+
+def _finite_or_none(token: str) -> float | None:
+    value = float(token)
+    return value if math.isfinite(value) else None
+
+
+def _load_report_data(path: Path) -> dict:
+    """Parse report_data.json into something JSONResponse can always encode.
+
+    Older generator runs wrote pandas' missing values as bare NaN, which
+    Python's json accepts but JSON (and JSONResponse's encoder) does not --
+    every such file made /report/data a 500. NaN/Infinity tokens and
+    overflowing numbers become null; anything that still isn't a JSON
+    object raises ValueError for the caller to report as unreadable.
+    """
+    data = _json_mod.loads(
+        path.read_text(encoding="utf-8"),
+        parse_constant=lambda _token: None,
+        parse_float=_finite_or_none,
+    )
+    if not isinstance(data, dict):
+        raise ValueError(f"expected a JSON object, got {type(data).__name__}")
+    return data
+
+
 @app.get("/report/data")
 def report_data(full: bool = Depends(infra_viewer)) -> JSONResponse:
     """Return structured JSON data for the React frontend (projects, languages, coverage).
@@ -940,11 +968,11 @@ def report_data(full: bool = Depends(infra_viewer)) -> JSONResponse:
     if not data_path.exists():
         return JSONResponse({"error": "No report data yet. Generate the report first."}, status_code=404)
     try:
-        import json as _json
-        data = _json.loads(data_path.read_text(encoding="utf-8"))
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-    if not full and isinstance(data, dict):
+        data = _load_report_data(data_path)
+    except (OSError, ValueError) as e:
+        log.warning("report_data.json unreadable: %s", e)
+        return JSONResponse({"error": _REPORT_DATA_UNREADABLE}, status_code=503)
+    if not full:
         data.pop("gitStatus", None)
     return JSONResponse(data)
 
