@@ -478,6 +478,15 @@ window.addEventListener('hashchange', function(){{ sbnavApplyHash(); }});
             "pct": round(100 * t.code / total_code, 2),
         })
 
+    def _none_if_nan(value):
+        # pandas fills a missing cell with float NaN, which json.dumps would
+        # write as a bare NaN token -- not JSON, and a 500 in /report/data.
+        return None if isinstance(value, float) and value != value else value
+
+    def _dict_or_empty(value):
+        # `NaN or {}` is NaN (NaN is truthy), so `or {}` alone isn't enough.
+        return value if isinstance(value, dict) else {}
+
     coverage_json = []
     for _, row in coverage_df.iterrows():
         pct = row.get("coverage_pct")
@@ -494,9 +503,9 @@ window.addEventListener('hashchange', function(){{ sbnavApplyHash(); }});
             "missed":    int(missed)   if (missed    is not None and missed   == missed)   else None,
             "branches":  int(branches) if (branches  is not None and branches == branches) else None,
             "failUnder": float(fail_u) if (fail_u    is not None and fail_u   == fail_u)   else None,
-            "testFramework": row.get("test_framework"),
+            "testFramework": _none_if_nan(row.get("test_framework")),
             "testFiles": int(row["test_files"]) if row.get("test_files") == row.get("test_files") and row.get("test_files") is not None else None,
-            "testFileTypes": row.get("test_file_types") or {},
+            "testFileTypes": _dict_or_empty(row.get("test_file_types")),
             "testsCollected": int(row["tests_collected"]) if row.get("tests_collected") == row.get("tests_collected") and row.get("tests_collected") is not None else None,
             "testsExecuted": int(row["tests_executed"]) if row.get("tests_executed") == row.get("tests_executed") and row.get("tests_executed") is not None else None,
             "testsPassed": int(row["tests_passed"]) if row.get("tests_passed") == row.get("tests_passed") and row.get("tests_passed") is not None else None,
@@ -504,11 +513,11 @@ window.addEventListener('hashchange', function(){{ sbnavApplyHash(); }});
             "testsSkipped": int(row["tests_skipped"]) if row.get("tests_skipped") == row.get("tests_skipped") and row.get("tests_skipped") is not None else None,
             "testErrors": int(row["test_errors"]) if row.get("test_errors") == row.get("test_errors") and row.get("test_errors") is not None else None,
             "collectionErrors": int(row["collection_errors"]) if row.get("collection_errors") == row.get("collection_errors") and row.get("collection_errors") is not None else None,
-            "testCaseTypes": row.get("test_case_types") or {},
-            "testDetailBasis": row.get("test_detail_basis"),
-            "installStatus": row.get("install_status"),
+            "testCaseTypes": _dict_or_empty(row.get("test_case_types")),
+            "testDetailBasis": _none_if_nan(row.get("test_detail_basis")),
+            "installStatus": _none_if_nan(row.get("install_status")),
             "installReturncode": int(row["install_returncode"]) if row.get("install_returncode") == row.get("install_returncode") and row.get("install_returncode") is not None else None,
-            "installStderrTail": row.get("install_stderr_tail"),
+            "installStderrTail": _none_if_nan(row.get("install_stderr_tail")),
         })
 
     # collect_git_status() was already run once above for gitstatus_html;
@@ -535,7 +544,7 @@ window.addEventListener('hashchange', function(){{ sbnavApplyHash(); }});
         "languages": languages_json,
         "coverage":  coverage_json,
         "gitStatus": git_status_json,
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    }, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
