@@ -7,8 +7,7 @@ Unit tests for:
 Covers _dir_exists_nonempty()'s "has real content, not just an empty
 directory tree" check, and GET /reference's discovery of organism/
 assembly index and variant-DB presence, cross-location database checks,
-and per-organism annotation status, across the two supported reference-
-root locations (data/reference and omnibioai-data/reference).
+and per-organism annotation status, under the reference root (data/reference).
 
 Developer:
     Manish Kumar <manish@omnibioai.org>
@@ -140,12 +139,12 @@ class TestGetReference(unittest.TestCase):
         self.assertTrue(present["available"])
 
     def test_organism_assembly_with_indexes_and_variants(self) -> None:
-        """A reference root under the alternate omnibioai-data/reference
-        location reports the organism/assembly and correctly distinguishes
+        """A reference root under data/reference reports the organism/
+        assembly and correctly distinguishes
         which index type (bwa present, star absent) and which variant DB
         (clinvar present, dbsnp absent) actually has content."""
         with tempfile.TemporaryDirectory() as tmp:
-            ref_root = Path(tmp) / "omnibioai-data" / "reference"
+            ref_root = Path(tmp) / "data" / "reference"
             org_path = ref_root / "organisms" / "human" / "GRCh38"
             org_path.mkdir(parents=True)
 

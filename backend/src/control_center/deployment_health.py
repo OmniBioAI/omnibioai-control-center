@@ -349,7 +349,9 @@ def _repo_from_path_segments(*values: str | None) -> str | None:
         if not value:
             continue
         for segment in value.split("/"):
-            if _REPO_SEGMENT_RE.match(segment):
+            # The ecosystem workspace contains repositories but is not itself
+            # the owner of a service built from one of its child directories.
+            if segment.lower() != "omnibioai-ecosystem" and _REPO_SEGMENT_RE.match(segment):
                 return segment.lower()
     return None
 

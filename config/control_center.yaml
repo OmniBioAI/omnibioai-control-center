@@ -137,7 +137,7 @@ system:
     - path: /workspace
       warn_pct_free_below: 15
   integrity_checks:
-    - name: omnibioai-data
-      path: /workspace/omnibioai-data
-    - name: omnibioai-work
-      path: /workspace/omnibioai-work
+    - name: data
+      path: /workspace/data
+    - name: work
+      path: /workspace/work

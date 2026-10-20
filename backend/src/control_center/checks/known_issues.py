@@ -19,7 +19,7 @@ from typing import Any
 
 from control_center.notifications.discord import notify as _discord_notify
 
-KNOWN_ISSUES_PATH_DEFAULT = "omnibioai-work/known_issues.json"
+KNOWN_ISSUES_PATH_DEFAULT = "work/known_issues.json"
 
 _VALID_SEVERITIES = {"high", "medium", "low"}
 _VALID_STATUSES = {"open", "acknowledged", "resolved"}

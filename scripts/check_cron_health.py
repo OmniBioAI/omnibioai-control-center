@@ -16,7 +16,7 @@ computation (rather than re-parsing log files itself) so this check can
 never disagree with what the dashboard shows.
 
 Cron (every 6 hours):
-  0 */6 * * * python3 /home/manish/Desktop/machine/omnibioai-control-center/scripts/check_cron_health.py >> /home/manish/Desktop/machine/work/backups/omnibioai-cron-health.log 2>&1
+  0 */6 * * * python3 /home/manish/Desktop/omnibioai-ecosystem/omnibioai-control-center/scripts/check_cron_health.py >> /home/manish/Desktop/omnibioai-ecosystem/work/backups/omnibioai-cron-health.log 2>&1
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ CONTROL_CENTER_URL = os.environ.get("CONTROL_CENTER_URL", "http://127.0.0.1:7070
 # straight from omnibioai-studio/.env rather than requiring this cron
 # job's own shell environment to export it -- mirrors backup-mysql.sh's
 # own "source .env" pattern for a script invoked straight from crontab.
-STUDIO_ENV_PATH = Path("/home/manish/Desktop/machine/omnibioai-studio/.env")
+STUDIO_ENV_PATH = Path("/home/manish/Desktop/omnibioai-ecosystem/omnibioai-studio/.env")
 
 # How stale a job's log is allowed to get before it's suspicious, keyed to
 # each job's own schedule (hourly job: 3h; daily jobs: 36h; this job's own

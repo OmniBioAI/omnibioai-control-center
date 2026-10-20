@@ -35,13 +35,20 @@ export default function AuthGate({ hasAccess, children }: Props) {
   const [user, setUser] = useState<SessionUser | null>(null)
 
   const resolve = useCallback(async () => {
-    if (!getToken()) {
+    try {
+      if (!getToken()) {
+        setState('anonymous')
+        return
+      }
+      const resolved = await ensureSession()
+      setUser(resolved)
+      setState(resolved && hasAccess() ? 'admin' : resolved ? 'denied' : 'anonymous')
+    } catch {
+      // A failed session probe must never strand the gate in its loading
+      // state. Keep any token untouched; the user can retry from sign-in.
+      setUser(null)
       setState('anonymous')
-      return
     }
-    const resolved = await ensureSession()
-    setUser(resolved)
-    setState(resolved && hasAccess() ? 'admin' : resolved ? 'denied' : 'anonymous')
   }, [hasAccess])
 
   useEffect(() => {

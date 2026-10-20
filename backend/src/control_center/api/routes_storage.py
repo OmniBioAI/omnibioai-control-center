@@ -53,13 +53,13 @@ def _df_disk(path: Path):
 
 def _compute_storage(workspace: Path) -> dict:
     data_root = None
-    for candidate in [workspace / "omnibioai-data", workspace / "data"]:
+    for candidate in [workspace / "data"]:
         if candidate.exists():
             data_root = candidate
             break
 
     work_root = None
-    for candidate in [workspace / "omnibioai-work", workspace / "work"]:
+    for candidate in [workspace / "work"]:
         if candidate.exists():
             work_root = candidate
             break
