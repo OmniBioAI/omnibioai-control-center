@@ -2,8 +2,10 @@
 
 The collector deliberately has no arbitrary command or path interface. It
 reads a small set of Linux mount/device metadata sources and fixed configured
-mountpoints. Restic is queried only when an existing protected password file
-is configured; the repository path and argument vector are fixed here.
+mountpoints. Host mount state is read only from explicit read-only host PID 1
+bind mounts; container-local mountinfo must never be presented as host state.
+Restic is queried only when an existing protected password file is configured;
+the repository path and argument vector are fixed here.
 """
 
 from __future__ import annotations
@@ -33,6 +35,8 @@ RESTIC_TIMEOUT_SECONDS = 8
 CACHE_TTL_SECONDS = 15
 RESTIC_REPOSITORY = Path("/mnt/omnibioai-backup20tb/restic")
 RESTIC_PASSWORD_FILE_ENV = "RESTIC_PASSWORD_FILE"
+HOST_MOUNTINFO = Path("/run/host-storage/mountinfo")
+HOST_FSTAB = Path("/run/host-storage/fstab")
 
 # Paths are a fixed, bounded discovery set. Capacity and filesystem facts are
 # always collected from the mounted filesystem; these entries do not encode
@@ -359,7 +363,10 @@ def _capacity(mount_point: str) -> tuple[int | None, int | None, int | None, flo
         return None, None, None, None
 
 
-def _device_records(mounts: dict[str, dict[str, object]], fstab: dict[str, dict[str, object]]) -> list[DeviceVolume]:
+def _device_records(
+    mounts: dict[str, dict[str, object]], fstab: dict[str, dict[str, object]],
+    *, capacity_from_collector_namespace: bool = True,
+) -> list[DeviceVolume]:
     uuid_by_device = _read_uuid_map()
     devices: list[DeviceVolume] = []
     for role, mount_point in MOUNT_ROLES:
@@ -380,7 +387,10 @@ def _device_records(mounts: dict[str, dict[str, object]], fstab: dict[str, dict[
         major_minor = str(mount["major_minor"])
         model, topology = _read_sysfs_device(major_minor)
         uuid = uuid_by_device.get(major_minor)
-        total, used, available, percent = _capacity(mount_point)
+        # statvfs in a container describes its namespace even when mountinfo
+        # was supplied from the host. Keep capacity unknown until a separately
+        # attested host capacity source is available.
+        total, used, available, percent = _capacity(mount_point) if capacity_from_collector_namespace else (None, None, None, None)
         health: HealthState = "UNKNOWN"
         detail = "SMART telemetry unavailable to this service"
         if percent is not None:
@@ -458,7 +468,7 @@ def _archive_data(devices: list[DeviceVolume], fstab: dict[str, dict[str, object
             except (ValueError, IndexError):
                 min_free_status = "UNKNOWN"
     dependencies = [item.split("=", 1)[1] for item in options if item.startswith("x-systemd.requires-mounts-for=")]
-    missing = [branch.mount_point for branch in branches if branch.mount_status != "MOUNTED"]
+    missing = [branch.mount_point for branch in branches if branch.mount_status == "MISSING"]
     return ArchiveTelemetry(
         pool_mount_point=pool.mount_point,
         pool_status=pool.mount_status,
@@ -723,9 +733,9 @@ def _health_alerts(devices: list[DeviceVolume], archive: ArchiveTelemetry, backu
         if device.mount_status == "MISSING":
             alerts.append(HealthAlert(
                 id=f"mount-missing:{device.role}", state="ACTIVE", severity="CRITICAL",
-                affected_device=device.label, source="/proc/self/mountinfo",
-                observed_at=observed_at, evidence=f"Expected mount {device.mount_point} is absent from the collector namespace.",
-                suggested_action="Verify the host mount and collector namespace before changing storage configuration.",
+                affected_device=device.label, source="host PID 1 mountinfo bind",
+                observed_at=observed_at, evidence=f"Expected host mount {device.mount_point} is absent from the supplied host mount table.",
+                suggested_action="Verify the host mount and bind provenance before changing storage configuration.",
             ))
         elif device.health in {"WARNING", "CRITICAL"}:
             alerts.append(HealthAlert(
@@ -734,12 +744,12 @@ def _health_alerts(devices: list[DeviceVolume], archive: ArchiveTelemetry, backu
                 observed_at=observed_at, evidence=device.health_detail,
                 suggested_action=("Review available capacity and workload growth; do not delete data automatically." if "utilization" in device.health_detail else "Verify mount mode and host mount identity before changing configuration."),
             ))
-    missing_branches = [branch for branch in archive.branches if branch.mount_status != "MOUNTED"]
+    missing_branches = [branch for branch in archive.branches if branch.mount_status == "MISSING"]
     for branch in missing_branches:
         alerts.append(HealthAlert(
             id=f"archive-branch:{branch.role}", state="ACTIVE", severity="WARNING",
-            affected_device=branch.mount_point, source="/proc/self/mountinfo",
-            observed_at=observed_at, evidence="Configured archive branch is not mounted in the collector namespace.",
+            affected_device=branch.mount_point, source="host PID 1 mountinfo bind",
+            observed_at=observed_at, evidence="Configured archive branch is not mounted in the supplied host mount table.",
             suggested_action="Confirm the member mount and pool dependency behavior; preserve member contents.",
         ))
     if backups.repository_status == "UNAVAILABLE":
@@ -753,8 +763,8 @@ def _health_alerts(devices: list[DeviceVolume], archive: ArchiveTelemetry, backu
 
 GATE_DEFINITIONS = (
     ("nvme-health", "NVMe health", "sysfs/NVMe SMART", "BLOCKED", "Health and wear indicators require device access not available to this service."),
-    ("device-identification", "Device identification", "/proc/self/mountinfo + /dev/disk/by-uuid", "PARTIAL", "Mount identity can be observed where UUID links are visible; USB identity and duplicate enclosure IDs require host evidence."),
-    ("mount-integrity", "Mount verification", "/proc/self/mountinfo + statvfs", "PARTIAL", "Current namespace mount observations do not prove host mount stability."),
+    ("device-identification", "Device identification", "Host PID 1 mountinfo bind + /dev/disk/by-uuid", "PARTIAL", "Host mount identity requires verified bind provenance; UUID and USB topology may be unavailable to this service."),
+    ("mount-integrity", "Mount verification", "Host PID 1 mountinfo bind", "PARTIAL", "A read-only host mount table can show current mounts; it does not prove long-term stability or capacity."),
     ("primary-reliability", "Primary disk reliability", "SMART + kernel log", "BLOCKED", "SMART and kernel I/O evidence are not available to this service."),
     ("archive-integrity", "Archive filesystem integrity", "Filesystem health evidence", "NOT_VERIFIED", "A mounted filesystem is not proof of integrity."),
     ("mergerfs-resilience", "Mergerfs resilience", "fstab + runtime mount", "PARTIAL", "Configured branches can be compared with mounts; failover behavior requires isolated testing."),
@@ -806,12 +816,19 @@ _cache: tuple[float, StorageOverview] | None = None
 
 def _collect() -> StorageOverview:
     observed_at = _now()
-    mount_text = _read_bounded(Path("/proc/self/mountinfo"), MAX_MOUNTINFO_BYTES)
-    fstab_text = _read_bounded(Path("/etc/fstab"), MAX_FSTAB_BYTES)
+    # These exact paths must be read-only binds of host /proc/1/mountinfo and
+    # /etc/fstab, verified from Docker's mount configuration at deployment.
+    # An absent or incomplete pair fails closed; never fall back to /proc/self.
+    mount_text = _read_bounded(HOST_MOUNTINFO, MAX_MOUNTINFO_BYTES)
+    fstab_text = _read_bounded(HOST_FSTAB, MAX_FSTAB_BYTES)
+    if mount_text is None or fstab_text is None:
+        mount_text = None
+        fstab_text = None
     mounts = parse_mountinfo(mount_text or "")
     fstab = parse_fstab(fstab_text or "")
-    devices = _device_records(mounts, fstab)
+    devices = _device_records(mounts, fstab, capacity_from_collector_namespace=False)
     archive = _archive_data(devices, fstab)
+    archive.configured_source = "Host /etc/fstab read-only bind" if fstab_text is not None else "Host fstab unavailable"
     backups = _restic_data(observed_at)
     schedule_status, schedules = _schedule_inventory()
     backups.schedule_status = schedule_status
@@ -819,14 +836,14 @@ def _collect() -> StorageOverview:
     alerts = _health_alerts(devices, archive, backups, observed_at)
     sources = {
         "mounts": SourceState(
-            status="AVAILABLE" if mount_text is not None else "UNAVAILABLE",
+            status="PARTIAL" if mount_text is not None else "UNAVAILABLE",
             observed_at=observed_at,
-            detail="Read bounded /proc/self/mountinfo in the collector namespace; host namespace identity is not verified" if mount_text is not None else "Mount metadata is unreadable or exceeded the size limit",
+            detail="Read bounded host PID 1 mountinfo bind; capacity and bind provenance require separate verification" if mount_text is not None else "Host mountinfo/fstab read-only bind pair is absent or unreadable; container mounts were not used",
         ),
         "configuration": SourceState(
-            status="AVAILABLE" if fstab_text is not None else "UNAVAILABLE",
+            status="PARTIAL" if fstab_text is not None else "UNAVAILABLE",
             observed_at=observed_at,
-            detail="Read bounded /etc/fstab in the collector namespace; host configuration identity is not verified" if fstab_text is not None else "fstab is unreadable or exceeded the size limit",
+            detail="Read bounded host fstab bind; bind provenance requires separate verification" if fstab_text is not None else "Host mountinfo/fstab read-only bind pair is absent or unreadable; container configuration was not used",
         ),
         "smart": SourceState(status="UNAVAILABLE", observed_at=observed_at, detail="No privileged SMART helper is configured"),
         "restic": SourceState(status=backups.repository_status, observed_at=observed_at, detail=backups.detail),
