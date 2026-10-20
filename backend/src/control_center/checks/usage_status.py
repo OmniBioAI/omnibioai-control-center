@@ -24,7 +24,7 @@ MYSQL_USER = os.environ.get("MYSQL_USER", "root")
 MYSQL_PASSWORD = os.environ.get("MYSQL_PASSWORD", "omnibioai")
 WORKBENCH_DATABASE = os.environ.get("WORKBENCH_DATABASE", "omnibioai")
 
-RUNS_ROOT = Path(os.environ.get("WORK_DIR", "/workspace/omnibioai-work")) / "runs"
+RUNS_ROOT = Path(os.environ.get("WORK_DIR", "/workspace/work")) / "runs"
 
 _CONNECT_TIMEOUT_S = 3
 _WINDOW_DAYS = 30

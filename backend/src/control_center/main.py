@@ -893,7 +893,7 @@ def coverage_status(_admin: dict = Depends(require_permission("platform.manage_i
     Gated: previously had no auth requirement at all -- same fix as
     /report/status above."""
     state = _coverage_job.as_dict()
-    result_path = _workspace_root() / "omnibioai-work" / "out" / "coverage" / f"{_COVERAGE_REPO}.json"
+    result_path = _workspace_root() / "work" / "out" / "coverage" / f"{_COVERAGE_REPO}.json"
     state["result_exists"] = result_path.exists()
     if result_path.exists():
         mtime = datetime.fromtimestamp(result_path.stat().st_mtime, tz=timezone.utc)

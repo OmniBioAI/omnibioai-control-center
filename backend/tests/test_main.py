@@ -459,7 +459,7 @@ class TestCoverageStatus(unittest.TestCase):
     def test_result_exists_true_and_generated_at_set(self):
         """With a coverage result file present under WORKSPACE_ROOT, result_exists is True and result_generated_at is set."""
         with tempfile.TemporaryDirectory() as tmp:
-            p = Path(tmp) / "omnibioai-work" / "out" / "coverage"
+            p = Path(tmp) / "work" / "out" / "coverage"
             p.mkdir(parents=True)
             (p / f"{main_module._COVERAGE_REPO}.json").write_text("{}")
             with patch("control_center.main._workspace_root", return_value=Path(tmp)):

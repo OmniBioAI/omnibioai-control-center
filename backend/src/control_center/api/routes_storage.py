@@ -59,7 +59,7 @@ def _compute_storage(workspace: Path) -> dict:
             break
 
     work_root = None
-    for candidate in [workspace / "omnibioai-work", workspace / "work"]:
+    for candidate in [workspace / "work"]:
         if candidate.exists():
             work_root = candidate
             break
