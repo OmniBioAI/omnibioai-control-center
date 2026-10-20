@@ -2,7 +2,7 @@ import {
   Activity, BarChart3, Bot, BookOpen, BrainCircuit, Building2, ClipboardCheck, Clock, Cloud,
   Container, CreditCard, FileCheck2, FileKey, Fingerprint, FlaskConical, Gauge, HeartPulse,
   KeyRound, KeySquare, LayoutDashboard, MessagesSquare, Network, Plug, ScrollText, Search,
-  Server, Settings, Settings2, Shield, ShieldCheck, ShieldPlus, Sparkles, Users,
+  HardDrive, Server, Settings, Settings2, Shield, ShieldCheck, ShieldPlus, Sparkles, Users,
   UsersRound, Workflow, Wrench,
 } from 'lucide-react'
 import { NAVIGATION, isNavItemVisible } from '../../navigation'
@@ -20,6 +20,7 @@ const ICONS: Partial<Record<PageKey, IconComponent>> = {
   'regression-health': ClipboardCheck,
   'deployment-health': HeartPulse,
   'integration-health': Plug,
+  storage: HardDrive,
   docker: Container,
   ecosystem: Network,
   config: Settings2,

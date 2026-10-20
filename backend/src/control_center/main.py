@@ -97,6 +97,7 @@ from control_center.api.routes_security_posture import router as security_postur
 from control_center.api.routes_report import router as report_router
 from control_center.api.routes_services import router as services_router
 from control_center.api.routes_storage import router_storage
+from control_center.api.storage_dashboard import router_storage_dashboard
 from control_center.api.routes_summary import router as summary_router
 
 
@@ -243,6 +244,7 @@ app.include_router(showcase_router)
 # breakdown by directory plus `docker system df` output. Gated the same
 # way docker_router/summary_router are, above.
 app.include_router(router_storage, dependencies=[Depends(require_permission("platform.manage_infra"))])
+app.include_router(router_storage_dashboard, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(auth_proxy_router)
 app.include_router(org_proxy_router)
 app.include_router(user_proxy_router)

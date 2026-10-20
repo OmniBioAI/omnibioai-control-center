@@ -73,6 +73,12 @@ const KNOWN: Record<string, { bg: string; color: string }> = {
   // new color language, just Deployment Health's own vocabulary mapped
   // onto colors this badge already had.
   healthy: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
+  critical: { bg: 'var(--red-bg)', color: 'var(--red)' },
+  warning: { bg: 'var(--amber-bg)', color: 'var(--amber)' },
+  mounted: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
+  missing: { bg: 'var(--red-bg)', color: 'var(--red)' },
+  read_only: { bg: 'var(--amber-bg)', color: 'var(--amber)' },
+  read_write: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
   degraded: { bg: 'var(--amber-bg)', color: 'var(--amber)' },
   unhealthy: { bg: 'var(--red-bg)', color: 'var(--red)' },
   // DH-5: drift is a separate operational dimension from health above --

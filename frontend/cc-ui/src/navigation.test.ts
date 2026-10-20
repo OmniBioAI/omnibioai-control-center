@@ -337,3 +337,17 @@ describe('navigation: Deployment Health placement', () => {
     expect(item.visible).toBe(regressionItem.visible)
   })
 })
+
+describe('navigation: Storage & Backup', () => {
+  it('has one functional Storage & Backup item gated by platform.manage_infra', () => {
+    const entries = NAVIGATION.flatMap(section => section.items.flatMap(item => [
+      ...(item.key === 'storage' ? [item] : []),
+      ...(item.children ?? []).filter(child => child.key === 'storage'),
+    ]))
+    expect(entries).toHaveLength(1)
+    expect(entries[0].label).toBe('Storage & Backup')
+    expect(entries[0].functional).toBe(true)
+    const infrastructure = NAVIGATION.find(section => section.key === 'operations')!.items.find(item => item.key === 'infrastructure')!
+    expect(entries[0].visible).toBe(infrastructure.children!.find(item => item.key === 'regression-health')!.visible)
+  })
+})

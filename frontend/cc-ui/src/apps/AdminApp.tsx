@@ -12,6 +12,7 @@ import DashboardPage from '../pages/DashboardPage'
 import HealthPage from '../pages/HealthPage'
 import RegressionHealthPage from '../pages/RegressionHealthPage'
 import DeploymentHealthPage from '../pages/DeploymentHealthPage'
+import StorageDashboardPage from '../pages/StorageDashboardPage'
 import IntegrationHealthPage from '../pages/IntegrationHealthPage'
 import DockerPage from '../pages/DockerPage'
 import EcosystemPage from '../pages/EcosystemPage'
@@ -179,6 +180,7 @@ function AdminDashboard() {
     if (window.location.pathname === '/regression-health') return 'regression-health'
     if (window.location.pathname === '/deployment-health') return 'deployment-health'
     if (window.location.pathname === '/integration-health') return 'integration-health'
+    if (window.location.pathname === '/storage') return 'storage'
     if (window.location.pathname === '/security-posture') return 'security-posture'
     if (window.location.pathname === '/hipaa-compliance') return 'hipaa-compliance'
     if (window.location.pathname === '/hipaa-audit-report') return 'compliance-report'
@@ -272,6 +274,7 @@ function AdminDashboard() {
       : active === 'regression-health' ? '/regression-health'
       : active === 'deployment-health' ? '/deployment-health'
       : active === 'integration-health' ? '/integration-health'
+      : active === 'storage' ? '/storage'
       : active === 'security-posture' ? '/security-posture'
       : active === 'hipaa-compliance' ? '/hipaa-compliance'
       : active === 'compliance-report' ? '/hipaa-audit-report'
@@ -296,6 +299,8 @@ function AdminDashboard() {
         setActive('deployment-health')
       } else if (window.location.pathname === '/integration-health') {
         setActive('integration-health')
+      } else if (window.location.pathname === '/storage') {
+        setActive('storage')
       } else if (window.location.pathname === '/security-posture') {
         setActive('security-posture')
       } else if (window.location.pathname === '/hipaa-compliance') {
@@ -501,6 +506,7 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
     case 'regression-health': return ctx.canSeeRegressionHealth ? <RegressionHealthPage /> : null
     case 'deployment-health': return ctx.canSeeDeploymentHealth ? <DeploymentHealthPage /> : null
     case 'integration-health': return ctx.canSeeRegressionHealth ? <IntegrationHealthPage /> : null
+    case 'storage': return ctx.canSeeRegressionHealth ? <StorageDashboardPage /> : null
     case 'docker':    return ctx.canSeeOps ? <DockerPage    refreshKey={ctx.refreshKey} /> : null
     case 'ecosystem': return ctx.canSeeOps ? <EcosystemPage refreshKey={ctx.refreshKey} /> : null
     case 'config':    return ctx.canSeeOps ? <ConfigPage    refreshKey={ctx.refreshKey} /> : null

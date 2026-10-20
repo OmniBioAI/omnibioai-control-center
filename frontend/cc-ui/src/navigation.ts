@@ -30,7 +30,7 @@ const hasManageInfraAccess = () => hasPermission('platform.manage_infra')
 
 export type PageKey =
   | 'overview'
-  | 'health' | 'regression-health' | 'deployment-health' | 'integration-health' | 'docker' | 'ecosystem' | 'config' | 'llms' | 'cloud'
+  | 'health' | 'regression-health' | 'deployment-health' | 'integration-health' | 'storage' | 'docker' | 'ecosystem' | 'config' | 'llms' | 'cloud'
   | 'actions' | 'scheduled-jobs' | 'known-issues'
   | 'organizations' | 'users' | 'teams' | 'roles'
   | 'infrastructure' | 'workflows' | 'tool-execution' | 'ai-models' | 'agentic-ai'
@@ -108,6 +108,7 @@ export const NAVIGATION: NavSection[] = [
           { key: 'deployment-health', label: 'Deployment Health', functional: true, visible: hasManageInfraAccess },
           { key: 'integration-health', label: 'Integration Health', functional: true, visible: hasManageInfraAccess },
           { key: 'docker', label: 'Docker', functional: true, visible: hasAdminAccess },
+          { key: 'storage', label: 'Storage & Backup', functional: true, visible: hasManageInfraAccess },
           { key: 'ecosystem', label: 'Ecosystem Report', functional: true, visible: hasAdminAccess },
           { key: 'config', label: 'Config', functional: true, visible: hasAdminAccess },
           { key: 'llms', label: 'LLMs', functional: true, visible: hasAdminAccess },
