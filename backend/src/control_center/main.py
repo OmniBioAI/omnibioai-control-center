@@ -57,6 +57,7 @@ from control_center.api.routes_role_proxy import router as role_proxy_router
 from control_center.api.routes_team_proxy import router as team_proxy_router
 from control_center.api.routes_service_accounts_proxy import router as service_accounts_proxy_router
 from control_center.api.routes_audit_proxy import router as audit_proxy_router
+from control_center.api.routes_license_admin_proxy import router as license_admin_proxy_router
 from control_center.api.routes_security_audit_proxy import router as security_audit_proxy_router
 from control_center.api.routes_sessions_proxy import router as sessions_proxy_router
 from control_center.api.routes_org_sso_proxy import router as org_sso_proxy_router
@@ -252,6 +253,7 @@ app.include_router(role_proxy_router)
 app.include_router(team_proxy_router)
 app.include_router(service_accounts_proxy_router)
 app.include_router(audit_proxy_router)
+app.include_router(license_admin_proxy_router)
 app.include_router(security_audit_proxy_router)
 app.include_router(sessions_proxy_router)
 app.include_router(org_sso_proxy_router)
@@ -896,7 +898,7 @@ def coverage_status(_admin: dict = Depends(require_permission("platform.manage_i
     Gated: previously had no auth requirement at all -- same fix as
     /report/status above."""
     state = _coverage_job.as_dict()
-    result_path = _workspace_root() / "omnibioai-work" / "out" / "coverage" / f"{_COVERAGE_REPO}.json"
+    result_path = _workspace_root() / "work" / "out" / "coverage" / f"{_COVERAGE_REPO}.json"
     state["result_exists"] = result_path.exists()
     if result_path.exists():
         mtime = datetime.fromtimestamp(result_path.stat().st_mtime, tz=timezone.utc)

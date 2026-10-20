@@ -315,8 +315,8 @@ INITIAL_CATALOG: tuple[CatalogControl, ...] = (
         deployment_status="unknown",
         operational_verification_status="unknown",
         evidence=(
-            CatalogEvidence("documentation", "/home/manish/Desktop/machine/omnibioai-security-audit/scripts/audit_retention_cleanup.py", "omnibioai-security-audit", notes="Source shows fail-closed cleanup gates and legal-hold checks."),
-            CatalogEvidence("documentation", "/home/manish/Desktop/machine/omnibioai-security-audit/docs/AUDIT_SOURCE_SEMANTICS_SAT4.md", "omnibioai-security-audit", notes="Doc explicitly states durable retention and freshness are UNKNOWN."),
+            CatalogEvidence("documentation", "/home/manish/Desktop/omnibioai-ecosystem/omnibioai-security-audit/scripts/audit_retention_cleanup.py", "omnibioai-security-audit", notes="Source shows fail-closed cleanup gates and legal-hold checks."),
+            CatalogEvidence("documentation", "/home/manish/Desktop/omnibioai-ecosystem/omnibioai-security-audit/docs/AUDIT_SOURCE_SEMANTICS_SAT4.md", "omnibioai-security-audit", notes="Doc explicitly states durable retention and freshness are UNKNOWN."),
         ),
         risks=(
             CatalogRisk(
@@ -326,7 +326,7 @@ INITIAL_CATALOG: tuple[CatalogControl, ...] = (
                 impact="Readiness reporting cannot claim configured audit retention duration, current freshness, legal hold completeness, or external WORM preservation.",
                 mitigation="Define retention governance, deployment evidence, and external immutable storage strategy before upgrading this control.",
                 evidence=(
-                    {"type": "documentation", "reference": "/home/manish/Desktop/machine/omnibioai-security-audit/docs/AUDIT_SOURCE_SEMANTICS_SAT4.md"},
+                    {"type": "documentation", "reference": "/home/manish/Desktop/omnibioai-ecosystem/omnibioai-security-audit/docs/AUDIT_SOURCE_SEMANTICS_SAT4.md"},
                 ),
             ),
         ),
@@ -348,8 +348,8 @@ INITIAL_CATALOG: tuple[CatalogControl, ...] = (
         deployment_status="unknown",
         operational_verification_status="unknown",
         evidence=(
-            CatalogEvidence("test_suite", "/home/manish/Desktop/machine/omnibioai-rag/tests/test_redis_role_separation.py", "omnibioai-rag", verification_result="pass", notes="Tests URL-selection logic only; live Redis production closure remains out of scope."),
-            CatalogEvidence("test_suite", "/home/manish/Desktop/machine/omnibioai-auth/tests/test_redis_role_separation.py", "omnibioai-auth", verification_result="pass", notes="Tests auth/interaction Redis identity selection behavior only."),
+            CatalogEvidence("test_suite", "/home/manish/Desktop/omnibioai-ecosystem/omnibioai-rag/tests/test_redis_role_separation.py", "omnibioai-rag", verification_result="pass", notes="Tests URL-selection logic only; live Redis production closure remains out of scope."),
+            CatalogEvidence("test_suite", "/home/manish/Desktop/omnibioai-ecosystem/omnibioai-auth/tests/test_redis_role_separation.py", "omnibioai-auth", verification_result="pass", notes="Tests auth/interaction Redis identity selection behavior only."),
         ),
         risks=(
             CatalogRisk(
@@ -359,8 +359,8 @@ INITIAL_CATALOG: tuple[CatalogControl, ...] = (
                 impact="Catalog cannot treat Redis role separation as deployed or operationally verified.",
                 mitigation="Complete and record production Redis ACL/credential rollout evidence in an approved non-secret artifact.",
                 evidence=(
-                    {"type": "test_suite", "reference": "/home/manish/Desktop/machine/omnibioai-rag/tests/test_redis_role_separation.py"},
-                    {"type": "test_suite", "reference": "/home/manish/Desktop/machine/omnibioai-auth/tests/test_redis_role_separation.py"},
+                    {"type": "test_suite", "reference": "/home/manish/Desktop/omnibioai-ecosystem/omnibioai-rag/tests/test_redis_role_separation.py"},
+                    {"type": "test_suite", "reference": "/home/manish/Desktop/omnibioai-ecosystem/omnibioai-auth/tests/test_redis_role_separation.py"},
                 ),
             ),
         ),

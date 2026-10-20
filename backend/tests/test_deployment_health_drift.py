@@ -395,7 +395,7 @@ def test_serialization_never_leaks_absolute_paths_or_secrets():
     service = _service(image_raw="mysql:8.0")
     container = _container(
         "com.docker.compose.image=sha256:same,"
-        "com.docker.compose.project.working_dir=/home/manish/Desktop/machine/omnibioai-studio"
+        "com.docker.compose.project.working_dir=/home/manish/Desktop/omnibioai-ecosystem/omnibioai-studio"
     )
     drift = build_service_drift(
         service=service, running_container=container, running_present=True,

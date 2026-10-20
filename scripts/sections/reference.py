@@ -24,7 +24,7 @@ def reference_section_html(control_center_url: str) -> str:
         pass
 
     if not data.get("available"):
-        ref_root = data.get("ref_root", "omnibioai-data/reference/")
+        ref_root = data.get("ref_root", "data/reference/")
         return f"""
 <div class="tab-section">
   <h2 style="font-size:18px;font-weight:700;margin-bottom:4px">Reference Data</h2>

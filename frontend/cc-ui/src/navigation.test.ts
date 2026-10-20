@@ -1,6 +1,17 @@
 import { describe, it, expect } from 'vitest'
 import { NAVIGATION } from './navigation'
 
+describe('navigation: License Management placement', () => {
+  it('is one functional, permission-gated Administration item with the new label', () => {
+    const items = NAVIGATION.flatMap(section => section.items).filter(item => item.key === 'manual-licenses')
+    expect(items).toHaveLength(1)
+    expect(items[0].functional).toBe(true)
+    expect(items[0].label).toBe('License Management')
+    expect(items[0].visible).toBeDefined()
+    expect(NAVIGATION.find(section => section.key === 'administration')?.items).toContain(items[0])
+  })
+})
+
 // PR-C (Control Center Sessions Integration). Direct assertions against
 // the single source of truth navigation.ts's own NAVIGATION array --
 // more precise than inferring placement from rendered DOM structure,

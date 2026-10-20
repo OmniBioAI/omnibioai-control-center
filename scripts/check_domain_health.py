@@ -44,7 +44,7 @@ is exactly why this check talks to the real public hostnames over the
 network rather than reading a certificate file on disk.
 
 Cron (daily at 05:00):
-  0 5 * * * python3 /home/manish/Desktop/machine/omnibioai-control-center/scripts/check_domain_health.py >> /home/manish/Desktop/machine/work/backups/omnibioai-domain-health.log 2>&1
+  0 5 * * * python3 /home/manish/Desktop/omnibioai-ecosystem/omnibioai-control-center/scripts/check_domain_health.py >> /home/manish/Desktop/omnibioai-ecosystem/work/backups/omnibioai-domain-health.log 2>&1
 """
 
 from __future__ import annotations
@@ -63,7 +63,7 @@ import requests
 CONTROL_CENTER_URL = os.environ.get("CONTROL_CENTER_URL", "http://127.0.0.1:7070")
 
 # Same shared secret used by the other two self-checks.
-STUDIO_ENV_PATH = Path("/home/manish/Desktop/machine/omnibioai-studio/.env")
+STUDIO_ENV_PATH = Path("/home/manish/Desktop/omnibioai-ecosystem/omnibioai-studio/.env")
 
 # Overridable for live-validation test runs only -- production always
 # uses the real 30/7-day defaults below.

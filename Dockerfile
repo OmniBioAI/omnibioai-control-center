@@ -31,6 +31,9 @@ LABEL org.opencontainers.image.source=https://github.com/OmniBioAI/omnibioai-con
 WORKDIR /app
 
 # Rust needed for gseapy compilation.
+# restic is used only by the Storage Dashboard's bounded, no-lock/no-cache
+# snapshot inventory when an approved read-only repository and password-file
+# bind are configured. Its absence leaves that source unavailable.
 # nodejs/npm needed for _run_vuln_scan()'s npm-audit branch (the 4
 # npm-manifest repos: omnibioai-studio, omnibioai-design-tokens,
 # omnibioai-ui, omnibioai-launcher) -- Debian trixie's own repo ships
@@ -41,7 +44,7 @@ WORKDIR /app
 # Report v0.8.0) -- it renders HTML/CSS to PDF via Pango/Cairo, not a
 # pure-Python engine, and imports libgobject at process start, so these
 # are needed here even though nothing else in this image did before.
-RUN apt-get update && apt-get install -y --no-install-recommends     build-essential gcc g++ pkg-config libssl-dev libffi-dev curl ca-certificates cloc nodejs npm     libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-xlib-2.0-0 libcairo2 shared-mime-info fonts-liberation     && curl https://sh.rustup.rs -sSf | sh -s -- -y     && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends     build-essential gcc g++ pkg-config libssl-dev libffi-dev curl ca-certificates cloc nodejs npm restic     libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-xlib-2.0-0 libcairo2 shared-mime-info fonts-liberation     && curl https://sh.rustup.rs -sSf | sh -s -- -y     && rm -rf /var/lib/apt/lists/*
 
 # Build configuration
 ENV PATH="/root/.cargo/bin:${PATH}"

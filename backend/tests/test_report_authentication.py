@@ -20,33 +20,55 @@ def report(monkeypatch):
 
 @pytest.mark.parametrize("token", [None, "", "   "])
 @pytest.mark.parametrize("skip_health", [False, True])
-def test_missing_token_precedes_expensive_work(report, monkeypatch, tmp_path, token, skip_health):
-    from shared.health_fetch import ReportAuthenticationError
-
+def test_missing_token_generates_public_report_without_protected_request(report, monkeypatch, tmp_path, token, skip_health):
     if token is None:
         monkeypatch.delenv("CONTROL_CENTER_ACCESS_TOKEN", raising=False)
     else:
         monkeypatch.setenv("CONTROL_CENTER_ACCESS_TOKEN", token)
+    public_health = report.EcosystemHealth(overall_status="UP", generated_at="")
     with patch.object(report, "ensure_cloc") as cloc, \
+            patch.object(report, "_resolve_target_paths", return_value=[]), \
             patch.object(report, "collect_coverage") as coverage, \
-            patch.object(report, "fetch_health") as health, \
-            patch.object(report, "build_report") as build:
-        with pytest.raises(ReportAuthenticationError, match="CONTROL_CENTER_ACCESS_TOKEN is required"):
-            report.generate_report(tmp_path, skip_health=skip_health)
-        for operation in (cloc, coverage, health, build):
-            operation.assert_not_called()
+            patch.object(report, "fetch_health", return_value=public_health) as health, \
+            patch.object(report, "build_report") as build, \
+            patch("urllib.request.urlopen") as protected_request:
+        result = report.generate_report(tmp_path, skip_health=skip_health, skip_coverage=True)
+    assert result == tmp_path / report.DEFAULT_OUT_PATH
+    cloc.assert_called_once()
+    coverage.assert_not_called()
+    build.assert_called_once()
+    if skip_health:
+        health.assert_not_called()
+    else:
+        health.assert_called_once()
+    protected_request.assert_not_called()
     assert not list(tmp_path.iterdir())
 
 
-def test_missing_token_cli_error(report, monkeypatch, capsys):
+def test_missing_token_skips_protected_license_request(report, monkeypatch):
+    from sections.misc.license import license_section_html
+
+    monkeypatch.delenv("CONTROL_CENTER_ACCESS_TOKEN", raising=False)
+    with patch("urllib.request.urlopen") as protected_request:
+        html = license_section_html("http://127.0.0.1:7070")
+    assert "Protected license data skipped" in html
+    assert "CONTROL_CENTER_ACCESS_TOKEN" in html
+    protected_request.assert_not_called()
+
+
+def test_missing_token_cli_generates_without_prompt(report, monkeypatch, tmp_path, capsys):
+    from shared import operator_login
+
     monkeypatch.delenv("CONTROL_CENTER_ACCESS_TOKEN", raising=False)
     monkeypatch.setattr(sys, "argv", ["generate_report.py"])
-    assert report.main() == 1
+    with patch.object(operator_login, "login_operator") as authenticate, \
+            patch.object(report, "generate_report", return_value=tmp_path / "report.html") as generate:
+        assert report.main() == 0
+    authenticate.assert_not_called()
+    generate.assert_called_once()
     captured = capsys.readouterr()
-    assert "CONTROL_CENTER_ACCESS_TOKEN is required" in captured.err
-    assert "short-lived IAM-issued operator access token" in captured.err
-    assert "platform.manage_infra" in captured.err
-    assert "Running cloc" not in captured.out
+    assert "Report written" in captured.out
+    assert captured.err == ""
 
 
 def test_license_forwards_token_and_renders_success(report, monkeypatch, capsys):
@@ -219,29 +241,27 @@ def test_iam_unavailable(login):
 
 
 @pytest.mark.parametrize("status, message", [(401, "authentication failure"), (403, "lacks platform.manage_infra")])
-def test_authorization_failure_stops_before_generation(login, report, monkeypatch, tmp_path, capsys, status, message):
-    monkeypatch.setattr(sys, "argv", ["generate_report.py"])
+def test_operator_session_rejects_invalid_access_before_protected_work(login, monkeypatch, capsys, status, message):
     token = "private-access"
     error = urllib.error.HTTPError(token, status, token, {}, io.BytesIO(token.encode()))
     with patch.object(login, "login_operator", return_value=token), \
-            patch.object(login, "_request_json", side_effect=error), \
-            patch.object(report, "generate_report") as generate:
-        assert report.main() == 1
-        generate.assert_not_called()
+            patch.object(login, "_request_json", side_effect=error):
+        with pytest.raises(login.ReportAuthenticationError, match=message) as caught:
+            with login.operator_session("http://127.0.0.1:7070"):
+                pytest.fail("protected report work must not start")
     assert login.operator_access_token.get() == ""
     captured = capsys.readouterr()
-    assert message in captured.err
-    assert token not in captured.out + captured.err
+    assert token not in str(caught.value) + captured.out + captured.err
     assert "✓ Authenticated" not in captured.out
 
 
-def test_missing_token_cli_invokes_interactive_login(login, report, monkeypatch, tmp_path, capsys):
+def test_missing_token_cli_never_invokes_interactive_login(login, report, monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(sys, "argv", ["generate_report.py"])
     with patch.object(login, "login_operator", return_value="private-access") as authenticate, \
             patch.object(login, "_verify_infra_access"), \
             patch.object(report, "generate_report", return_value=tmp_path / "report.html") as generate:
         assert report.main() == 0
-    authenticate.assert_called_once()
+    authenticate.assert_not_called()
     generate.assert_called_once()
     captured = capsys.readouterr()
     assert "private-access" not in captured.out + captured.err

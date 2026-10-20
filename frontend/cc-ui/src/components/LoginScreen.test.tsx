@@ -6,12 +6,14 @@ import * as auth from '../auth'
 
 vi.mock('../auth', async () => {
   const actual = await vi.importActual<typeof import('../auth')>('../auth')
-  return { ...actual, login: vi.fn() }
+  return { ...actual, login: vi.fn(), completeMFAChallenge: vi.fn(), resendMFAEmailCode: vi.fn() }
 })
 
 describe('LoginScreen', () => {
   beforeEach(() => {
     vi.mocked(auth.login).mockReset()
+    vi.mocked(auth.completeMFAChallenge).mockReset()
+    vi.mocked(auth.resendMFAEmailCode).mockReset()
   })
 
   it('renders the admin portal branding and form', () => {
@@ -49,5 +51,67 @@ describe('LoginScreen', () => {
     await user.click(screen.getByRole('button', { name: /Sign In/i }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Authentication failed')
+  })
+
+  it('completes an MFA challenge without displaying its challenge token', async () => {
+    const user = userEvent.setup()
+    const sessionUser: auth.SessionUser = {
+      userId: '1', email: 'mfa-user@example.invalid', roles: ['admin'],
+      permissions: [], orgId: null, orgRoles: [], teamId: null, teamRole: null, schemaVersion: 2,
+    }
+    vi.mocked(auth.login).mockRejectedValue(
+      new auth.MFAChallengeRequiredError('isolated-test-challenge', ['totp', 'recovery_code']),
+    )
+    vi.mocked(auth.completeMFAChallenge).mockResolvedValue(sessionUser)
+    const onSuccess = vi.fn()
+
+    render(<LoginScreen onSuccess={onSuccess} />)
+    await user.type(screen.getByRole('textbox'), 'mfa-user@example.invalid')
+    await user.type(document.querySelector('input[type="password"]')!, 'test-only')
+    await user.click(screen.getByRole('button', { name: /Sign In/i }))
+
+    const code = await screen.findByRole('textbox', { name: /verification code/i })
+    expect(screen.queryByText('isolated-test-challenge')).not.toBeInTheDocument()
+    await user.type(code, '000000')
+    await user.click(screen.getByRole('button', { name: 'Verify' }))
+
+    await waitFor(() => expect(auth.completeMFAChallenge).toHaveBeenCalledWith('isolated-test-challenge', '000000'))
+    expect(onSuccess).toHaveBeenCalledWith(sessionUser)
+  })
+
+  it('requires email first and then preserves the enrolled authenticator step', async () => {
+    const user = userEvent.setup()
+    const sessionUser: auth.SessionUser = {
+      userId: '1', email: 'admin@omnibioai.org', roles: ['admin'], permissions: [],
+      orgId: null, orgRoles: [], teamId: null, teamRole: null, schemaVersion: 2,
+    }
+    vi.mocked(auth.login).mockRejectedValue(
+      new auth.MFAChallengeRequiredError('email-test-challenge', ['email']),
+    )
+    vi.mocked(auth.completeMFAChallenge)
+      .mockRejectedValueOnce(new auth.MFAChallengeRequiredError('totp-test-challenge', ['totp', 'recovery_code']))
+      .mockResolvedValueOnce(sessionUser)
+    const onSuccess = vi.fn()
+
+    render(<LoginScreen onSuccess={onSuccess} />)
+    await user.type(screen.getByRole('textbox'), 'admin@omnibioai.org')
+    await user.type(document.querySelector('input[type="password"]')!, 'test-only')
+    await user.click(screen.getByRole('button', { name: /Sign In/i }))
+
+    expect(await screen.findByText(/six-digit code sent/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Google Authenticator' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Resend Code \(60s\)/ })).toBeDisabled()
+    await user.type(screen.getByRole('textbox', { name: /verification code/i }), '123456')
+    await user.click(screen.getByRole('button', { name: 'Verify' }))
+    await waitFor(() => expect(auth.completeMFAChallenge).toHaveBeenCalledWith(
+      'email-test-challenge', '123456', 'email',
+    ))
+    expect(await screen.findByText(/Google Authenticator or one of your recovery codes/i)).toBeInTheDocument()
+    await user.type(screen.getByRole('textbox', { name: /verification code/i }), '654321')
+    await user.click(screen.getByRole('button', { name: 'Verify' }))
+    await waitFor(() => expect(auth.completeMFAChallenge).toHaveBeenLastCalledWith(
+      'totp-test-challenge', '654321',
+    ))
+    expect(onSuccess).toHaveBeenCalledWith(sessionUser)
   })
 })

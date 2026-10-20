@@ -18,6 +18,7 @@ import SecuritySummaryCard from '../components/organizations/SecuritySummaryCard
 import RoleAssignmentList from '../components/roles/RoleAssignmentList'
 import RoleSelector from '../components/roles/RoleSelector'
 import TeamsCard from '../components/teams/TeamsCard'
+import OrganizationInvitationsCard from '../components/organizations/OrganizationInvitationsCard'
 
 const card: React.CSSProperties = {
   background: 'var(--surface)', border: '1px solid var(--border)',
@@ -394,6 +395,7 @@ function PlatformDetailView({ orgId, onBack, onViewTeams, onViewRoles, onManageS
       <QuickLinks orgId={org.id} onViewTeams={onViewTeams} onViewRoles={onViewRoles} />
 
       <MembersRolesCard orgId={org.id} />
+      <OrganizationInvitationsCard orgId={org.id} />
 
       <TeamsCard orgId={org.id} />
 
@@ -487,6 +489,7 @@ function MyOrgDetailView({ orgId, onBack, onViewTeams, onViewRoles }: Props) {
       <QuickLinks orgId={org.id} onViewTeams={onViewTeams} onViewRoles={onViewRoles} />
 
       <MembersRolesCard orgId={org.id} />
+      <OrganizationInvitationsCard orgId={org.id} />
 
       <TeamsCard orgId={org.id} />
 

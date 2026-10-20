@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { fetchSummary, fetchReportStatus, triggerGenerate } from '../api'
 import {
-  canSeeAnalytics as canSeeAnalyticsAccess, getSessionUser, hasAdminAccess, hasOrganizationsAccess, hasPermission, hasPlatformAdminAccess,
+  canSeeAnalytics as canSeeAnalyticsAccess, getSessionUser, hasAdminAccess, hasManualLicenseAccess, hasOrganizationsAccess, hasPermission, hasPlatformAdminAccess,
   UNAUTHORIZED_EVENT, openLims,
 } from '../auth'
 import { findNavItem } from '../navigation'
@@ -33,6 +33,7 @@ import OrganizationsPage from '../pages/OrganizationsPage'
 import OrganizationDetailPage from '../pages/OrganizationDetailPage'
 import UsersPage from '../pages/UsersPage'
 import UserDetailPage from '../pages/UserDetailPage'
+import ManualLicensesPage from '../pages/ManualLicensesPage'
 import TeamsPage from '../pages/identity/TeamsPage'
 import RolesPage from '../pages/identity/RolesPage'
 import SSOSettingsPage from '../pages/identity/SSOSettingsPage'
@@ -50,6 +51,7 @@ import SecurityPosturePage from '../pages/security/SecurityPosturePage'
 import OrganizationMFAPolicyPage from '../pages/security/OrganizationMFAPolicyPage'
 import SAMLSettingsPage from '../pages/identity/SAMLSettingsPage'
 import AuthGate from './AuthGate'
+import InvitationAcceptancePage from '../pages/InvitationAcceptancePage'
 
 /**
  * Admin Console Phase 2 -- Enterprise Admin Console Foundation.
@@ -79,6 +81,9 @@ function hasConsoleAccess(): boolean {
 }
 
 export default function AdminApp() {
+  if (window.location.pathname === '/invitations/accept') {
+    return <InvitationAcceptancePage />
+  }
   return (
     <AuthGate hasAccess={hasConsoleAccess}>
       <AdminDashboard />
@@ -145,6 +150,7 @@ function AdminDashboard() {
   const canSeeDeploymentHealth = hasPermission('platform.manage_infra')
   const canSeeOrganizations = hasOrganizationsAccess()
   const canSeeUsers = hasPlatformAdminAccess()
+  const canSeeManualLicenses = hasManualLicenseAccess()
   // PR11.4b: same gate as 'users' -- GET /platform/audit-events is
   // manage_all_orgs-gated, not org-scoped, so this is a flat platform-
   // wide page (no org-picker/deep-link, unlike 'iam'/'api-keys').
@@ -187,6 +193,7 @@ function AdminDashboard() {
     if (window.location.pathname === '/workflows') return 'workflows'
     if (window.location.pathname.startsWith('/organizations')) return 'organizations'
     if (window.location.pathname.startsWith('/users')) return 'users'
+    if (window.location.pathname === '/licenses/manual') return 'manual-licenses'
     // /iam/service-accounts must be checked before the bare /iam prefix
     // below, or it would always match the SSO branch first.
     if (window.location.pathname.startsWith('/iam/service-accounts')) return 'api-keys'
@@ -266,6 +273,7 @@ function AdminDashboard() {
     const path =
       active === 'organizations' ? (selectedOrgId != null ? `/organizations/${selectedOrgId}` : '/organizations')
       : active === 'users' ? (selectedUserId != null ? `/users/${selectedUserId}` : '/users')
+      : active === 'manual-licenses' ? '/licenses/manual'
       : active === 'iam' ? (selectedSsoOrgId != null ? `/iam/${selectedSsoOrgId}` : '/iam')
       : active === 'api-keys' ? (selectedServiceAccountsOrgId != null ? `/iam/service-accounts/${selectedServiceAccountsOrgId}` : '/iam/service-accounts')
       : active === 'mfa-policy' ? (selectedMfaPolicyOrgId != null ? `/security/mfa-policy/${selectedMfaPolicyOrgId}` : '/security/mfa-policy')
@@ -315,6 +323,8 @@ function AdminDashboard() {
       } else if (window.location.pathname.startsWith('/users')) {
         setActive('users')
         setSelectedUserId(userIdFromPath())
+      } else if (window.location.pathname === '/licenses/manual') {
+        setActive('manual-licenses')
       } else if (window.location.pathname.startsWith('/iam/service-accounts')) {
         setActive('api-keys')
         setSelectedServiceAccountsOrgId(serviceAccountsOrgIdFromPath())
@@ -432,7 +442,7 @@ function AdminDashboard() {
       </div>}
     >
       {renderPage(active, {
-        canSeeOps, canSeeRegressionHealth, canSeeDeploymentHealth, canSeeOrganizations, canSeeUsers, canSeeAuditLogs, canSeeAuditExplorer, canSeeInteractions, canSeeAnalytics, canSeeSecurityOverview, canSeeSecurityPosture,
+        canSeeOps, canSeeRegressionHealth, canSeeDeploymentHealth, canSeeOrganizations, canSeeUsers, canSeeManualLicenses, canSeeAuditLogs, canSeeAuditExplorer, canSeeInteractions, canSeeAnalytics, canSeeSecurityOverview, canSeeSecurityPosture,
         canSeeComplianceReport, canSeeHipaaCompliance, refreshKey,
         selectedOrgId, setSelectedOrgId, selectedUserId, setSelectedUserId,
         teamsOrgHint, rolesOrgHint, onViewTeams: handleViewTeams, onViewRoles: handleViewRoles,
@@ -453,6 +463,7 @@ interface RenderCtx {
   canSeeDeploymentHealth: boolean
   canSeeOrganizations: boolean
   canSeeUsers: boolean
+  canSeeManualLicenses: boolean
   canSeeAuditLogs: boolean
   canSeeAuditExplorer: boolean
   canSeeInteractions: boolean
@@ -578,6 +589,9 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
       return ctx.selectedUserId != null
         ? <UserDetailPage userId={ctx.selectedUserId} onBack={() => ctx.setSelectedUserId(null)} />
         : <UsersPage onSelect={ctx.setSelectedUserId} />
+
+    case 'manual-licenses':
+      return ctx.canSeeManualLicenses ? <ManualLicensesPage /> : null
 
     // PR11.4b: flat platform-wide page, no org-picker/deep-link --
     // audit events span every organization, filtered in-page, not

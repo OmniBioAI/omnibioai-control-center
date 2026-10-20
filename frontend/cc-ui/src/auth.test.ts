@@ -75,13 +75,14 @@ async function loginAs(user: {
   roles: string[]
   permissions: string[]
   org_id?: string | null
+  user_id?: string | number
 }) {
   const accessToken = makeToken({ sub: '1', exp: nowSeconds() + 900 })
   vi.stubGlobal('fetch', mockFetchByUrl({
     '/auth/login': jsonResponse({ access_token: accessToken, refresh_token: 'r' }),
     '/auth/validate': jsonResponse({
       valid: true,
-      user_id: '1',
+      user_id: user.user_id ?? '1',
       email: 'user@omnibioai.org',
       ...user,
     }),
@@ -98,6 +99,23 @@ describe('hasAdminAccess', () => {
   it('is false without the admin role, even with other permissions', async () => {
     await loginAs({ roles: ['org_admin'], permissions: ['manage_org'] })
     expect(auth.hasAdminAccess()).toBe(false)
+  })
+})
+
+describe('hasManualLicenseAccess', () => {
+  it('admits the stable designated Admin ID when Auth returns a numeric user_id', async () => {
+    await loginAs({ user_id: 1, roles: ['admin'], permissions: [] })
+    expect(auth.hasManualLicenseAccess()).toBe(true)
+  })
+
+  it('admits a separate Platform Owner with both required roles', async () => {
+    await loginAs({ user_id: 2, roles: ['admin', 'platform_admin'], permissions: ['manage_all_orgs'] })
+    expect(auth.hasManualLicenseAccess()).toBe(true)
+  })
+
+  it('denies a regular user', async () => {
+    await loginAs({ user_id: 3, roles: ['user'], permissions: [] })
+    expect(auth.hasManualLicenseAccess()).toBe(false)
   })
 })
 
@@ -171,9 +189,7 @@ describe('login', () => {
       '/auth/login': jsonResponse({ error: 'Invalid email or password' }, false),
     }))
 
-    await expect(auth.login('admin@omnibioai.org', 'wrong')).rejects.toThrow(
-      'Invalid email or password'
-    )
+    await expect(auth.login('admin@omnibioai.org', 'wrong')).rejects.toThrow('Unable to sign in. Please try again.')
     expect(localStorage.getItem('omnibioai_access_token')).toBeNull()
   })
 
@@ -188,6 +204,68 @@ describe('login', () => {
 
     expect(user?.email).toBe('admin@omnibioai.org')
     expect(user?.roles).toEqual(['admin'])
+  })
+
+  it('surfaces an MFA challenge without storing it or treating it as a session', async () => {
+    vi.stubGlobal('fetch', mockFetchByUrl({
+      '/auth/login': jsonResponse({
+        mfa_required: true,
+        challenge_token: 'isolated-test-challenge',
+        methods: ['totp', 'recovery_code'],
+      }),
+    }))
+
+    const error = await auth.login('mfa-user@example.invalid', 'test-only').catch(value => value)
+
+    expect(error).toBeInstanceOf(auth.MFAChallengeRequiredError)
+    expect(error.challengeToken).toBe('isolated-test-challenge')
+    expect(error.methods).toEqual(['totp', 'recovery_code'])
+    expect(localStorage.getItem('omnibioai_access_token')).toBeNull()
+  })
+
+  it('completes an MFA challenge and establishes the validated session', async () => {
+    const accessToken = makeToken({ sub: '1', exp: nowSeconds() + 900 })
+    const fetchMock = mockFetchByUrl({
+      '/auth/mfa/challenge': jsonResponse({ access_token: accessToken, refresh_token: 'server-cookie-token' }),
+      '/auth/validate': jsonResponse(validUser),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const user = await auth.completeMFAChallenge('isolated-test-challenge', '000000')
+
+    expect(fetchMock).toHaveBeenCalledWith('/auth/mfa/challenge', expect.objectContaining({
+      body: JSON.stringify({ challenge_token: 'isolated-test-challenge', code: '000000' }),
+    }))
+    expect(user?.roles).toEqual(['admin'])
+    expect(localStorage.getItem('omnibioai_access_token')).toBe(accessToken)
+    expect(localStorage.getItem('omnibioai_refresh_token')).toBeNull()
+  })
+
+  it('advances email verification to an enrolled authenticator without storing a session', async () => {
+    vi.stubGlobal('fetch', mockFetchByUrl({
+      '/auth/mfa/challenge': jsonResponse({
+        mfa_required: true,
+        challenge_token: 'totp-stage-challenge',
+        methods: ['totp', 'recovery_code'],
+      }),
+    }))
+
+    const error = await auth.completeMFAChallenge('email-stage-challenge', '123456', 'email').catch(value => value)
+
+    expect(error).toBeInstanceOf(auth.MFAChallengeRequiredError)
+    expect(error.challengeToken).toBe('totp-stage-challenge')
+    expect(localStorage.getItem('omnibioai_access_token')).toBeNull()
+  })
+
+  it('requests a replacement email code and returns its cooldown', async () => {
+    const fetchMock = mockFetchByUrl({
+      '/auth/mfa/resend': jsonResponse({ sent: true, cooldown_seconds: 60 }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(auth.resendMFAEmailCode('isolated-test-challenge')).resolves.toBe(60)
+    expect(fetchMock).toHaveBeenCalledWith('/auth/mfa/resend', expect.objectContaining({
+      body: JSON.stringify({ challenge_token: 'isolated-test-challenge' }),
+    }))
   })
 })
 

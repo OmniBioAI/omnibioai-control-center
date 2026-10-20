@@ -44,7 +44,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import pandas as pd
+try:
+    import pandas as pd
+except ModuleNotFoundError as exc:
+    if exc.name == "pandas":
+        raise SystemExit(
+            "Missing reporting dependency 'pandas'. Install the control-center project "
+            "dependencies (for example: python -m pip install -e .)."
+        ) from exc
+    raise
 
 from shared.cloc import Totals, ensure_cloc, run_cloc, validate_paths, _resolve_target_paths
 from shared.health_fetch import EcosystemHealth, fetch_health
@@ -95,6 +103,7 @@ DEFAULT_TARGETS = [
     "omnibioai-security-audit", "omnibioai-security-sdk",
     "omnibioai-api-gateway", "omnibioai-hpc-policy-engine", "omnibioai-docs", "omnibioai-auth", "omnibioai-landing", "omnibioai-design-tokens", "omnibioai-ui",
     "omnibioai-utils",
+    "omnibioai-skills",
     "omnibioai-launcher",
     "omnibioai-billing", "omnibioai-db-init",
 ]
