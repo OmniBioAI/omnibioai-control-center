@@ -1,0 +1,25 @@
+# Candidate-only pin and host mount-table inputs for Storage Dashboard V3.
+# Include after docker-compose.yml, docker-compose.override.yml, and the
+# existing release pin when testing or deploying this candidate.
+services:
+  control-center:
+    image: obai-control-center:2891b65
+    pull_policy: never
+    build: !reset null
+    volumes:
+      - type: bind
+        source: /proc/1/mountinfo
+        target: /run/host-storage/mountinfo
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /etc/fstab
+        target: /run/host-storage/fstab
+        read_only: true
+        bind:
+          create_host_path: false
+  control-center-web:
+    image: obai-control-center-web:2891b65
+    pull_policy: never
+    build: !reset null
