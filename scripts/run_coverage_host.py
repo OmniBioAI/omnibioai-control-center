@@ -19,10 +19,10 @@ instead of running pytest itself, which would fail due to missing package instal
 Usage
 -----
   # From anywhere:
-  python3 ~/Desktop/machine/omnibioai-control-center/scripts/run_coverage_host.py
+  python3 <ecosystem-root>/omnibioai-control-center/scripts/run_coverage_host.py
 
   # Custom root:
-  python3 .../run_coverage_host.py --root ~/Desktop/machine
+  python3 .../run_coverage_host.py --root <ecosystem-root>
 
   # Specific repos only:
   python3 .../run_coverage_host.py --repos omnibioai-tes omnibioai_sdk
@@ -83,6 +83,7 @@ REPOS = [
     "omnibioai-iam-client",
     "omnibioai-ui",
     "omnibioai-utils",
+    "omnibioai-skills",
     "omnibioai-landing",
     "omnibioai-db-init",
 ]
@@ -890,10 +891,11 @@ def run_omnibioai(repo: Path, timeout_override: int | None = None) -> Dict[str, 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
+    script_root = Path(__file__).resolve().parent.parent.parent
     parser.add_argument(
         "--root", type=Path,
-        default=Path.home() / "Desktop/machine",
-        help="Ecosystem root (default: ~/Desktop/machine)",
+        default=script_root,
+        help=f"Ecosystem root (default: {script_root})",
     )
     parser.add_argument(
         "--repos", nargs="+", default=None,
@@ -906,6 +908,9 @@ def main() -> int:
     args = parser.parse_args()
 
     root     = args.root.resolve()
+    if not root.is_dir():
+        print(f"Ecosystem root does not exist or is not a directory: {root}", file=sys.stderr)
+        return 2
     repos    = args.repos or REPOS
     work_dir = Path(os.environ.get("WORK_DIR", str(root / "work")))
     out_dir  = work_dir / "out" / "coverage"
@@ -943,6 +948,9 @@ def main() -> int:
             warn += 1
 
     print(f"Done — {ok} ok, {warn} with issues, {skip} skipped")
+    if repos and ok == 0 and warn == 0 and skip == len(repos):
+        print("Coverage failed: every requested repository was skipped; check --root and repository paths.", file=sys.stderr)
+        return 1
     print(f"Regenerate the report at http://localhost:7070 to see results.")
     return 0
 

@@ -1,4 +1,4 @@
-import { canSeeAnalytics, hasAdminAccess, hasOrganizationsAccess, hasPermission, hasPlatformAdminAccess } from './auth'
+import { canSeeAnalytics, hasAdminAccess, hasManualLicenseAccess, hasOrganizationsAccess, hasPermission, hasPlatformAdminAccess } from './auth'
 
 // DH-3: shared reference (not a fresh arrow function per item) so
 // Regression Health and Deployment Health -- both gated by the exact
@@ -32,7 +32,7 @@ export type PageKey =
   | 'overview'
   | 'health' | 'regression-health' | 'deployment-health' | 'integration-health' | 'docker' | 'ecosystem' | 'config' | 'llms' | 'cloud'
   | 'actions' | 'scheduled-jobs' | 'known-issues'
-  | 'organizations' | 'users' | 'teams' | 'roles'
+  | 'organizations' | 'users' | 'teams' | 'roles' | 'manual-licenses'
   | 'infrastructure' | 'workflows' | 'tool-execution' | 'ai-models' | 'agentic-ai'
   | 'security-overview' | 'security-posture' | 'mfa-policy' | 'iam' | 'saml' | 'audit-logs' | 'audit-explorer' | 'sessions' | 'interactions' | 'api-keys' | 'compliance-report'
   | 'hipaa-compliance'
@@ -80,6 +80,7 @@ export const NAVIGATION: NavSection[] = [
       // anyone who can see an org's detail page can see its teams/roles.
       { key: 'teams', label: 'Teams', functional: true, visible: hasOrganizationsAccess },
       { key: 'roles', label: 'Roles & Permissions', functional: true, visible: hasOrganizationsAccess },
+      { key: 'manual-licenses', label: 'License Management', functional: true, visible: hasManualLicenseAccess },
     ],
   },
   {
@@ -346,7 +347,7 @@ export const NAVIGATION: NavSection[] = [
       // regular org member is denied both here and, independently and
       // authoritatively, by the backend).
       { key: 'analytics', label: 'Usage Analytics', functional: true, visible: canSeeAnalytics },
-      // PR B (Admin Console Billing/Usage consolidation): 'licenses' and
+      // PR B (Admin Console Billing/Usage consolidation): the former generic 'licenses' and
       // 'usage' removed from this section, not flipped to functional.
       // Both were Coming Soon placeholders that, on audit, turned out to
       // already be covered:
@@ -361,8 +362,8 @@ export const NAVIGATION: NavSection[] = [
       //     LicenseValidateRequest.platform: web|desktop|both) --
       //     Phase 1's own license-decommission work already targeted
       //     that flow for retirement. It is not an org-seat/subscription
-      //     concept and building an Admin Console UI for it would be
-      //     resurrecting a superseded model, not consolidating one.
+      //     concept. The Administration > License Management page now targets
+      //     auth's identity-bound contract, not that legacy database writer.
       //     Organization-level plan/subscription management is exactly
       //     what the 'billing' entry above (Subscription tab) already
       //     is. See docs/pr-b-billing-usage-consolidation.md for the

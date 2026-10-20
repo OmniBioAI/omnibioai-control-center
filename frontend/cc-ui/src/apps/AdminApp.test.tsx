@@ -25,6 +25,7 @@ vi.mock('../auth', async () => {
     hasPermission: vi.fn(),
     hasOrganizationsAccess: vi.fn(),
     hasPlatformAdminAccess: vi.fn(),
+    hasManualLicenseAccess: vi.fn(),
   }
 })
 
@@ -83,6 +84,7 @@ vi.mock('../pages/OrganizationDetailPage', () => ({
   ),
 }))
 vi.mock('../pages/UsersPage', () => ({ default: () => <div data-testid="UsersPage" /> }))
+vi.mock('../pages/ManualLicensesPage', () => ({ default: () => <div data-testid="ManualLicensesPage" /> }))
 vi.mock('../pages/UserDetailPage', () => ({
   default: ({ userId }: { userId: number }) => <div data-testid="UserDetailPage" data-user-id={userId} />,
 }))
@@ -147,6 +149,7 @@ describe('AdminApp auth gate', () => {
     vi.mocked(auth.hasPermission).mockReset().mockReturnValue(false)
     vi.mocked(auth.hasOrganizationsAccess).mockReset()
     vi.mocked(auth.hasPlatformAdminAccess).mockReset()
+    vi.mocked(auth.hasManualLicenseAccess).mockReset().mockReturnValue(false)
     window.history.pushState(null, '', '/')
   })
 
@@ -179,6 +182,41 @@ describe('AdminApp auth gate', () => {
     render(<AdminApp />)
     await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
     expect(screen.queryByText('Access Denied')).not.toBeInTheDocument()
+  })
+
+  it('shows Administration > License Management at the backward-compatible route', async () => {
+    window.history.pushState(null, '', '/licenses/manual')
+    vi.mocked(auth.getToken).mockReturnValue('isolated-admin-test-token')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasManualLicenseAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+
+    expect(await screen.findByTestId('ManualLicensesPage')).toBeInTheDocument()
+    expect(screen.getAllByText('Administration').length).toBeGreaterThan(0)
+    const licenseNav = screen.getByRole('button', { name: 'License Management' })
+    expect(licenseNav).toHaveAttribute('aria-current', 'page')
+    expect(licenseNav.querySelector('svg')).toHaveClass('lucide-key-round')
+    expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toHaveTextContent('Administration')
+    expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toHaveTextContent('License Management')
+    expect(window.location.pathname).toBe('/licenses/manual')
+  })
+
+  it('does not expose License Management when the identity-specific gate denies access', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('isolated-admin-test-token')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasManualLicenseAccess).mockReturnValue(false)
+
+    render(<AdminApp />)
+
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: 'License Management' })).not.toBeInTheDocument()
   })
 
   it('reaches Health via the sidebar (Operations > Infrastructure > Health)', async () => {

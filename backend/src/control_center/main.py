@@ -56,6 +56,7 @@ from control_center.api.routes_role_proxy import router as role_proxy_router
 from control_center.api.routes_team_proxy import router as team_proxy_router
 from control_center.api.routes_service_accounts_proxy import router as service_accounts_proxy_router
 from control_center.api.routes_audit_proxy import router as audit_proxy_router
+from control_center.api.routes_license_admin_proxy import router as license_admin_proxy_router
 from control_center.api.routes_security_audit_proxy import router as security_audit_proxy_router
 from control_center.api.routes_sessions_proxy import router as sessions_proxy_router
 from control_center.api.routes_org_sso_proxy import router as org_sso_proxy_router
@@ -249,6 +250,7 @@ app.include_router(role_proxy_router)
 app.include_router(team_proxy_router)
 app.include_router(service_accounts_proxy_router)
 app.include_router(audit_proxy_router)
+app.include_router(license_admin_proxy_router)
 app.include_router(security_audit_proxy_router)
 app.include_router(sessions_proxy_router)
 app.include_router(org_sso_proxy_router)

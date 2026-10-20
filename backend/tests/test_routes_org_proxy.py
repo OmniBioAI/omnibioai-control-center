@@ -274,5 +274,61 @@ class TestListOrgMembersProxy(unittest.TestCase):
         self.assertEqual(resp.status_code, 404)
 
 
+class TestOrganizationInvitationProxy(unittest.TestCase):
+    def test_create_invitation_forwards_body_auth_and_scoped_path(self) -> None:
+        upstream = _mock_response(201, {"id": 5, "status": "pending"})
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.post(
+                "/orgs/7/invitations", json={"email": "synthetic@example.test", "roles": ["org_member"]},
+                headers={"Authorization": "Bearer synthetic"},
+            )
+        self.assertEqual(resp.status_code, 201)
+        call = mock_ctx.__aenter__.return_value.request.call_args
+        self.assertEqual(call.args[:2], ("POST", f"{__import__('control_center.api.routes_org_proxy', fromlist=['IAM_URL']).IAM_URL}/orgs/7/invitations"))
+        self.assertEqual(call.kwargs["headers"]["Authorization"], "Bearer synthetic")
+        self.assertIn(b"synthetic@example.test", call.kwargs["content"])
+
+    def test_token_acceptance_is_post_body_not_url(self) -> None:
+        upstream = _mock_response(200, {"status": "accepted"})
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.post("/organization-invitations/accept", json={"token": "opaque"})
+        self.assertEqual(resp.status_code, 200)
+        call = mock_ctx.__aenter__.return_value.request.call_args
+        self.assertTrue(call.args[1].endswith("/organization-invitations/accept"))
+        self.assertNotIn("opaque", call.args[1])
+        self.assertIn(b"opaque", call.kwargs["content"])
+
+    def test_list_and_revoke_invitation_paths_forwarded(self) -> None:
+        upstream = _mock_response(403, {"detail": "Forbidden"})
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            denied = client.get("/orgs/12/invitations", headers={"Authorization": "Bearer org-member"})
+        self.assertEqual(denied.status_code, 403)
+        call = mock_ctx.__aenter__.return_value.request.call_args
+        self.assertEqual(call.args[0], "GET")
+        self.assertTrue(call.args[1].endswith("/orgs/12/invitations"))
+        self.assertEqual(call.kwargs["headers"]["Authorization"], "Bearer org-member")
+
+        upstream = _mock_response(403, {"detail": "Forbidden"})
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            denied = client.post(
+                "/orgs/12/invitations/31/revoke", headers={"Authorization": "Bearer org-member"},
+            )
+        self.assertEqual(denied.status_code, 403)
+        call = mock_ctx.__aenter__.return_value.request.call_args
+        self.assertEqual(call.args[0], "POST")
+        self.assertTrue(call.args[1].endswith("/orgs/12/invitations/31/revoke"))
+        self.assertEqual(call.kwargs["headers"]["Authorization"], "Bearer org-member")
+
+    def test_unknown_public_invitation_operation_is_not_proxied(self) -> None:
+        with patch("control_center.api.routes_org_proxy.httpx.AsyncClient") as upstream:
+            resp = client.post("/organization-invitations/issue-token", json={"token": "opaque"})
+        self.assertEqual(resp.status_code, 404)
+        upstream.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

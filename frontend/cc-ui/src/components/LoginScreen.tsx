@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { login } from '../auth'
+import { useEffect, useState } from 'react'
+import { completeMFAChallenge, login, MFAChallengeRequiredError, MFAResendError, resendMFAEmailCode } from '../auth'
 import type { SessionUser } from '../auth'
 import AdminLogo from './AdminLogo'
 import OAuthButtons from './OAuthButtons'
@@ -22,6 +22,16 @@ export default function LoginScreen({ onSuccess }: Props) {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [mfaChallenge, setMfaChallenge] = useState<MFAChallengeRequiredError | null>(null)
+  const [mfaCode, setMfaCode] = useState('')
+  const [mfaMethod, setMfaMethod] = useState<'email' | 'totp'>('totp')
+  const [resendCooldown, setResendCooldown] = useState(0)
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return
+    const timer = window.setInterval(() => setResendCooldown(value => Math.max(0, value - 1)), 1000)
+    return () => window.clearInterval(timer)
+  }, [resendCooldown > 0])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -31,7 +41,59 @@ export default function LoginScreen({ onSuccess }: Props) {
       const user = await login(email, password)
       onSuccess(user)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Authentication failed')
+      if (err instanceof MFAChallengeRequiredError) {
+        setMfaChallenge(err)
+        if (err.methods.includes('email')) {
+          setMfaMethod('email')
+          setResendCooldown(60)
+        } else {
+          setMfaMethod('totp')
+        }
+        setPassword('')
+      } else {
+        setError(err instanceof Error ? err.message : 'Authentication failed')
+      }
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleMfaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!mfaChallenge) return
+    setError(null)
+    setSubmitting(true)
+    try {
+      const user = mfaMethod === 'email'
+        ? await completeMFAChallenge(mfaChallenge.challengeToken, mfaCode, 'email')
+        : await completeMFAChallenge(mfaChallenge.challengeToken, mfaCode)
+      onSuccess(user)
+    } catch (err) {
+      if (err instanceof MFAChallengeRequiredError) {
+        setMfaChallenge(err)
+        setMfaMethod(err.methods.includes('email') ? 'email' : 'totp')
+        setMfaCode('')
+        setResendCooldown(err.methods.includes('email') ? 60 : 0)
+      } else {
+        setError(err instanceof Error ? err.message : 'MFA verification failed')
+      }
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleResend = async () => {
+    if (!mfaChallenge || resendCooldown > 0) return
+    setError(null)
+    setSubmitting(true)
+    try {
+      setResendCooldown(await resendMFAEmailCode(mfaChallenge.challengeToken))
+      setMfaCode('')
+    } catch (err) {
+      if (err instanceof MFAResendError && err.retryAfterSeconds) {
+        setResendCooldown(err.retryAfterSeconds)
+      }
+      setError(err instanceof Error ? err.message : 'Unable to resend verification code')
     } finally {
       setSubmitting(false)
     }
@@ -114,7 +176,7 @@ export default function LoginScreen({ onSuccess }: Props) {
 
         {/* ── Login card ── */}
         <form
-          onSubmit={handleSubmit}
+          onSubmit={mfaChallenge ? handleMfaSubmit : handleSubmit}
           style={{
             background: 'var(--surface)',
             border: '1px solid var(--border)',
@@ -123,7 +185,7 @@ export default function LoginScreen({ onSuccess }: Props) {
             padding: '28px 26px',
           }}
         >
-          <div
+          {!mfaChallenge ? <><div
             style={{
               fontFamily: 'var(--mono)',
               fontSize: 10,
@@ -165,6 +227,53 @@ export default function LoginScreen({ onSuccess }: Props) {
             autoComplete="current-password"
             style={{ width: '100%', padding: '9px 12px', marginBottom: 20, fontSize: 14 }}
           />
+          </> : <>
+          <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
+            {mfaMethod === 'email'
+              ? 'Enter the six-digit code sent to the Admin email address. It expires in 5 minutes.'
+              : 'Enter a code from Google Authenticator or one of your recovery codes.'}
+          </div>
+          {mfaChallenge.methods.includes('email') && mfaChallenge.methods.includes('totp') && <div
+            role="group"
+            aria-label="Verification method"
+            style={{ display: 'flex', gap: 8, marginBottom: 16 }}
+          >
+            <button type="button" aria-pressed={mfaMethod === 'email'} onClick={() => { setMfaMethod('email'); setMfaCode(''); setError(null) }}>
+              Email code
+            </button>
+            <button type="button" aria-pressed={mfaMethod === 'totp'} onClick={() => { setMfaMethod('totp'); setMfaCode(''); setError(null) }}>
+              Google Authenticator
+            </button>
+          </div>}
+          <div
+            style={{
+              fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em',
+              textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6,
+            }}
+          >
+            Verification code
+          </div>
+          <input
+            aria-label="Verification code"
+            value={mfaCode}
+            onChange={(e) => setMfaCode(e.target.value)}
+            required
+            autoFocus
+            autoComplete="one-time-code"
+            inputMode={mfaMethod === 'email' ? 'numeric' : undefined}
+            pattern={mfaMethod === 'email' ? '[0-9]{6}' : undefined}
+            maxLength={mfaMethod === 'email' ? 6 : undefined}
+            style={{ width: '100%', padding: '9px 12px', marginBottom: 20, fontSize: 14 }}
+          />
+          {mfaMethod === 'email' && <button
+            type="button"
+            disabled={submitting || resendCooldown > 0}
+            onClick={handleResend}
+            style={{ width: '100%', marginBottom: 16, background: 'transparent', color: 'var(--accent)' }}
+          >
+            {resendCooldown > 0 ? `Resend Code (${resendCooldown}s)` : 'Resend Code'}
+          </button>}
+          </>}
 
           {error && (
             <div
@@ -198,10 +307,19 @@ export default function LoginScreen({ onSuccess }: Props) {
               cursor: submitting ? 'not-allowed' : 'pointer',
             }}
           >
-            {submitting ? 'Authenticating…' : 'Sign In'}
+            {submitting ? 'Authenticating…' : mfaChallenge ? 'Verify' : 'Sign In'}
           </button>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '20px 0 16px' }}>
+          {mfaChallenge && <button
+            type="button"
+            disabled={submitting}
+            onClick={() => { setMfaChallenge(null); setMfaCode(''); setError(null); setResendCooldown(0) }}
+            style={{ width: '100%', marginTop: 10, background: 'transparent', color: 'var(--muted)' }}
+          >
+            Back to sign in
+          </button>}
+
+          {!mfaChallenge && <><div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '20px 0 16px' }}>
             <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
             <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>
               Continue with
@@ -210,6 +328,7 @@ export default function LoginScreen({ onSuccess }: Props) {
           </div>
 
           <OAuthButtons />
+          </>}
         </form>
 
         <div

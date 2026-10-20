@@ -3,6 +3,22 @@
 // Same localStorage key name as workbench's lib/web/session.js so a
 // future shared-cookie SSO pass can line the two up.
 const TOKEN_KEY = 'omnibioai_access_token'
+const LOGIN_TIMEOUT_MS = 15_000
+
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs = LOGIN_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(input, { ...init, signal: controller.signal })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('Authentication timed out. Check your connection and try again.')
+    }
+    throw error
+  } finally {
+    window.clearTimeout(timer)
+  }
+}
 
 // SSO Phase 2 PR13: the refresh token is deliberately NEVER stored here
 // (or anywhere else in JS-reachable storage). PR10 made auth-service set
@@ -191,6 +207,16 @@ export interface SessionUser {
   schemaVersion: number
 }
 
+export class MFAChallengeRequiredError extends Error {
+  constructor(
+    readonly challengeToken: string,
+    readonly methods: string[],
+  ) {
+    super('MFA verification required')
+    this.name = 'MFAChallengeRequiredError'
+  }
+}
+
 // Permissions the auth-service seeds onto the "admin" role (see
 // omnibioai-auth's db/init_admin.py). Kept here only for future
 // page-level gating -- the actual admin boundary enforced both
@@ -207,6 +233,16 @@ export function getSessionUser(): SessionUser | null {
 
 export function hasAdminAccess(): boolean {
   return !!cachedUser?.roles.includes('admin')
+}
+
+/** UX mirror only; auth-service re-checks the stable identity and roles. */
+export function hasManualLicenseAccess(): boolean {
+  if (!cachedUser) return false
+  const roles = new Set(cachedUser.roles)
+  return (
+    (String(cachedUser.userId) === '1' && roles.has('admin')) ||
+    (roles.has('platform_admin') && roles.has('admin'))
+  )
 }
 
 export function hasPermission(permission: string): boolean {
@@ -342,19 +378,32 @@ async function validateSession(token: string): Promise<SessionUser | null> {
 }
 
 export async function login(email: string, password: string): Promise<SessionUser | null> {
-  const r = await fetch('/auth/login', {
+  let r: Response
+  try {
+    r = await fetchWithTimeout('/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
-  })
+    })
+  } catch (error) {
+    throw error instanceof Error ? error : new Error('Authentication failed')
+  }
   const body = await r.json().catch(() => ({}))
   if (!r.ok) {
-    // authenticate_user() in omnibioai-auth returns the same generic 401
-    // for a wrong password AND a disabled account -- deliberately, to
-    // avoid leaking account status to an unauthenticated caller. There is
-    // no server signal to build a distinct "account disabled" message
-    // from at this step; surfacing one here would just be UI fiction.
-    throw new Error(body.error || body.detail || 'Authentication failed')
+    if (r.status === 429) throw new Error('Too many sign-in attempts. Please wait and try again.')
+    if (r.status >= 500) throw new Error('Authentication is temporarily unavailable. Please try again.')
+    // Keep 401/403 generic: the server deliberately does not reveal whether
+    // an account exists or is disabled to an unauthenticated caller.
+    throw new Error(r.status === 401 || r.status === 403 ? 'Authentication failed' : 'Unable to sign in. Please try again.')
+  }
+  if (body.mfa_required) {
+    if (typeof body.challenge_token !== 'string' || !body.challenge_token) {
+      throw new Error('Invalid MFA challenge response')
+    }
+    throw new MFAChallengeRequiredError(
+      body.challenge_token,
+      Array.isArray(body.methods) ? body.methods.filter((method: unknown) => typeof method === 'string') : [],
+    )
   }
   if (!body.access_token) {
     throw new Error('Login response missing access_token')
@@ -368,6 +417,60 @@ export async function login(email: string, password: string): Promise<SessionUse
   // would duplicate a secret this app has no need to ever see in JS.
   persistAccessToken(body.access_token)
   return validateSession(body.access_token)
+}
+
+export async function completeMFAChallenge(
+  challengeToken: string,
+  code: string,
+  method?: 'email' | 'totp' | 'recovery_code',
+): Promise<SessionUser | null> {
+  const r = await fetch('/auth/mfa/challenge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ challenge_token: challengeToken, code, ...(method ? { method } : {}) }),
+  })
+  const body = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    throw new Error(body.error || body.detail || body.message || 'MFA verification failed')
+  }
+  if (body.mfa_required) {
+    if (typeof body.challenge_token !== 'string' || !body.challenge_token) {
+      throw new Error('Invalid MFA challenge response')
+    }
+    throw new MFAChallengeRequiredError(
+      body.challenge_token,
+      Array.isArray(body.methods) ? body.methods.filter((item: unknown) => typeof item === 'string') : [],
+    )
+  }
+  if (!body.access_token) {
+    throw new Error('MFA response missing access_token')
+  }
+  persistAccessToken(body.access_token)
+  return validateSession(body.access_token)
+}
+
+export class MFAResendError extends Error {
+  constructor(message: string, readonly retryAfterSeconds: number | null) {
+    super(message)
+    this.name = 'MFAResendError'
+  }
+}
+
+export async function resendMFAEmailCode(challengeToken: string): Promise<number> {
+  const r = await fetch('/auth/mfa/resend', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ challenge_token: challengeToken }),
+  })
+  const body = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    const retryAfter = Number.parseInt(r.headers.get('Retry-After') || '', 10)
+    throw new MFAResendError(
+      body.error || body.detail || body.message || 'Unable to resend verification code',
+      Number.isFinite(retryAfter) ? retryAfter : null,
+    )
+  }
+  return typeof body.cooldown_seconds === 'number' ? body.cooldown_seconds : 60
 }
 
 // Mode B Phase 2: Workspace Switcher. Reuses the exact reissue-and-

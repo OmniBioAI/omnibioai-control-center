@@ -1,0 +1,517 @@
+[
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-tes",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-workbench",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-rag",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-lims",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-toolserver",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-tool-runtime",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-control-center",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-dev-docker",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-sdk",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-workflow-bundles",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-model-registry",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-tool-images",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-studio",
+    "scanner": "npm-audit",
+    "vuln_count": 38,
+    "severity": {
+      "critical": 2,
+      "high": 16,
+      "moderate": 20,
+      "low": 0,
+      "info": 0
+    }
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-dev-hub",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-videos",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-iam-client",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-usage-client",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-policy-engine",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-ecosystem-regression",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-security-audit",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-security-sdk",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-api-gateway",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-hpc-policy-engine",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-docs",
+    "scanner": "npm-audit",
+    "vuln_count": 2,
+    "severity": {
+      "critical": 0,
+      "high": 2,
+      "moderate": 0,
+      "low": 0,
+      "info": 0
+    }
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-auth",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-landing",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-design-tokens",
+    "scanner": "npm-audit",
+    "vuln_count": 1,
+    "severity": {
+      "critical": 0,
+      "high": 1,
+      "moderate": 0,
+      "low": 0,
+      "info": 0
+    }
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-ui",
+    "scanner": "npm-audit",
+    "vuln_count": 16,
+    "severity": {
+      "critical": 5,
+      "high": 6,
+      "moderate": 5,
+      "low": 0,
+      "info": 0
+    }
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-utils",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-launcher",
+    "scanner": "npm-audit",
+    "vuln_count": 90,
+    "severity": {
+      "critical": 3,
+      "high": 71,
+      "moderate": 13,
+      "low": 3,
+      "info": 0
+    }
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-billing",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-11T15:11:08.867418+00:00",
+    "repo": "omnibioai-db-init",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-tes",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-workbench",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-rag",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-lims",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-toolserver",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-tool-runtime",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-control-center",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-dev-docker",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-sdk",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-workflow-bundles",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-model-registry",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-tool-images",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-studio",
+    "scanner": "npm-audit",
+    "vuln_count": 38,
+    "severity": {
+      "critical": 2,
+      "high": 16,
+      "moderate": 20,
+      "low": 0,
+      "info": 0
+    }
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-dev-hub",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-videos",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-iam-client",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-usage-client",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-policy-engine",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-ecosystem-regression",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-security-audit",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-security-sdk",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-api-gateway",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-hpc-policy-engine",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-docs",
+    "scanner": "npm-audit",
+    "vuln_count": 2,
+    "severity": {
+      "critical": 0,
+      "high": 2,
+      "moderate": 0,
+      "low": 0,
+      "info": 0
+    }
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-auth",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-landing",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-design-tokens",
+    "scanner": "npm-audit",
+    "vuln_count": 1,
+    "severity": {
+      "critical": 0,
+      "high": 1,
+      "moderate": 0,
+      "low": 0,
+      "info": 0
+    }
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-ui",
+    "scanner": "npm-audit",
+    "vuln_count": 16,
+    "severity": {
+      "critical": 5,
+      "high": 6,
+      "moderate": 5,
+      "low": 0,
+      "info": 0
+    }
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-utils",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-skills",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-launcher",
+    "scanner": "npm-audit",
+    "vuln_count": 90,
+    "severity": {
+      "critical": 3,
+      "high": 71,
+      "moderate": 13,
+      "low": 3,
+      "info": 0
+    }
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-billing",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  },
+  {
+    "generated_at": "2026-10-17T01:37:05.682746+00:00",
+    "repo": "omnibioai-db-init",
+    "scanner": null,
+    "vuln_count": null,
+    "severity": null
+  }
+]

@@ -99,6 +99,28 @@ async def list_org_members_proxy(org_id: int, request: Request) -> JSONResponse:
     return await _proxy("GET", f"/orgs/{org_id}/members", request)
 
 
+@router.get("/orgs/{org_id}/invitations")
+async def list_org_invitations_proxy(org_id: int, request: Request) -> JSONResponse:
+    return await _proxy("GET", f"/orgs/{org_id}/invitations", request)
+
+
+@router.post("/orgs/{org_id}/invitations")
+async def create_org_invitation_proxy(org_id: int, request: Request) -> JSONResponse:
+    return await _proxy("POST", f"/orgs/{org_id}/invitations", request)
+
+
+@router.post("/orgs/{org_id}/invitations/{invitation_id}/revoke")
+async def revoke_org_invitation_proxy(org_id: int, invitation_id: int, request: Request) -> JSONResponse:
+    return await _proxy("POST", f"/orgs/{org_id}/invitations/{invitation_id}/revoke", request)
+
+
+@router.post("/organization-invitations/{operation}")
+async def organization_invitation_token_proxy(operation: str, request: Request) -> JSONResponse:
+    if operation not in {"preview", "mfa-setup", "accept", "accept-existing"}:
+        return JSONResponse({"detail": "Not found"}, status_code=404)
+    return await _proxy("POST", f"/organization-invitations/{operation}", request)
+
+
 # ---------------- Platform-admin discovery (Phase 3 PR1) ----------------
 
 
