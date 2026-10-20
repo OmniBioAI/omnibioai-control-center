@@ -22,10 +22,10 @@ from fastapi.responses import JSONResponse
 router = APIRouter()
 
 _TOOL_IMAGES_BASE = Path(
-    os.environ.get("TOOL_IMAGES_BASE", str(Path.home() / "Desktop/machine/omnibioai-tool-images"))
+    os.environ.get("TOOL_IMAGES_BASE", str(Path.home() / "Desktop/omnibioai-ecosystem/omnibioai-tool-images"))
 )
 _OMNIBIOAI_BASE = Path(
-    os.environ.get("OMNIBIOAI_BASE", str(Path.home() / "Desktop/machine/omnibioai"))
+    os.environ.get("OMNIBIOAI_BASE", str(Path.home() / "Desktop/omnibioai-ecosystem/omnibioai"))
 )
 
 _ARCH_RE = re.compile(r"_(arm64|x86_64|amd64|linux|darwin)$", re.IGNORECASE)

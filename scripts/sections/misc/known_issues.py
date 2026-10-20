@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
-KNOWN_ISSUES_PATH_DEFAULT = "omnibioai-work/known_issues.json"
+KNOWN_ISSUES_PATH_DEFAULT = "work/known_issues.json"
 
 _SEVERITY_COLOR = {"high": "#A32D2D", "medium": "#854F0B", "low": "#185FA5"}
 

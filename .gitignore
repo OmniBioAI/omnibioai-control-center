@@ -11,4 +11,4 @@ frontend/cc-ui/e2e/.auth/
 frontend/cc-ui/e2e/test-results/
 frontend/cc-ui/e2e/playwright-report/
 
-/backend/omnibioai-work/cve_history.json
+/backend/work/cve_history.json

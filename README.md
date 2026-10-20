@@ -461,7 +461,7 @@ cd backend
 pip install -e ".[dev]"
 
 CONTROL_CENTER_CONFIG=../config/control_center.yaml \
-WORKSPACE_ROOT=~/Desktop/machine \
+WORKSPACE_ROOT=~/Desktop/omnibioai-ecosystem \
 uvicorn control_center.main:app --host 0.0.0.0 --port 7070 --reload
 ```
 
@@ -599,21 +599,21 @@ endpoints are reported separately.
 ```bash
 # From the ecosystem root — with live health data
 python omnibioai-control-center/scripts/generate_report.py \
-    --root ~/Desktop/machine
+    --root ~/Desktop/omnibioai-ecosystem
 
 # Skip health check
 python omnibioai-control-center/scripts/generate_report.py \
-    --root ~/Desktop/machine \
+    --root ~/Desktop/omnibioai-ecosystem \
     --skip-health
 
 # Skip coverage collection (code stats only, very fast)
 python omnibioai-control-center/scripts/generate_report.py \
-    --root ~/Desktop/machine \
+    --root ~/Desktop/omnibioai-ecosystem \
     --skip-coverage
 
 # All options
 python omnibioai-control-center/scripts/generate_report.py \
-    --root ~/Desktop/machine \
+    --root ~/Desktop/omnibioai-ecosystem \
     --control-center-url http://127.0.0.1:7070 \
     --out out/reports/omnibioai_ecosystem_report.html \
     --title "OmniBioAI Ecosystem Report"
@@ -646,7 +646,7 @@ sudo apt-get install nodejs npm  # Ubuntu/Debian — pins whatever major
 
 ### View
 
-- **File:** `~/Desktop/machine/out/reports/omnibioai_ecosystem_report.html`
+- **File:** `~/Desktop/omnibioai-ecosystem/out/reports/omnibioai_ecosystem_report.html`
 - **Browser:** Open directly — no server needed
 - **Live:** `http://localhost/_svc/control` when Control Center is running
 

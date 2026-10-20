@@ -184,6 +184,50 @@ export async function fetchOrgMembers(orgId: number): Promise<OrgMember[]> {
   return r.json()
 }
 
+export interface OrganizationInvitation {
+  id: number
+  organization_id: number
+  organization_name: string
+  email: string
+  roles: string[]
+  status: string
+  created_at: string
+  expires_at: string
+  accepted_at: string | null
+}
+
+export async function fetchOrgInvitations(orgId: number): Promise<OrganizationInvitation[]> {
+  const r = await apiFetch(`/orgs/${orgId}/invitations`)
+  if (!r.ok) throw new Error(`/orgs/${orgId}/invitations ${r.status}`)
+  return r.json()
+}
+
+export async function createOrgInvitation(orgId: number, email: string, roles: string[]): Promise<OrganizationInvitation> {
+  const r = await apiFetch(`/orgs/${orgId}/invitations`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, roles }),
+  })
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}))
+    throw new Error(body?.detail?.detail ?? `/orgs/${orgId}/invitations ${r.status}`)
+  }
+  return r.json()
+}
+
+export async function revokeOrgInvitation(orgId: number, invitationId: number): Promise<void> {
+  const r = await apiFetch(`/orgs/${orgId}/invitations/${invitationId}/revoke`, { method: 'POST' })
+  if (!r.ok) throw new Error(`/orgs/${orgId}/invitations/${invitationId}/revoke ${r.status}`)
+}
+
+export async function postInvitationToken<T>(operation: 'preview' | 'mfa-setup' | 'accept' | 'accept-existing', body: Record<string, unknown>): Promise<T> {
+  const r = await apiFetch(`/organization-invitations/${operation}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  const result = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(result?.detail?.detail ?? `Invitation ${operation} failed (${r.status})`)
+  return result as T
+}
+
 // Phase 3 PR2: platform-admin-only server-side (omnibioai-auth's PATCH
 // /orgs/{org_id} rejects this with 403 for anyone lacking manage_all_orgs
 // -- this function does not and cannot enforce that itself, it just calls

@@ -83,7 +83,7 @@ class TestKnownIssuesRoutes(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.mkdtemp()
         os.environ["WORKSPACE_ROOT"] = self._tmp
-        self._issues_path = Path(self._tmp) / "omnibioai-work" / "known_issues.json"
+        self._issues_path = Path(self._tmp) / "work" / "known_issues.json"
 
     def tearDown(self) -> None:
         del os.environ["WORKSPACE_ROOT"]

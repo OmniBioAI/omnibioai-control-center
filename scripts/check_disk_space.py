@@ -22,13 +22,13 @@ Mount points checked (confirmed via `df -h` -- not assumed):
                                    live here, confirmed via `docker info`
   - /media/manish/omnibioai-data   separate ext4 drive
   - /media/manish/OmniBioAI-SIFs   separate exfat drive (autofs-mounted);
-                                   `omnibioai-work`/`work` symlink targets
+                                   `work` symlink targets
                                    live here
   - /media/manish itself is NOT a separate mount (df -h resolves it to
     root) -- its two subdirectories above are the real, distinct mounts.
 
 Cron (daily at 06:00):
-  0 6 * * * python3 /home/manish/Desktop/machine/omnibioai-control-center/scripts/check_disk_space.py >> /home/manish/Desktop/machine/work/backups/omnibioai-disk-space.log 2>&1
+  0 6 * * * python3 /home/manish/Desktop/omnibioai-ecosystem/omnibioai-control-center/scripts/check_disk_space.py >> /home/manish/Desktop/omnibioai-ecosystem/work/backups/omnibioai-disk-space.log 2>&1
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ CONTROL_CENTER_URL = os.environ.get("CONTROL_CENTER_URL", "http://127.0.0.1:7070
 # Same shared secret used by check_cron_health.py -- read straight from
 # omnibioai-studio/.env rather than requiring this cron job's own shell
 # environment to export it.
-STUDIO_ENV_PATH = Path("/home/manish/Desktop/machine/omnibioai-studio/.env")
+STUDIO_ENV_PATH = Path("/home/manish/Desktop/omnibioai-ecosystem/omnibioai-studio/.env")
 
 # Overridable for the live-validation test run only (see the --thresholds
 # note in the project's cron-health-check precedent) -- production always

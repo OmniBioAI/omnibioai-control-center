@@ -143,6 +143,46 @@ def test_mountinfo_parsing_and_read_only_detection():
     assert storage._mount_mode(["relatime"]) == "UNKNOWN"
 
 
+def test_collector_never_substitutes_container_mounts_for_host_mounts(monkeypatch, tmp_path):
+    monkeypatch.setattr(storage, "HOST_MOUNTINFO", tmp_path / "missing-mountinfo")
+    monkeypatch.setattr(storage, "HOST_FSTAB", tmp_path / "missing-fstab")
+    with patch.object(storage, "_capacity") as capacity:
+        snapshot = storage._collect()
+    assert snapshot.sources["mounts"].status == "UNAVAILABLE"
+    assert snapshot.sources["configuration"].status == "UNAVAILABLE"
+    assert "container mounts were not used" in snapshot.sources["mounts"].detail
+    assert snapshot.freshness == "UNKNOWN"
+    assert all(device.mount_status == "UNKNOWN" for device in snapshot.physical_devices)
+    assert snapshot.archive_pool.pool_status == "UNKNOWN"
+    assert not any(alert.id.startswith("mount-missing:") or alert.id.startswith("archive-branch:") for alert in snapshot.alerts)
+    capacity.assert_not_called()
+
+
+def test_collector_uses_only_explicit_host_mount_bind_pair(monkeypatch, tmp_path):
+    host_mountinfo = tmp_path / "mountinfo"
+    host_fstab = tmp_path / "fstab"
+    host_mountinfo.write_text(
+        "36 25 8:17 / /mnt/omnibioai-backup20tb rw - ext4 /dev/sdd1 rw\n",
+        encoding="utf-8",
+    )
+    host_fstab.write_text(
+        "UUID=example /mnt/omnibioai-backup20tb ext4 defaults 0 2\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(storage, "HOST_MOUNTINFO", host_mountinfo)
+    monkeypatch.setattr(storage, "HOST_FSTAB", host_fstab)
+    with patch.object(storage, "_capacity") as capacity:
+        snapshot = storage._collect()
+    backup = next(device for device in snapshot.physical_devices if device.role == "backup")
+    assert snapshot.sources["mounts"].status == "PARTIAL"
+    assert "host PID 1 mountinfo bind" in snapshot.sources["mounts"].detail
+    assert backup.mount_status == "MOUNTED"
+    assert backup.filesystem == "ext4"
+    assert backup.total_bytes is None
+    assert snapshot.archive_pool.configured_source == "Host /etc/fstab read-only bind"
+    capacity.assert_not_called()
+
+
 def test_device_identity_uses_kernel_device_number_with_duplicate_models(monkeypatch):
     monkeypatch.setattr(storage, "_read_uuid_map", lambda: {"8:1": "fs-primary", "8:17": "fs-backup"})
     monkeypatch.setattr(storage, "_read_sysfs_device", lambda _device: ("ACASIS enclosure", "/sys/devices/usb1/1-1"))

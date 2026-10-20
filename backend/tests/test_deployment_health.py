@@ -516,7 +516,7 @@ def test_serialized_output_excludes_absolute_developer_paths_with_no_repo_segmen
 services:
   weird:
     build:
-      context: /home/manish/Desktop/machine/some-private-tree
+      context: /home/manish/Desktop/omnibioai-ecosystem/some-private-tree
       dockerfile: Dockerfile
 """
     inventory = parse_compose_text(compose, deployment_repository="omnibioai-studio")
@@ -540,7 +540,7 @@ def test_absolute_path_containing_repo_segment_is_normalized_not_leaked():
 services:
   weird:
     build:
-      context: /home/manish/Desktop/machine/omnibioai-weird
+      context: /home/manish/Desktop/omnibioai-ecosystem/omnibioai-weird
       dockerfile: Dockerfile
 """
     inventory = parse_compose_text(compose)

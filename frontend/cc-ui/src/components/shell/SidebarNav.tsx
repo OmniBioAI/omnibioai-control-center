@@ -15,6 +15,7 @@ const ICONS: Partial<Record<PageKey, IconComponent>> = {
   users: Users,
   teams: UsersRound,
   roles: ShieldCheck,
+  'manual-licenses': KeyRound,
   infrastructure: Server,
   health: Activity,
   'regression-health': ClipboardCheck,
@@ -68,6 +69,8 @@ function NavRow({ item, active, onNavigate, depth }: {
   return (
     <button
       onClick={() => onNavigate(item.key)}
+      aria-label={item.label}
+      aria-current={isActive ? 'page' : undefined}
       style={{
         display: 'flex', alignItems: 'center', gap: 9,
         width: '100%', textAlign: 'left',
@@ -78,7 +81,7 @@ function NavRow({ item, active, onNavigate, depth }: {
         borderLeft: isActive ? '3px solid var(--accent)' : '3px solid transparent',
       }}
     >
-      {!depth && Icon && <Icon size={15} />}
+      {!depth && Icon && <Icon size={15} aria-hidden="true" />}
       <span className="shell-nav-label" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {item.label}
       </span>

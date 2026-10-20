@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 # Same exclude list ecosystem_status.sh's own `case` guard uses: legacy,
 # un-prefixed duplicate dirs (e.g. "data/", "work/" alongside the real
-# "omnibioai-data/", "omnibioai-work/") that still happen to be git repos
+# "data/", "work/") that still happen to be git repos
 # but aren't part of the canonical ecosystem.
 _EXCLUDE_DIRS = {"db-init", "obsolete", "utils", "data", "work"}
 
