@@ -736,6 +736,180 @@ export async function updateKnownIssueStatus(id: string, status: string): Promis
   return r.json()
 }
 
+// ── Admin Console: read-only Storage & Backup telemetry ─────────────────────
+export type StorageHealth = 'HEALTHY' | 'WARNING' | 'CRITICAL' | 'UNKNOWN' | 'STALE'
+export type StorageGateState = 'PASS' | 'PARTIAL' | 'FAIL' | 'BLOCKED' | 'NOT_VERIFIED'
+
+export interface StorageSourceState {
+  status: 'AVAILABLE' | 'PARTIAL' | 'UNAVAILABLE'
+  observed_at: string
+  detail: string
+}
+
+export interface StorageDevice {
+  role: string
+  label: string
+  device_identity: string | null
+  filesystem_uuid: string | null
+  filesystem: string | null
+  mount_point: string
+  mount_status: 'MOUNTED' | 'MISSING' | 'UNKNOWN'
+  mount_mode: 'READ_ONLY' | 'READ_WRITE' | 'UNKNOWN'
+  total_bytes: number | null
+  used_bytes: number | null
+  available_bytes: number | null
+  utilization_percent: number | null
+  mount_options: string[]
+  transport: string | null
+  transport_topology: string | null
+  smart_status: 'AVAILABLE' | 'UNAVAILABLE' | 'UNKNOWN'
+  health: StorageHealth
+  health_detail: string
+  last_observed_error: string | null
+  last_successful_observation: string | null
+  aggregate: boolean
+}
+
+export interface StorageArchiveBranch {
+  mount_point: string
+  role: string
+  expected_mode: 'READ_ONLY' | 'READ_WRITE' | 'UNKNOWN'
+  observed_mode: 'READ_ONLY' | 'READ_WRITE' | 'UNKNOWN'
+  mount_status: 'MOUNTED' | 'MISSING' | 'UNKNOWN'
+  filesystem: string | null
+  filesystem_uuid: string | null
+  total_bytes: number | null
+  available_bytes: number | null
+}
+
+export interface StorageArchive {
+  pool_mount_point: string
+  pool_status: 'MOUNTED' | 'MISSING' | 'UNKNOWN'
+  total_bytes: number | null
+  used_bytes: number | null
+  available_bytes: number | null
+  utilization_percent: number | null
+  branches: StorageArchiveBranch[]
+  create_policy: string | null
+  min_free_bytes: number | null
+  min_free_policy_status: 'CONFIGURED' | 'NOT_CONFIGURED' | 'UNKNOWN'
+  dependencies: string[]
+  dependency_assessment: 'CONFIGURED' | 'NOT_VERIFIED' | 'WARNING'
+  configured_source: string
+  dependency_note: string
+  runtime_policy_status: 'VERIFIED' | 'NOT_VERIFIED'
+}
+
+export interface StorageSnapshot {
+  id: string
+  time: string
+  age_seconds: number | null
+  source_paths: string[]
+  tags: string[]
+}
+
+export interface StorageBackups {
+  repository_status: 'AVAILABLE' | 'UNAVAILABLE' | 'PARTIAL'
+  repository_id: string | null
+  snapshot_count: number | null
+  snapshots_truncated: boolean
+  snapshots: StorageSnapshot[]
+  latest_snapshot_at: string | null
+  schedule_status: 'AVAILABLE' | 'MISSING' | 'UNKNOWN'
+  schedules: string[]
+  retention_status: 'AVAILABLE' | 'MISSING' | 'UNKNOWN'
+  retention_summary: string | null
+  restore_verification: StorageGateState
+  observed_at: string
+  detail: string
+}
+
+export interface StorageAlert {
+  id: string
+  state: 'ACTIVE' | 'HISTORICAL'
+  severity: 'WARNING' | 'CRITICAL'
+  affected_device: string | null
+  source: string
+  observed_at: string
+  evidence: string
+  suggested_action: string
+}
+
+export interface StorageReadinessGate {
+  id: string
+  label: string
+  state: StorageGateState
+  evidence_source: string
+  observed_at: string
+  explanation: string
+}
+
+export interface StorageOverview {
+  schema_version: '1.0'
+  observed_at: string
+  freshness: 'CURRENT' | 'STALE' | 'UNKNOWN'
+  sources: Record<string, StorageSourceState>
+  physical_devices: StorageDevice[]
+  archive_pool: StorageArchive
+  backups: StorageBackups
+  alerts: StorageAlert[]
+  readiness_gates: StorageReadinessGate[]
+  readiness_state: 'READY' | 'NOT_READY' | 'NOT_VERIFIED'
+}
+
+export interface StorageDevicesResponse {
+  schema_version: '1.0'
+  observed_at: string
+  freshness: 'CURRENT' | 'STALE' | 'UNKNOWN'
+  source: StorageSourceState
+  devices: StorageDevice[]
+}
+
+export interface StorageArchiveResponse {
+  schema_version: '1.0'
+  observed_at: string
+  freshness: 'CURRENT' | 'STALE' | 'UNKNOWN'
+  source: StorageSourceState
+  archive: StorageArchive
+}
+
+export interface StorageBackupsResponse {
+  schema_version: '1.0'
+  observed_at: string
+  freshness: 'CURRENT' | 'STALE' | 'UNKNOWN'
+  source: StorageSourceState
+  backups: StorageBackups
+}
+
+export interface StorageHealthResponse {
+  schema_version: '1.0'
+  observed_at: string
+  freshness: 'CURRENT' | 'STALE' | 'UNKNOWN'
+  alerts: StorageAlert[]
+}
+
+export interface StorageReadinessResponse {
+  schema_version: '1.0'
+  observed_at: string
+  freshness: 'CURRENT' | 'STALE' | 'UNKNOWN'
+  overall: 'READY' | 'NOT_READY' | 'NOT_VERIFIED'
+  gates: StorageReadinessGate[]
+}
+
+async function fetchStorageResource<T>(resource: string): Promise<T> {
+  const path = `${BASE}/storage/${resource}`
+  const response = await apiFetch(path)
+  if (!response.ok) throw new Error(`${path} ${response.status}`)
+  return response.json() as Promise<T>
+}
+
+export const fetchStorageOverview = () => fetchStorageResource<StorageOverview>('overview')
+export const fetchStorageDevices = () => fetchStorageResource<StorageDevicesResponse>('devices')
+export const fetchStorageArchive = () => fetchStorageResource<StorageArchiveResponse>('archive')
+export const fetchStorageBackups = () => fetchStorageResource<StorageBackupsResponse>('backups')
+export const fetchStorageHealth = () => fetchStorageResource<StorageHealthResponse>('health')
+export const fetchStorageReadiness = () => fetchStorageResource<StorageReadinessResponse>('readiness')
+
 export async function deleteKnownIssue(id: string): Promise<void> {
   const r = await apiFetch(`${BASE}/known-issues/${encodeURIComponent(id)}`, { method: 'DELETE' })
   if (!r.ok) throw new Error(`/known-issues/${id} ${r.status}`)

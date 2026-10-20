@@ -43,6 +43,7 @@ vi.mock('../pages/DashboardPage', () => ({ default: () => <div data-testid="Dash
 vi.mock('../pages/HealthPage', () => ({ default: () => <div data-testid="HealthPage" /> }))
 vi.mock('../pages/RegressionHealthPage', () => ({ default: () => <div data-testid="RegressionHealthPage" /> }))
 vi.mock('../pages/DeploymentHealthPage', () => ({ default: () => <div data-testid="DeploymentHealthPage" /> }))
+vi.mock('../pages/StorageDashboardPage', () => ({ default: () => <div data-testid="StorageDashboardPage" /> }))
 vi.mock('../pages/IntegrationHealthPage', () => ({ default: () => <div data-testid="IntegrationHealthPage" /> }))
 vi.mock('../pages/operations/WorkflowsPage', () => ({ default: () => <div data-testid="WorkflowsPage" /> }))
 vi.mock('../pages/security/AuditExplorerPage', () => ({ default: () => <div data-testid="AuditExplorerPage" /> }))
@@ -179,6 +180,39 @@ describe('AdminApp auth gate', () => {
     render(<AdminApp />)
     await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
     expect(screen.queryByText('Access Denied')).not.toBeInTheDocument()
+  })
+
+  it('reaches Storage & Backup through the infrastructure permission gate and deep link', async () => {
+    vi.mocked(auth.getToken).mockReturnValue('token-storage')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPermission).mockImplementation(permission => permission === 'platform.manage_infra')
+
+    const { unmount } = render(<AdminApp />)
+    await waitFor(() => expect(screen.getByTestId('DashboardPage')).toBeInTheDocument())
+    clickNav('Storage & Backup')
+    expect(await screen.findByTestId('StorageDashboardPage')).toBeInTheDocument()
+    await waitFor(() => expect(window.location.pathname).toBe('/storage'))
+    unmount()
+
+    window.history.pushState(null, '', '/storage')
+    render(<AdminApp />)
+    expect(await screen.findByTestId('StorageDashboardPage')).toBeInTheDocument()
+  })
+
+  it('does not render the Storage Dashboard on a direct path without platform.manage_infra', async () => {
+    window.history.pushState(null, '', '/storage')
+    vi.mocked(auth.getToken).mockReturnValue('token-storage-denied')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPermission).mockReturnValue(false)
+
+    render(<AdminApp />)
+    await waitFor(() => expect(auth.ensureSession).toHaveBeenCalled())
+    expect(screen.queryByTestId('StorageDashboardPage')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Storage & Backup' })).not.toBeInTheDocument()
   })
 
   it('reaches Health via the sidebar (Operations > Infrastructure > Health)', async () => {
