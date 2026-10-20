@@ -71,11 +71,8 @@ def get_reference(full: bool = Depends(infra_viewer)) -> JSONResponse:
 
 def _reference_status() -> dict:
     workspace = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
-    # omnibioai-data is a symlink on host that doesn't resolve in container
-    # Try multiple candidate paths
     ref_root = None
     for candidate in [
-        workspace / "omnibioai-data" / "reference",
         workspace / "data" / "reference",
     ]:
         if candidate.exists():
@@ -85,7 +82,7 @@ def _reference_status() -> dict:
     if ref_root is None:
         return {
             "available": False,
-            "ref_root": str(workspace / "omnibioai-data" / "reference"),
+            "ref_root": str(workspace / "data" / "reference"),
             "organisms": [],
             "databases": {},
             "annotation": {},

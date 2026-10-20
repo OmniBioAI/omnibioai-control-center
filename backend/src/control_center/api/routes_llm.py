@@ -285,14 +285,10 @@ def _resolve_roots() -> tuple[Path | None, Path | None]:
     workspace = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
     pubmed_root = next((c for c in (
         workspace / "data" / "PubMed",
-        workspace / "omnibioai-data" / "data" / "PubMed",
-        workspace / "omnibioai-data" / "PubMed",
     ) if c.exists()), None)
     index_root = next((c for c in (
         workspace / "data" / "PubMed" / "Index",
         workspace / "data" / "Index",
-        workspace / "omnibioai-data" / "data" / "Index",
-        workspace / "omnibioai-data" / "Index",
     ) if c.exists()), None)
     return pubmed_root, index_root
 
