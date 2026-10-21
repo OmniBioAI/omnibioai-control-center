@@ -181,6 +181,7 @@ function AdminDashboard() {
   const canSeeHipaaCompliance = hasPlatformAdminAccess()
 
   const [active, setActive] = useState<PageKey>(() => {
+    if (window.location.pathname === '/platform-health') return 'health'
     if (window.location.pathname === '/audit-explorer') return 'audit-explorer'
     if (window.location.pathname === '/audit-logs') return 'audit-logs'
     if (window.location.pathname === '/regression-health') return 'regression-health'
@@ -279,6 +280,7 @@ function AdminDashboard() {
       : active === 'mfa-policy' ? (selectedMfaPolicyOrgId != null ? `/security/mfa-policy/${selectedMfaPolicyOrgId}` : '/security/mfa-policy')
       : active === 'saml' ? (selectedSamlOrgId != null ? `/security/saml/${selectedSamlOrgId}` : '/security/saml')
       : active === 'billing' ? (selectedBillingOrgId != null ? `/billing/${selectedBillingOrgId}` : '/billing')
+      : active === 'health' ? '/platform-health'
       : active === 'regression-health' ? '/regression-health'
       : active === 'deployment-health' ? '/deployment-health'
       : active === 'integration-health' ? '/integration-health'
@@ -299,6 +301,8 @@ function AdminDashboard() {
     const onPopState = () => {
       if (window.location.pathname === '/audit-explorer') {
         setActive('audit-explorer')
+      } else if (window.location.pathname === '/platform-health') {
+        setActive('health')
       } else if (window.location.pathname === '/audit-logs') {
         setActive('audit-logs')
       } else if (window.location.pathname === '/regression-health') {

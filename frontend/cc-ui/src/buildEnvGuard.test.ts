@@ -41,6 +41,7 @@ describe('prebuild guard: no secret-like VITE_ variable may reach the browser bu
 
   it('allows every approved public variable the app reads', () => {
     const env = {
+      VITE_ENVIRONMENT_LABEL: 'Development', VITE_APP_VERSION: '1.2.3', VITE_BUILD_COMMIT: '12345678',
       VITE_API_BASE: 'https://api.example.test', VITE_APP_MODE: 'admin', VITE_ENABLE_OAUTH: 'true',
       VITE_LIMS_SSO_CLIENT_ID: 'public-client-id', VITE_LIMS_SSO_REDIRECT_URI: 'https://lims.example.test/sso/callback',
     }

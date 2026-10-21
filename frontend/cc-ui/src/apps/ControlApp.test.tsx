@@ -37,7 +37,7 @@ describe('ControlApp is a genuinely anonymous public dashboard', () => {
     vi.mocked(auth.getToken).mockReturnValue(null)
     render(<ControlApp />)
     await waitFor(() => expect(screen.getByTestId('PublicOverviewPage')).toBeInTheDocument())
-    expect(screen.queryByText(/Ecosystem Management Console/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Control the ecosystem with confidence/)).not.toBeInTheDocument()
     expect(screen.queryByText('Access Denied')).not.toBeInTheDocument()
   })
 

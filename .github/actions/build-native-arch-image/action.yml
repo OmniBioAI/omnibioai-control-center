@@ -102,5 +102,7 @@ runs:
         build-args: |
           VITE_LIMS_SSO_CLIENT_ID=omnibioai-lims
           VITE_LIMS_SSO_REDIRECT_URI=https://lims.omnibioai.org/sso/callback
+          VITE_APP_VERSION=${{ inputs.version }}
+          VITE_BUILD_COMMIT=${{ inputs.source-sha }}
         cache-from: type=gha,scope=${{ inputs.target }}-${{ inputs.arch }}
         cache-to: type=gha,mode=max,scope=${{ inputs.target }}-${{ inputs.arch }}

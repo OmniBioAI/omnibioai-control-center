@@ -157,7 +157,7 @@ describe('AdminApp auth gate', () => {
   it('shows the login screen when there is no token', async () => {
     vi.mocked(auth.getToken).mockReturnValue(null)
     render(<AdminApp />)
-    expect(await screen.findByText(/Ecosystem Management Console/)).toBeInTheDocument()
+    expect(await screen.findByText(/Control the ecosystem with confidence/)).toBeInTheDocument()
   })
 
   it('shows Access Denied for an authenticated non-admin user', async () => {
@@ -267,6 +267,20 @@ describe('AdminApp auth gate', () => {
 
     expect(await screen.findByTestId('HealthPage')).toBeInTheDocument()
     expect(screen.queryByTestId('DashboardPage')).not.toBeInTheDocument()
+  })
+
+  it('opens Health from its shareable public-facing link path', async () => {
+    window.history.pushState(null, '', '/platform-health')
+    vi.mocked(auth.getToken).mockReturnValue('token-health-link')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+
+    expect(await screen.findByTestId('HealthPage')).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/platform-health')
   })
 
   it('reaches Regression Health only with platform.manage_infra permission', async () => {
@@ -467,7 +481,7 @@ describe('AdminApp auth gate', () => {
       window.dispatchEvent(new Event(auth.UNAUTHORIZED_EVENT))
     })
 
-    expect(await screen.findByText(/Ecosystem Management Console/)).toBeInTheDocument()
+    expect(await screen.findByText(/Control the ecosystem with confidence/)).toBeInTheDocument()
   })
 
   // ── Phase 3 PR2: the widened gate + deep linking ──────────────────────────
@@ -1141,7 +1155,7 @@ describe('AdminApp auth gate', () => {
     fireEvent.click(screen.getByText(admin.email))
     fireEvent.click(screen.getByText('Sign out'))
 
-    expect(await screen.findByText(/Ecosystem Management Console/)).toBeInTheDocument()
+    expect(await screen.findByText(/Control the ecosystem with confidence/)).toBeInTheDocument()
   })
 
   // ── PR11.2: Teams / Roles & Permissions nav items ──────────────────────
