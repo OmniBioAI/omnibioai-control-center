@@ -1,0 +1,17 @@
+# Metadata-only signed snapshot from the DGX host collector.
+# The dedicated metadata directory must exist before Compose is applied.
+# Bind the directory so atomic snapshot replacements become visible; a file
+# bind would pin an obsolete inode. This directory must never contain keys.
+# No storage data directory,
+# host mount table, Docker socket, Restic repository, or credential is mounted.
+services:
+  control-center:
+    environment:
+      STORAGE_TELEMETRY_PUBLIC_KEY: ${STORAGE_TELEMETRY_PUBLIC_KEY:?set the pinned collector Ed25519 public key}
+    volumes:
+      - type: bind
+        source: /run/omnibioai/storage-telemetry
+        target: /run/storage-telemetry
+        read_only: true
+        bind:
+          create_host_path: false
