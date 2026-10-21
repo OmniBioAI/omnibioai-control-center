@@ -207,6 +207,13 @@ export interface SessionUser {
   schemaVersion: number
 }
 
+export class AuthRateLimitError extends Error {
+  constructor() {
+    super('Too many attempts. Please wait and try again.')
+    this.name = 'AuthRateLimitError'
+  }
+}
+
 export class MFAChallengeRequiredError extends Error {
   constructor(
     readonly challengeToken: string,
@@ -390,7 +397,7 @@ export async function login(email: string, password: string): Promise<SessionUse
   }
   const body = await r.json().catch(() => ({}))
   if (!r.ok) {
-    if (r.status === 429) throw new Error('Too many sign-in attempts. Please wait and try again.')
+    if (r.status === 429) throw new AuthRateLimitError()
     if (r.status >= 500) throw new Error('Authentication is temporarily unavailable. Please try again.')
     // Keep 401/403 generic: the server deliberately does not reveal whether
     // an account exists or is disabled to an unauthenticated caller.
@@ -431,6 +438,7 @@ export async function completeMFAChallenge(
   })
   const body = await r.json().catch(() => ({}))
   if (!r.ok) {
+    if (r.status === 429) throw new AuthRateLimitError()
     throw new Error(body.error || body.detail || body.message || 'MFA verification failed')
   }
   if (body.mfa_required) {

@@ -1,38 +1,72 @@
-import { useEffect, useState } from 'react'
-import { completeMFAChallenge, login, MFAChallengeRequiredError, MFAResendError, resendMFAEmailCode } from '../auth'
+import { useEffect, useRef, useState } from 'react'
+import { completeMFAChallenge, login, MFAChallengeRequiredError, AuthRateLimitError, MFAResendError, resendMFAEmailCode } from '../auth'
 import type { SessionUser } from '../auth'
 import AdminLogo from './AdminLogo'
 
-// Mirrors backend/pyproject.toml's version; there's no runtime endpoint
-// that exposes it to the frontend, so this is a manually-kept pointer
-// rather than a build-time import.
-const APP_VERSION = 'v0.1.0'
 
 function getEnvironmentLabel() {
   return import.meta.env.VITE_ENVIRONMENT_LABEL?.trim() || 'Development'
+}
+
+function environmentTone(label: string): 'development' | 'staging' | 'production' | 'unknown' {
+  const normalized = label.toLowerCase()
+  if (normalized === 'development' || normalized === 'dev') return 'development'
+  if (normalized === 'staging' || normalized === 'stage') return 'staging'
+  if (normalized === 'production' || normalized === 'prod') return 'production'
+  return 'unknown'
 }
 
 interface Props {
   onSuccess: (user: SessionUser | null) => void
 }
 
+interface PublicSummary {
+  overall_status?: string
+}
+
 export default function LoginScreen({ onSuccess }: Props) {
+  const appVersion = import.meta.env.VITE_APP_VERSION?.trim() || 'Version unavailable'
+  const buildCommit = import.meta.env.VITE_BUILD_COMMIT?.trim().slice(0, 8) || 'local'
+  const codeInput = useRef<HTMLInputElement>(null)
   const environmentLabel = getEnvironmentLabel()
-  const environmentColor = environmentLabel.toLowerCase() === 'production' ? 'var(--color-success)' : 'var(--amber)'
+  const environment = environmentTone(environmentLabel)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [capsLockOn, setCapsLockOn] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [mfaChallenge, setMfaChallenge] = useState<MFAChallengeRequiredError | null>(null)
   const [mfaCode, setMfaCode] = useState('')
   const [mfaMethod, setMfaMethod] = useState<'email' | 'totp'>('totp')
   const [resendCooldown, setResendCooldown] = useState(0)
+  const [systemStatus, setSystemStatus] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 5000)
+    fetch('/summary', { credentials: 'omit', signal: controller.signal })
+      .then(response => response.ok ? response.json() as Promise<PublicSummary> : null)
+      .then(summary => {
+        if (active && summary && typeof summary.overall_status === 'string' && ['UP', 'WARN', 'DOWN'].includes(summary.overall_status)) {
+          setSystemStatus(summary.overall_status)
+        }
+      })
+      .catch(() => { /* Public health is optional; keep sign-in usable while it is unavailable. */ })
+      .finally(() => window.clearTimeout(timeout))
+    return () => { active = false; controller.abort(); window.clearTimeout(timeout) }
+  }, [])
 
   useEffect(() => {
     if (resendCooldown <= 0) return
     const timer = window.setInterval(() => setResendCooldown(value => Math.max(0, value - 1)), 1000)
     return () => window.clearInterval(timer)
   }, [resendCooldown > 0])
+
+  useEffect(() => {
+    if (mfaChallenge) codeInput.current?.focus()
+  }, [mfaChallenge, mfaMethod])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -51,8 +85,12 @@ export default function LoginScreen({ onSuccess }: Props) {
           setMfaMethod('totp')
         }
         setPassword('')
+        setShowPassword(false)
+        setCapsLockOn(false)
+      } else if (err instanceof AuthRateLimitError) {
+        setError('Too many sign-in attempts. Please wait before trying again.')
       } else {
-        setError(err instanceof Error ? err.message : 'Authentication failed')
+        setError('Unable to sign in. Check your details or contact your platform owner.')
       }
     } finally {
       setSubmitting(false)
@@ -75,8 +113,10 @@ export default function LoginScreen({ onSuccess }: Props) {
         setMfaMethod(err.methods.includes('email') ? 'email' : 'totp')
         setMfaCode('')
         setResendCooldown(err.methods.includes('email') ? 60 : 0)
+      } else if (err instanceof AuthRateLimitError) {
+        setError('Too many verification attempts. Please wait before trying again.')
       } else {
-        setError(err instanceof Error ? err.message : 'MFA verification failed')
+        setError('Unable to verify your code. Check it and try again.')
       }
     } finally {
       setSubmitting(false)
@@ -93,247 +133,146 @@ export default function LoginScreen({ onSuccess }: Props) {
     } catch (err) {
       if (err instanceof MFAResendError && err.retryAfterSeconds) {
         setResendCooldown(err.retryAfterSeconds)
+        setError('Too many code requests. Please wait before requesting another code.')
+      } else {
+        setError('Unable to send a verification code. Please try again later.')
       }
-      setError(err instanceof Error ? err.message : 'Unable to resend verification code')
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        width: '100%',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'var(--bg)',
-        fontFamily: 'var(--sans)',
-        position: 'relative',
-        overflow: 'hidden',
-        padding: '24px 16px',
-        boxSizing: 'border-box',
-      }}
-    >
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          inset: 0,
-          backgroundImage:
-            'linear-gradient(var(--accent-dim) 1px, transparent 1px), ' +
-            'linear-gradient(90deg, var(--accent-dim) 1px, transparent 1px)',
-          backgroundSize: '48px 48px',
-          maskImage: 'radial-gradient(ellipse at center, black 0%, transparent 70%)',
-        }}
-      />
+    <main className="admin-login-page">
+      <div aria-hidden="true" className="admin-login-grid" />
+      <div className="admin-login-layout">
+        <section className="admin-login-intro" aria-label="Admin Console information">
+          <AdminLogo size={44} />
+          <p className="admin-login-eyebrow">OmniBioAI · Admin Portal</p>
+          <h1>Control the ecosystem with confidence.</h1>
+          <p className="admin-login-description">Secure access for the people responsible for operating and protecting OmniBioAI.</p>
 
-      <div style={{ width: '100%', maxWidth: 400, position: 'relative', zIndex: 1 }}>
-        {/* ── Admin identity header ── */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 28 }}>
-          <AdminLogo size={40} />
-          <div style={{ marginTop: 14, textAlign: 'center' }}>
-            <div style={{ fontWeight: 700, fontSize: 20, letterSpacing: '-0.01em', lineHeight: 1.2 }}>
-              Omni<span style={{ fontWeight: 400, color: 'var(--text)' }}>BioAI</span>{' '}
-              <span style={{ color: 'var(--accent)' }}>Admin Portal</span>
+        </section>
+
+        <div className="admin-login-column">
+          <header className="admin-login-header">
+            <div className="admin-login-brand">
+              <strong>Omni<span>BioAI</span></strong>
+              <span className="admin-login-brand-product">Admin Portal</span>
             </div>
-            <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>
-              Ecosystem Management Console
+            <div className="admin-login-badges">
+              <span className="admin-login-version">{appVersion}</span>
+              <span className={`admin-environment-badge admin-environment-${environment}`}>
+                <span aria-hidden="true" className="admin-environment-dot" />
+                {environmentLabel}
+              </span>
             </div>
-          </div>
+          </header>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14 }}>
-            <span
-              style={{
-                fontFamily: 'var(--mono)',
-                fontSize: 11,
-                color: 'var(--muted)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '3px 8px',
-              }}
-            >
-              {APP_VERSION}
-            </span>
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                fontFamily: 'var(--mono)',
-                fontSize: 11,
-                color: environmentColor,
-                border: `1px solid ${environmentColor}`,
-                borderRadius: 'var(--radius-sm)',
-                padding: '3px 8px',
-              }}
-            >
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: environmentColor }} />
-              {environmentLabel}
-            </span>
-          </div>
-        </div>
+          <form className="admin-login-card" onSubmit={mfaChallenge ? handleMfaSubmit : handleSubmit}>
+            <div className="admin-login-card-heading">
+              <h2>{mfaChallenge ? 'Verify your identity' : 'Sign In'}</h2>
+              {!mfaChallenge && <p>Authorized personnel only. Sign-ins are logged.</p>}
+            </div>
 
-        {/* ── Login card ── */}
-        <form
-          onSubmit={mfaChallenge ? handleMfaSubmit : handleSubmit}
-          style={{
-            background: 'var(--surface)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-lg)',
-            boxShadow: 'var(--shadow-card)',
-            padding: '28px 26px',
-          }}
-        >
-          {!mfaChallenge ? <><div
-            style={{
-              fontFamily: 'var(--mono)',
-              fontSize: 10,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              color: 'var(--muted)',
-              marginBottom: 6,
-            }}
-          >
-            Email
-          </div>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            autoFocus
-            autoComplete="username"
-            style={{ width: '100%', padding: '9px 12px', marginBottom: 16, fontSize: 14 }}
-          />
+            {!mfaChallenge ? <>
+              <label htmlFor="admin-email">Email address</label>
+              <input
+                id="admin-email"
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                required
+                autoFocus
+                autoComplete="username"
+              />
 
-          <div
-            style={{
-              fontFamily: 'var(--mono)',
-              fontSize: 10,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              color: 'var(--muted)',
-              marginBottom: 6,
-            }}
-          >
-            Password
-          </div>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            autoComplete="current-password"
-            style={{ width: '100%', padding: '9px 12px', marginBottom: 20, fontSize: 14 }}
-          />
-          </> : <>
-          <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
-            {mfaMethod === 'email'
-              ? 'Enter the six-digit code sent to the Admin email address. It expires in 5 minutes.'
-              : 'Enter a code from Google Authenticator or one of your recovery codes.'}
-          </div>
-          {mfaChallenge.methods.includes('email') && mfaChallenge.methods.includes('totp') && <div
-            role="group"
-            aria-label="Verification method"
-            style={{ display: 'flex', gap: 8, marginBottom: 16 }}
-          >
-            <button type="button" aria-pressed={mfaMethod === 'email'} onClick={() => { setMfaMethod('email'); setMfaCode(''); setError(null) }}>
-              Email code
+              <label htmlFor="admin-password">Password</label>
+              <div className="admin-password-field">
+                <input
+                  id="admin-password"
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  onKeyDown={e => setCapsLockOn(e.getModifierState('CapsLock'))}
+                  onKeyUp={e => setCapsLockOn(e.getModifierState('CapsLock'))}
+                  onBlur={() => setCapsLockOn(false)}
+                  required
+                  autoComplete="current-password"
+                  aria-describedby={capsLockOn ? 'admin-caps-lock' : undefined}
+                />
+                <button
+                  className="admin-password-toggle"
+                  type="button"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
+                  onClick={() => setShowPassword(value => !value)}
+                >
+                  {showPassword ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              {capsLockOn && <p id="admin-caps-lock" className="admin-caps-warning" role="status">Caps Lock is on.</p>}
+              <a className="admin-login-reset" href="mailto:manish@omnibioai.org?subject=Admin%20Console%20password%20help">
+                Contact your platform owner
+              </a>
+            </> : <>
+              <p className="admin-mfa-instructions">
+                {mfaMethod === 'email'
+                  ? 'Enter the six-digit code sent to the Admin email address. It expires in 5 minutes.'
+                  : 'Enter a code from your authenticator app or one of your recovery codes.'}
+              </p>
+              {mfaChallenge.methods.includes('email') && mfaChallenge.methods.includes('totp') && <div role="group" aria-label="Verification method" className="admin-mfa-methods">
+                <button type="button" aria-pressed={mfaMethod === 'email'} onClick={() => { setMfaMethod('email'); setMfaCode(''); setError(null) }}>Email code</button>
+                <button type="button" aria-pressed={mfaMethod === 'totp'} onClick={() => { setMfaMethod('totp'); setMfaCode(''); setError(null) }}>Authenticator</button>
+              </div>}
+              <label htmlFor="admin-mfa-code">Verification code</label>
+              <input
+                ref={codeInput}
+                id="admin-mfa-code"
+                value={mfaCode}
+                onChange={e => setMfaCode(e.target.value)}
+                required
+                autoFocus
+                autoComplete="one-time-code"
+                inputMode={mfaMethod === 'email' ? 'numeric' : undefined}
+                pattern={mfaMethod === 'email' ? '[0-9]{6}' : undefined}
+                maxLength={mfaMethod === 'email' ? 6 : undefined}
+              />
+              {mfaMethod === 'email' && <button className="admin-resend" type="button" disabled={submitting || resendCooldown > 0} onClick={handleResend}>
+                {resendCooldown > 0 ? `Resend Code (${resendCooldown}s)` : 'Resend Code'}
+              </button>}
+            </>}
+
+            {error && <div className="admin-login-error" role="alert">{error}</div>}
+
+            <button className="admin-login-submit" type="submit" disabled={submitting}>
+              {submitting ? 'Please wait…' : mfaChallenge ? 'Verify' : 'Sign In'}
             </button>
-            <button type="button" aria-pressed={mfaMethod === 'totp'} onClick={() => { setMfaMethod('totp'); setMfaCode(''); setError(null) }}>
-              Google Authenticator
-            </button>
-          </div>}
-          <div
-            style={{
-              fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '0.08em',
-              textTransform: 'uppercase', color: 'var(--muted)', marginBottom: 6,
-            }}
-          >
-            Verification code
-          </div>
-          <input
-            aria-label="Verification code"
-            value={mfaCode}
-            onChange={(e) => setMfaCode(e.target.value)}
-            required
-            autoFocus
-            autoComplete="one-time-code"
-            inputMode={mfaMethod === 'email' ? 'numeric' : undefined}
-            pattern={mfaMethod === 'email' ? '[0-9]{6}' : undefined}
-            maxLength={mfaMethod === 'email' ? 6 : undefined}
-            style={{ width: '100%', padding: '9px 12px', marginBottom: 20, fontSize: 14 }}
-          />
-          {mfaMethod === 'email' && <button
-            type="button"
-            disabled={submitting || resendCooldown > 0}
-            onClick={handleResend}
-            style={{ width: '100%', marginBottom: 16, background: 'transparent', color: 'var(--accent)' }}
-          >
-            {resendCooldown > 0 ? `Resend Code (${resendCooldown}s)` : 'Resend Code'}
-          </button>}
-          </>}
 
-          {error && (
-            <div
-              role="alert"
-              style={{
-                fontSize: 13,
-                color: 'var(--red)',
-                background: 'var(--red-bg)',
-                border: '1px solid var(--red-border)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '8px 12px',
-                marginBottom: 16,
-              }}
-            >
-              {error}
-            </div>
+            {mfaChallenge && <button className="admin-back-to-login" type="button" disabled={submitting} onClick={() => { setMfaChallenge(null); setMfaCode(''); setError(null); setResendCooldown(0) }}>
+              Back to sign in
+            </button>}
+          </form>
+
+          {systemStatus && (
+            <p className="admin-login-system-status" role="status">
+              <span className={`admin-status-dot admin-status-${systemStatus.toLowerCase()}`} aria-hidden="true" />
+              Platform status: <strong>{systemStatus}</strong>
+              {' · '}<a href="/platform-health">Health</a>
+            </p>
           )}
-
-          <button
-            type="submit"
-            disabled={submitting}
-            style={{
-              width: '100%',
-              fontSize: 14,
-              fontWeight: 600,
-              padding: '10px 15px',
-              border: 'none',
-              borderRadius: 8,
-              background: submitting ? 'var(--accent-dim2)' : 'var(--accent)',
-              color: '#000',
-              cursor: submitting ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {submitting ? 'Authenticating…' : mfaChallenge ? 'Verify' : 'Sign In'}
-          </button>
-
-          {mfaChallenge && <button
-            type="button"
-            disabled={submitting}
-            onClick={() => { setMfaChallenge(null); setMfaCode(''); setError(null); setResendCooldown(0) }}
-            style={{ width: '100%', marginTop: 10, background: 'transparent', color: 'var(--muted)' }}
-          >
-            Back to sign in
-          </button>}
-
-        </form>
-
-        <div
-          style={{
-            textAlign: 'center',
-            marginTop: 20,
-            fontSize: 11,
-            fontFamily: 'var(--mono)',
-            color: 'var(--muted)',
-          }}
-        >
-          Admin access is permission-based and revocable at any time.
+          <p className="admin-login-studio">Looking for OmniBioAI Studio? <a href="https://webstudio.omnibioai.org">Open Studio</a></p>
+          <footer className="admin-login-footer">
+            <span>{appVersion} · {buildCommit}</span>
+            <nav aria-label="Footer links">
+              <a href="https://docs.omnibioai.org">Docs</a>
+              <a href="https://control.omnibioai.org">Status</a>
+              <a href="https://omnibioai.org/privacy">Privacy</a>
+              <a href="mailto:manish@omnibioai.org">Support</a>
+            </nav>
+          </footer>
         </div>
       </div>
-    </div>
+    </main>
   )
 }

@@ -112,7 +112,7 @@ describe('AdminApp: RAG/PubMed sidebar navigation', () => {
       clickNav('RAG')
 
       expect(await screen.findByText('RAG did not accept your session')).toBeInTheDocument()
-      expect(screen.queryByText(/Ecosystem Management Console/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/Control the ecosystem with confidence/)).not.toBeInTheDocument()
       expect(screen.queryByText('Your account does not have permission to access the Admin Portal.')).not.toBeInTheDocument()
     })
 
@@ -124,7 +124,7 @@ describe('AdminApp: RAG/PubMed sidebar navigation', () => {
       clickNav('PubMed')
 
       expect(await screen.findByText('RAG did not accept your session')).toBeInTheDocument()
-      expect(screen.queryByText(/Ecosystem Management Console/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/Control the ecosystem with confidence/)).not.toBeInTheDocument()
     })
 
     it('shows an insufficient-permissions state (not a credential error) and stays signed in on a RAG 403', async () => {
@@ -136,7 +136,7 @@ describe('AdminApp: RAG/PubMed sidebar navigation', () => {
 
       expect(await screen.findByText('Insufficient permissions')).toBeInTheDocument()
       expect(screen.queryByText(/service credential/i)).not.toBeInTheDocument()
-      expect(screen.queryByText(/Ecosystem Management Console/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/Control the ecosystem with confidence/)).not.toBeInTheDocument()
     })
 
     it('does not depend on error wording: an unfamiliar RAG 401 message is handled the same way', async () => {
@@ -147,7 +147,7 @@ describe('AdminApp: RAG/PubMed sidebar navigation', () => {
       clickNav('RAG')
 
       expect(await screen.findByText('RAG did not accept your session')).toBeInTheDocument()
-      expect(screen.queryByText(/Ecosystem Management Console/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/Control the ecosystem with confidence/)).not.toBeInTheDocument()
     })
 
     it('still drops to the login screen when control-center itself reports the admin session invalid (401 with no upstream tag)', async () => {
@@ -157,7 +157,7 @@ describe('AdminApp: RAG/PubMed sidebar navigation', () => {
 
       clickNav('RAG')
 
-      expect(await screen.findByText(/Ecosystem Management Console/)).toBeInTheDocument()
+      expect(await screen.findByText(/Control the ecosystem with confidence/)).toBeInTheDocument()
     })
 
     it('still renders real RAG data on success (sidebar destination is correct, not just error-tolerant)', async () => {
@@ -195,7 +195,7 @@ describe('AdminApp: RAG/PubMed sidebar navigation', () => {
     it('an unauthenticated visitor still lands on the login screen, not RAGPage (no token at all)', async () => {
       vi.mocked(auth.getToken).mockReset().mockReturnValue(null)
       render(<AdminApp />)
-      expect(await screen.findByText(/Ecosystem Management Console/)).toBeInTheDocument()
+      expect(await screen.findByText(/Control the ecosystem with confidence/)).toBeInTheDocument()
       expect(screen.queryByText('RAG')).not.toBeInTheDocument()
       expect(screen.queryByText('PubMed')).not.toBeInTheDocument()
     })

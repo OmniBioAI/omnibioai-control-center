@@ -44,6 +44,108 @@
   --sans: 'Inter', system-ui, -apple-system, sans-serif;
 }
 
+/* Admin Console sign-in layout and controls. */
+.admin-login-page {
+  --muted: var(--text3);
+  --login-link: #86efac;
+  --login-dev: #93c5fd;
+  --login-stage: #fcd34d;
+  --login-prod: #86efac;
+  --login-error: #fca5a5;
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  padding: 36px 24px;
+  background: var(--bg);
+  color: var(--text2);
+  font-family: var(--sans);
+}
+.admin-login-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(var(--accent-dim) 1px, transparent 1px), linear-gradient(90deg, var(--accent-dim) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at center, black 0%, transparent 72%);
+}
+.admin-login-layout {
+  width: min(100%, 1050px);
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 32px;
+  align-items: center;
+}
+.admin-login-intro { display: none; }
+.admin-login-column { width: 100%; max-width: 440px; margin: 0 auto; }
+.admin-login-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 22px; }
+.admin-login-brand { display: flex; flex-direction: column; gap: 3px; color: var(--text); }
+.admin-login-brand strong { font-size: 19px; letter-spacing: -.03em; }
+.admin-login-brand strong span { font-weight: 400; color: var(--text2); }
+.admin-login-brand-product { font-size: 12px; color: var(--muted); }
+.admin-login-badges { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
+.admin-login-version, .admin-environment-badge { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; padding: 5px 9px; font: 11px var(--mono); white-space: nowrap; }
+.admin-login-version { color: var(--text3); }
+.admin-environment-development { color: var(--login-dev); border-color: rgba(59,130,246,.55); background: rgba(59,130,246,.10); }
+.admin-environment-staging { color: var(--login-stage); border-color: rgba(245,158,11,.55); background: rgba(245,158,11,.10); }
+.admin-environment-production { color: var(--login-prod); border-color: rgba(34,197,94,.55); background: rgba(34,197,94,.10); }
+.admin-environment-unknown { color: var(--text2); }
+.admin-environment-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.admin-login-card { padding: 30px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-card); }
+.admin-login-card-heading { margin: 0 0 24px; }
+.admin-login-card-heading h2 { color: var(--text); font-size: 22px; letter-spacing: -.02em; }
+.admin-login-card-heading p { margin-top: 7px; color: var(--text3); font-size: 13px; line-height: 1.5; }
+.admin-login-card label { display: block; margin: 0 0 7px; color: var(--text3); font-size: 12px; font-weight: 600; }
+.admin-login-card input { display: block; width: 100%; min-height: 44px; margin: 0 0 19px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg2); color: var(--text); font: 14px var(--sans); }
+.admin-login-page a:focus-visible, .admin-login-card input:focus-visible, .admin-login-card button:focus-visible, .admin-login-card a:focus-visible, .admin-login-footer a:focus-visible, .admin-login-studio a:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.admin-password-field { position: relative; }
+.admin-password-field input { padding-right: 68px; }
+.admin-password-toggle { position: absolute; top: 5px; right: 6px; min-height: 34px; padding: 0 8px; border: 0; border-radius: 4px; background: transparent; color: var(--accent); font: 600 12px var(--sans); cursor: pointer; }
+.admin-caps-warning { margin: -12px 0 14px; color: var(--login-stage); font-size: 12px; }
+.admin-login-reset { display: inline-block; margin: -8px 0 18px; color: var(--login-link); font-size: 12px; text-underline-offset: 3px; }
+.admin-mfa-instructions { margin: -6px 0 18px; color: var(--text3); font-size: 13px; line-height: 1.5; }
+.admin-mfa-methods { display: flex; gap: 8px; margin: 0 0 18px; }
+.admin-mfa-methods button, .admin-resend, .admin-back-to-login { min-height: 40px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text2); cursor: pointer; }
+.admin-mfa-methods button { flex: 1; }
+.admin-mfa-methods button[aria-pressed='true'] { border-color: var(--accent); color: var(--accent); }
+.admin-resend { width: 100%; margin: -7px 0 18px; }
+.admin-resend:disabled { cursor: not-allowed; color: var(--muted); }
+.admin-login-error { margin: 0 0 16px; padding: 10px 12px; border: 1px solid var(--red-border); border-radius: var(--radius-sm); background: var(--red-bg); color: var(--login-error); font-size: 13px; line-height: 1.45; }
+.admin-login-submit { width: 100%; min-height: 46px; border: 0; border-radius: var(--radius-sm); background: var(--accent); color: #07130f; font-size: 14px; font-weight: 700; cursor: pointer; }
+.admin-login-submit:disabled { background: var(--accent-dim2); color: var(--text3); cursor: not-allowed; }
+.admin-back-to-login { width: 100%; margin-top: 10px; background: transparent; color: var(--text3); }
+.admin-login-studio { margin: 20px 0 0; color: var(--text3); text-align: center; font-size: 12px; }
+.admin-login-studio a, .admin-login-footer a, .admin-login-system-status a { color: var(--login-link); text-underline-offset: 3px; }
+.admin-login-footer { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-top: 22px; color: var(--muted); font: 11px var(--mono); }
+.admin-login-footer nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; }
+.admin-login-system-status { text-align: center; margin-top: 25px; color: var(--text3); font-size: 13px; }
+.admin-status-dot { display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--muted); }
+.admin-status-up { background: #4ade80; }
+.admin-status-warn { background: #fbbf24; }
+.admin-status-down { background: #f87171; }
+@media (min-width: 1024px) {
+  .admin-login-layout { grid-template-columns: minmax(0, 1fr) minmax(390px, 440px); gap: clamp(42px, 7vw, 90px); }
+  .admin-login-intro { display: block; max-width: 480px; }
+  .admin-login-eyebrow { margin-top: 27px; color: var(--accent); font: 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+  .admin-login-intro h1 { margin-top: 14px; color: var(--text); font-size: clamp(34px, 4vw, 52px); line-height: 1.08; letter-spacing: -.045em; }
+  .admin-login-description { max-width: 410px; margin-top: 18px; color: var(--text3); font-size: 16px; line-height: 1.65; }
+  .admin-login-system-status { text-align: center; margin-top: 30px; }
+  .admin-login-footer { flex-direction: row; justify-content: space-between; gap: 12px; }
+  .admin-login-footer nav { justify-content: flex-end; gap: 13px; }
+}
+@media (max-width: 480px) {
+  .admin-login-page { padding: 24px 16px; }
+  .admin-login-header { align-items: flex-start; flex-direction: column; }
+  .admin-login-badges { justify-content: flex-start; }
+  .admin-login-card { padding: 24px 20px; }
+  .admin-login-footer nav { gap: 12px; }
+}
+
 /* Admin Console Phase 2: light theme. Opt-in via a `data-theme="light"`
    attribute on <html> (see components/shell/ThemeToggle.tsx), not
    prefers-color-scheme -- this app has always shipped dark-only, so an
@@ -175,3 +277,12 @@ select option { background: var(--surface); color: var(--text); }
   vertical-align: middle;
 }
 .data-table tr:last-child td { border-bottom: none; }
+
+:root[data-theme='light'] .admin-login-page {
+  --login-link: #166534;
+  --login-dev: #1d4ed8;
+  --login-stage: #854d0e;
+  --login-prod: #166534;
+  --login-error: #991b1b;
+}
+:root[data-theme='light'] .admin-password-toggle { color: var(--login-link); }
