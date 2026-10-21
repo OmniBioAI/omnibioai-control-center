@@ -23,6 +23,8 @@ COPY frontend/cc-ui/ ./
 # Build arguments
 ARG VITE_LIMS_SSO_CLIENT_ID
 ARG VITE_LIMS_SSO_REDIRECT_URI
+ARG VITE_ENVIRONMENT_LABEL=Development
+ENV VITE_ENVIRONMENT_LABEL=${VITE_ENVIRONMENT_LABEL}
 RUN npm run build && npm run build:admin && npm run build:control && npm run build:control:studio
 
 # ── Stage 2: Python backend ────────────────────────────────────────────────────

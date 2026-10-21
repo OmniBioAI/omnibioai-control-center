@@ -2,22 +2,23 @@ import { useEffect, useState } from 'react'
 import { completeMFAChallenge, login, MFAChallengeRequiredError, MFAResendError, resendMFAEmailCode } from '../auth'
 import type { SessionUser } from '../auth'
 import AdminLogo from './AdminLogo'
-import OAuthButtons from './OAuthButtons'
 
 // Mirrors backend/pyproject.toml's version; there's no runtime endpoint
 // that exposes it to the frontend, so this is a manually-kept pointer
 // rather than a build-time import.
 const APP_VERSION = 'v0.1.0'
 
-const ENV_READY = import.meta.env.PROD
-const ENV_LABEL = ENV_READY ? 'Production Control Plane' : 'Development'
-const ENV_COLOR = ENV_READY ? 'var(--color-success)' : 'var(--amber)'
+function getEnvironmentLabel() {
+  return import.meta.env.VITE_ENVIRONMENT_LABEL?.trim() || 'Development'
+}
 
 interface Props {
   onSuccess: (user: SessionUser | null) => void
 }
 
 export default function LoginScreen({ onSuccess }: Props) {
+  const environmentLabel = getEnvironmentLabel()
+  const environmentColor = environmentLabel.toLowerCase() === 'production' ? 'var(--color-success)' : 'var(--amber)'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -162,14 +163,14 @@ export default function LoginScreen({ onSuccess }: Props) {
                 gap: 5,
                 fontFamily: 'var(--mono)',
                 fontSize: 11,
-                color: ENV_COLOR,
-                border: `1px solid ${ENV_COLOR}`,
+                color: environmentColor,
+                border: `1px solid ${environmentColor}`,
                 borderRadius: 'var(--radius-sm)',
                 padding: '3px 8px',
               }}
             >
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: ENV_COLOR }} />
-              {ENV_LABEL}
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: environmentColor }} />
+              {environmentLabel}
             </span>
           </div>
         </div>
@@ -319,16 +320,6 @@ export default function LoginScreen({ onSuccess }: Props) {
             Back to sign in
           </button>}
 
-          {!mfaChallenge && <><div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '20px 0 16px' }}>
-            <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-            <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>
-              Continue with
-            </span>
-            <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-          </div>
-
-          <OAuthButtons />
-          </>}
         </form>
 
         <div

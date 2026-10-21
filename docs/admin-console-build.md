@@ -82,6 +82,13 @@ frontend/cc-ui/dist-control/  # control.omnibioai.org
 
 Both are gitignored (`frontend/cc-ui/.gitignore`), generated fresh by `npm run build:admin`/`build:control` or the Dockerfile's `frontend-builder` stage. The pre-existing `frontend/cc-ui/dist/` (committed to git — an existing, unrelated repo convention, not something this PR changes) is still produced too, by the unmodified `npm run build`, so the Dockerfile's existing (currently unused in the live deployment — see below) Stage 3 keeps working exactly as before.
 
+The login environment badge reads `VITE_ENVIRONMENT_LABEL` at build time.
+The Dockerfile defaults it to `Development`, so production-mode builds do
+not claim to be production unless their build explicitly sets
+`--build-arg VITE_ENVIRONMENT_LABEL=Production` (or another environment
+name such as `Staging`). Only the exact label `Production` receives the
+green badge treatment.
+
 ## Deployment mapping
 
 End-to-end path, PR14.7B (MERGED) + PR14.7C (Cloudflare Tunnel cutover,

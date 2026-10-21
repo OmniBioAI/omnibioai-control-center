@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import LoginScreen from './LoginScreen'
 import * as auth from '../auth'
 
@@ -16,12 +16,25 @@ describe('LoginScreen', () => {
     vi.mocked(auth.resendMFAEmailCode).mockReset()
   })
 
-  it('renders the admin portal branding and form', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('renders email and password login without unavailable provider buttons', () => {
     render(<LoginScreen onSuccess={vi.fn()} />)
     expect(screen.getByText(/Admin Portal/)).toBeInTheDocument()
     expect(screen.getByText('Ecosystem Management Console')).toBeInTheDocument()
+    expect(screen.getByText('Development')).toBeInTheDocument()
+    expect(screen.getByRole('textbox')).toHaveAttribute('type', 'email')
+    expect(document.querySelector('input[type="password"]')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Sign In/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Continue with Google/i })).toBeDisabled()
+    expect(screen.queryByText('Continue with')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Continue with (Google|Microsoft|GitHub)/i })).not.toBeInTheDocument()
+  })
+
+  it('uses the configured environment label when provided', () => {
+    vi.stubEnv('VITE_ENVIRONMENT_LABEL', 'Staging')
+    render(<LoginScreen onSuccess={vi.fn()} />)
+    expect(screen.getByText('Staging')).toBeInTheDocument()
+    expect(screen.queryByText('Production Control Plane')).not.toBeInTheDocument()
   })
 
   it('calls onSuccess with the resolved session user on successful login', async () => {
