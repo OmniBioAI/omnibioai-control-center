@@ -7,6 +7,7 @@ export const ADMIN_ROUTES = {
   regressionHealth: '/regression-health',
   deploymentHealth: '/deployment-health',
   integrationHealth: '/integration-health',
+  storage: '/storage',
   securityPosture: '/security-posture',
   workflows: '/workflows',
   auditExplorer: '/audit-explorer',

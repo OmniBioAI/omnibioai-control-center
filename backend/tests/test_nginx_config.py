@@ -201,6 +201,20 @@ class TestNginxApiProxyConfig(unittest.TestCase):
             "the exact HIPAA Compliance SPA route must serve the frontend index",
         )
 
+    def test_admin_storage_page_does_not_displace_protected_storage_api(self) -> None:
+        """The Admin browser page wins the exact path; API subpaths still proxy."""
+        server_blocks = re.findall(r"server\s*\{.*?\n\}", self.control_center_conf, re.DOTALL)
+        admin = next(block for block in server_blocks if "server_name admin.omnibioai.org;" in block)
+        control = next(block for block in server_blocks if "server_name control.omnibioai.org;" in block)
+        page_location = r"location\s+=\s+/storage\s*\{\s*try_files\s+/index.html\s+=404;\s*\}"
+        self.assertRegex(admin, page_location)
+        self.assertNotRegex(control, page_location)
+        self.assertRegex(
+            self.api_proxy_conf,
+            r"location\s+/storage\s*\{\s*proxy_pass\s+http://\$control_center_upstream;\s*"
+            r"proxy_set_header\s+Host\s+\$host;\s*\}",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
