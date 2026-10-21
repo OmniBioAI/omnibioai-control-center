@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh signed storage telemetry snapshot
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Unit=storage-metadata-collector.service
+
+[Install]
+WantedBy=timers.target

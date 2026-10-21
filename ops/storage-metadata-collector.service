@@ -1,0 +1,30 @@
+[Unit]
+Description=Collect signed metadata-only storage capacity metrics
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /opt/omnibioai/storage_metadata_collector.py
+RuntimeDirectory=omnibioai/storage-telemetry
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+UMask=0022
+NoNewPrivileges=yes
+PrivateNetwork=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ReadOnlyPaths=/mnt/wdpro26tb /mnt/omnibioai-backup20tb /mnt/omnibioai-archive22tb /media/manish/omnibioai-data /mnt/omnibioai-archive2tb-b /mnt/omnibioai-archive
+ReadWritePaths=/run/omnibioai/storage-telemetry
+
+[Install]
+WantedBy=multi-user.target
