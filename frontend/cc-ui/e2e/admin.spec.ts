@@ -55,6 +55,11 @@ test('certifies supported direct links and hard refreshes with the session intac
   }
 })
 
+test('renders Storage Dashboard after authenticated navigation and hard refresh', async ({ page }) => {
+  await certifyDeepLink(page, ADMIN_ROUTES.storage, 'Storage & Backup')
+  await expect(page.getByRole('tab', { name: 'Overview' })).toBeVisible()
+})
+
 test('certifies read-only Workflow Operations entry without executing a run', async ({ page }) => {
   await visitFromSidebar(page, 'Workflows', 'Workflows')
   await expect(page.getByText(/No workflow (runs recorded yet|registered yet)|Permission denied|Loading workflows/).first()).toBeVisible()
