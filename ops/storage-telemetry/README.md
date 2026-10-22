@@ -1,4 +1,4 @@
-# Storage telemetry host installation
+# Storage telemetry collector
 
 The API container only reads the generated snapshot and its read-only storage
 binds. It does not receive privileges, `/dev`, the Docker socket, or Restic
@@ -15,28 +15,9 @@ container runs as root, so binding `/` would expose `/etc` (including the
 Restic password file) to the API. The probe must live on the root filesystem;
 the install steps check this.
 
-```bash
-# Confirm the probe location is on the root filesystem (UUIDs must match).
-findmnt -n -o UUID /
-findmnt -n -o UUID -T /var/lib
+Install steps: [INSTALL.md](INSTALL.md).
 
-sudo install -d -o root -g root -m 0755 /usr/local/libexec/omnibioai /etc/omnibioai /var/lib/omnibioai
-sudo install -d -o root -g root -m 0555 /var/lib/omnibioai-storage-probe
-sudo install -o root -g root -m 0755 ops/storage-telemetry/collect-storage-telemetry.py /usr/local/libexec/omnibioai/collect-storage-telemetry.py
-sudo install -o root -g root -m 0644 ops/storage-telemetry/omnibioai-storage-telemetry.service /etc/systemd/system/omnibioai-storage-telemetry.service
-sudo install -o root -g root -m 0644 ops/storage-telemetry/omnibioai-storage-telemetry.timer /etc/systemd/system/omnibioai-storage-telemetry.timer
-sudo install -o root -g root -m 0600 ops/storage-telemetry/storage-telemetry.conf.example /etc/omnibioai/storage-telemetry.conf
-sudo install -o root -g root -m 0400 /dev/null /etc/omnibioai/restic-password
-sudoedit /etc/omnibioai/restic-password
-sudo systemctl daemon-reload
-sudo systemctl start omnibioai-storage-telemetry.service
-sudo systemctl status omnibioai-storage-telemetry.service
-sudo stat -c '%U %G %a %n' /var/lib/omnibioai/storage-telemetry.json /etc/omnibioai/restic-password
-sudo systemctl enable --now omnibioai-storage-telemetry.timer
-```
-
-Enter only the Restic password in the root-owned file; do not place it in this
-repository. `/etc/omnibioai/storage-telemetry.conf` contains:
+Never place the Restic password in this repository. `/etc/omnibioai/storage-telemetry.conf` contains:
 
 ```ini
 STORAGE_TELEMETRY_TARGETS="root|/|9f3cd4b6-f34e-435e-9fcf-ed7861f7cf99 backup|/mnt/omnibioai-backup20tb|9d872bab-a481-4fca-8ad8-8031d78c0dbc archive|/mnt/omnibioai-archive22tb|6a805bb7-2513-435f-9cd4-b9970a0e4fc4"
