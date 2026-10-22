@@ -11,8 +11,14 @@ async function request(path: string, init: RequestInit = {}) {
     const body = await response.json().catch(() => ({}))
     const detail = body.detail
     const message = typeof detail === 'object' ? detail.message : detail
-    const error = new Error(message || body.error || `${path} ${response.status}`) as Error & { code?: string }
+    const error = new Error(message || body.error || `${path} ${response.status}`) as Error & {
+      code?: string
+      path?: string
+      status?: number
+    }
     error.code = typeof detail === 'object' ? detail.code : undefined
+    error.path = path
+    error.status = response.status
     throw error
   }
   return response.json()
