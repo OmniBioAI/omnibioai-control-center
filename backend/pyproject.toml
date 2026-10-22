@@ -53,6 +53,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = [".."]
 addopts = [
   "-p", "no:django",
   "--cov=control_center",
