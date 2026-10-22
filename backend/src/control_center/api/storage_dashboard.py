@@ -1,22 +1,13 @@
-"""Read-only, bounded storage telemetry for the Admin Console.
+"""Authenticated Storage Dashboard backed by read-only binds and a host snapshot.
 
-The collector deliberately has no arbitrary command or path interface. It
-reads a small set of Linux mount/device metadata sources and fixed configured
-mountpoints. Host mount state is read only from explicit read-only host PID 1
-bind mounts; container-local mountinfo must never be presented as host state.
-Restic is queried only when an existing protected password file is configured;
-the repository path and argument vector are fixed here.
+The API process uses statvfs on configured collector bind points and never
+accesses block devices, Restic credentials, or a Docker socket.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import re
-import selectors
-import shutil
-import stat
-import subprocess
 import threading
 import time
 from datetime import datetime, timezone
@@ -25,42 +16,18 @@ from typing import Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel
+from control_center.api.storage_telemetry import (
+    STALE_AFTER_SECONDS,
+    load_targets,
+    read_host_snapshot,
+    snapshot_age_seconds,
+)
 
 router_storage_dashboard = APIRouter(prefix="/storage", tags=["storage-dashboard"])
 
-MAX_MOUNTINFO_BYTES = 2 * 1024 * 1024
-MAX_FSTAB_BYTES = 256 * 1024
-MAX_RESTIC_OUTPUT_BYTES = 1024 * 1024
-RESTIC_TIMEOUT_SECONDS = 8
 CACHE_TTL_SECONDS = 15
-RESTIC_REPOSITORY = Path("/mnt/omnibioai-backup20tb/restic")
-RESTIC_PASSWORD_FILE_ENV = "RESTIC_PASSWORD_FILE"
-HOST_MOUNTINFO = Path("/run/host-storage/mountinfo")
-HOST_FSTAB = Path("/run/host-storage/fstab")
 
-# Paths are a fixed, bounded discovery set. Capacity and filesystem facts are
-# always collected from the mounted filesystem; these entries do not encode
-# capacities or claim that a path is mounted.
-MOUNT_ROLES: tuple[tuple[str, str], ...] = (
-    ("compute", "/"),
-    ("primary", "/mnt/wdpro26tb"),
-    ("backup", "/mnt/omnibioai-backup20tb"),
-    ("archive-writable", "/mnt/omnibioai-archive22tb"),
-    ("archive-member-a", "/media/manish/omnibioai-data"),
-    ("archive-member-b", "/mnt/omnibioai-archive2tb-b"),
-    ("archive-pool", "/mnt/omnibioai-archive"),
-)
-ROLE_LABELS = {
-    "compute": "Compute",
-    "primary": "Primary",
-    "backup": "Backup",
-    "archive-writable": "Archive writable branch",
-    "archive-member-a": "Archive read-only branch A",
-    "archive-member-b": "Archive read-only branch B",
-    "archive-pool": "Archive pool",
-}
-PHYSICAL_ROLES = {role for role, _ in MOUNT_ROLES if role != "archive-pool"}
-ARCHIVE_ROLES = {"archive-writable", "archive-member-a", "archive-member-b"}
+SIGNED_METADATA_SOURCE = "Host storage telemetry snapshot"
 
 HealthState = Literal["HEALTHY", "WARNING", "CRITICAL", "UNKNOWN", "STALE"]
 GateState = Literal["PASS", "PARTIAL", "FAIL", "BLOCKED", "NOT_VERIFIED"]
@@ -94,6 +61,8 @@ class DeviceVolume(BaseModel):
     last_observed_error: str | None = None
     last_successful_observation: str | None = None
     aggregate: bool = False
+    operational_state: str | None = None
+    note: str | None = None
 
 
 class ArchiveBranch(BaseModel):
@@ -226,133 +195,11 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _unescape_mount(value: str) -> str:
-    return re.sub(r"\\([0-7]{3})", lambda match: chr(int(match.group(1), 8)), value)
-
-
-def _read_bounded(path: Path, limit: int) -> str | None:
-    try:
-        with path.open("rb") as handle:
-            raw = handle.read(limit + 1)
-        if len(raw) > limit:
-            return None
-        return raw.decode("utf-8", errors="replace")
-    except OSError:
-        return None
-
-
-def parse_mountinfo(text: str) -> dict[str, dict[str, object]]:
-    """Parse /proc/self/mountinfo into mountpoint-keyed observations."""
-    result: dict[str, dict[str, object]] = {}
-    for line in text.splitlines():
-        fields = line.split()
-        try:
-            separator = fields.index("-")
-            if separator < 6 or len(fields) < separator + 4:
-                continue
-            mount_point = _unescape_mount(fields[4])
-            mount_options = fields[5].split(",")
-            major_minor = fields[2]
-            if not re.fullmatch(r"\d+:\d+", major_minor):
-                continue
-            result[mount_point] = {
-                "major_minor": major_minor,
-                "root": _unescape_mount(fields[3]),
-                "options": mount_options,
-                "filesystem": fields[separator + 1],
-                "source": _unescape_mount(fields[separator + 2]),
-                "super_options": fields[separator + 3].split(","),
-            }
-        except (ValueError, IndexError):
-            continue
-    return result
-
-
-def parse_fstab(text: str) -> dict[str, dict[str, object]]:
-    """Parse fstab without invoking mount or accepting caller-supplied paths."""
-    result: dict[str, dict[str, object]] = {}
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        fields = stripped.split()
-        if len(fields) < 4:
-            continue
-        source, target, filesystem, options = fields[:4]
-        target = _unescape_mount(target)
-        option_list = [_unescape_mount(item) for item in options.split(",")]
-        result[target] = {
-            "source": _unescape_mount(source),
-            "filesystem": filesystem,
-            "options": option_list,
-        }
-    return result
-
-
-def _read_uuid_map() -> dict[str, str]:
-    mapping: dict[str, str] = {}
-    base = Path("/dev/disk/by-uuid")
-    try:
-        with os.scandir(base) as entries:
-            for index, entry in enumerate(entries):
-                if index >= 512:
-                    break
-                try:
-                    if entry.is_symlink():
-                        # Match the UUID link to mountinfo's kernel device
-                        # number. This avoids depending on /dev/sdX aliases or
-                        # symlink target spelling, both of which can change.
-                        details = os.stat(entry.path)
-                        if stat.S_ISBLK(details.st_mode):
-                            device = f"{os.major(details.st_rdev)}:{os.minor(details.st_rdev)}"
-                            mapping[device] = entry.name
-                except OSError:
-                    continue
-    except OSError:
-        pass
-    return mapping
-
-
-def _read_sysfs_device(major_minor: str) -> tuple[str | None, str | None]:
-    if not re.fullmatch(r"\d+:\d+", major_minor):
-        return None, None
-    base = Path("/sys/dev/block") / major_minor
-    try:
-        resolved = base.resolve(strict=True)
-    except OSError:
-        return None, None
-    model = None
-    for candidate in (resolved / "device" / "model", resolved.parent / "device" / "model"):
-        value = _read_bounded(candidate, 256)
-        if value:
-            model = value.strip()[:128] or None
-            if model:
-                break
-    # Keep USB topology stable without publishing serials/WWNs.
-    topology = None
-    try:
-        relative = resolved.as_posix().split("/sys/devices/", 1)[1]
-        if "usb" in relative.lower():
-            topology = "/sys/devices/" + "/".join(relative.split("/")[:8])
-    except (IndexError, OSError):
-        pass
-    return model, topology
-
-
-def _fstab_options(entry: dict[str, object] | None) -> list[str]:
-    return list(entry.get("options", [])) if entry else []
-
-
-def _mount_mode(options: list[str]) -> Literal["READ_ONLY", "READ_WRITE", "UNKNOWN"]:
-    if "ro" in options:
-        return "READ_ONLY"
-    if "rw" in options:
-        return "READ_WRITE"
-    return "UNKNOWN"
-
-
 def _capacity(mount_point: str) -> tuple[int | None, int | None, int | None, float | None]:
     try:
+        # A missing bind leaves an empty directory on the container's own root.
+        if os.stat(mount_point).st_dev == os.stat("/").st_dev:
+            return None, None, None, None
         statvfs = os.statvfs(mount_point)
         total = statvfs.f_blocks * statvfs.f_frsize
         available = statvfs.f_bavail * statvfs.f_frsize
@@ -363,219 +210,22 @@ def _capacity(mount_point: str) -> tuple[int | None, int | None, int | None, flo
         return None, None, None, None
 
 
-def _device_records(
-    mounts: dict[str, dict[str, object]], fstab: dict[str, dict[str, object]],
-    *, capacity_from_collector_namespace: bool = True,
-) -> list[DeviceVolume]:
-    uuid_by_device = _read_uuid_map()
-    devices: list[DeviceVolume] = []
-    for role, mount_point in MOUNT_ROLES:
-        mount = mounts.get(mount_point)
-        configured = fstab.get(mount_point)
-        if mount is None:
-            devices.append(DeviceVolume(
-                role=role, label=ROLE_LABELS[role], mount_point=mount_point,
-                mount_status="MISSING" if configured else "UNKNOWN", mount_mode="UNKNOWN",
-                health="UNKNOWN", health_detail="Mount is not present in the collector namespace",
-                aggregate=(role == "archive-pool"),
-            ))
-            continue
-        options = list(mount["options"])
-        # Superblock mode is often more useful for FUSE/overlay mounts.
-        super_options = list(mount["super_options"])
-        observed_mode = _mount_mode(options + super_options)
-        major_minor = str(mount["major_minor"])
-        model, topology = _read_sysfs_device(major_minor)
-        uuid = uuid_by_device.get(major_minor)
-        # statvfs in a container describes its namespace even when mountinfo
-        # was supplied from the host. Keep capacity unknown until a separately
-        # attested host capacity source is available.
-        total, used, available, percent = _capacity(mount_point) if capacity_from_collector_namespace else (None, None, None, None)
-        health: HealthState = "UNKNOWN"
-        detail = "SMART telemetry unavailable to this service"
-        if percent is not None:
-            if percent >= 95:
-                health, detail = "CRITICAL", "Filesystem utilization is at least 95%"
-            elif percent >= 85:
-                health, detail = "WARNING", "Filesystem utilization is at least 85%"
-        if health == "UNKNOWN" and observed_mode == "READ_ONLY" and _mount_mode(_fstab_options(configured)) == "READ_WRITE":
-            health, detail = "WARNING", "Mounted read-only although fstab does not declare read-only"
-        devices.append(DeviceVolume(
-            role=role,
-            label=ROLE_LABELS[role],
-            device_identity=model,
-            filesystem_uuid=uuid,
-            filesystem=str(mount["filesystem"]),
-            mount_point=mount_point,
-            mount_status="MOUNTED",
-            mount_mode=observed_mode,
-            total_bytes=total,
-            used_bytes=used,
-            available_bytes=available,
-            utilization_percent=percent,
-            mount_options=list(dict.fromkeys(options + super_options)),
-            transport="USB" if topology else None,
-            transport_topology=topology,
-            smart_status="UNAVAILABLE",
-            health=health,
-            health_detail=detail,
-            last_successful_observation=_now(),
-            aggregate=(role == "archive-pool"),
-        ))
-    return devices
-
-
 def _archive_data(devices: list[DeviceVolume], fstab: dict[str, dict[str, object]]) -> ArchiveTelemetry:
-    by_role = {device.role: device for device in devices}
-    pool = by_role["archive-pool"]
-    pool_mount = fstab.get("/mnt/omnibioai-archive", {})
-    pool_source = str(pool_mount.get("source", ""))
-    branch_modes: dict[str, Literal["READ_ONLY", "READ_WRITE"]] = {}
-    for configured_branch in pool_source.split(":"):
-        branch_path, marker, branch_mode = configured_branch.rpartition("=")
-        if marker and branch_mode in {"RW", "RO"} and branch_path.startswith("/"):
-            branch_modes[branch_path] = "READ_WRITE" if branch_mode == "RW" else "READ_ONLY"
-    branches: list[ArchiveBranch] = []
-    branch_roles = ["archive-writable", "archive-member-a", "archive-member-b"]
-    for role in branch_roles:
-        device = by_role[role]
-        expected = branch_modes.get(device.mount_point, "UNKNOWN")
-        branches.append(ArchiveBranch(
-            mount_point=device.mount_point,
-            role=role,
-            expected_mode=expected,
-            observed_mode=device.mount_mode,
-            mount_status=device.mount_status,
-            filesystem=device.filesystem,
-            filesystem_uuid=device.filesystem_uuid,
-            total_bytes=device.total_bytes,
-            available_bytes=device.available_bytes,
-        ))
-    options = _fstab_options(pool_mount)
-    create_policy = next((item.split("=", 1)[1] for item in options if item.startswith("category.create=")), None)
-    min_free = None
-    min_free_status: Literal["CONFIGURED", "NOT_CONFIGURED", "UNKNOWN"] = "NOT_CONFIGURED" if pool_mount else "UNKNOWN"
-    for item in options:
-        if item.startswith("minfreespace="):
-            try:
-                value = item.split("=", 1)[1]
-                multiplier = 1
-                if value[-1:].lower() in {"k", "m", "g", "t"}:
-                    multiplier = {"k": 1024, "m": 1024**2, "g": 1024**3, "t": 1024**4}[value[-1].lower()]
-                    value = value[:-1]
-                min_free = int(value) * multiplier
-                min_free_status = "CONFIGURED"
-            except (ValueError, IndexError):
-                min_free_status = "UNKNOWN"
-    dependencies = [item.split("=", 1)[1] for item in options if item.startswith("x-systemd.requires-mounts-for=")]
-    missing = [branch.mount_point for branch in branches if branch.mount_status == "MISSING"]
+    del fstab
+    pool = next((device for device in devices if device.role == "archive"), None)
     return ArchiveTelemetry(
-        pool_mount_point=pool.mount_point,
-        pool_status=pool.mount_status,
-        total_bytes=pool.total_bytes,
-        used_bytes=pool.used_bytes,
-        available_bytes=pool.available_bytes,
-        utilization_percent=pool.utilization_percent,
-        branches=branches,
-        create_policy=create_policy,
-        min_free_bytes=min_free,
-        min_free_policy_status=min_free_status,
-        dependencies=dependencies,
-        dependency_assessment="WARNING" if missing or any(path in dependencies for path in ("/media/manish/omnibioai-data", "/mnt/omnibioai-archive2tb-b")) else ("CONFIGURED" if dependencies else "NOT_VERIFIED"),
-        configured_source="/etc/fstab in collector namespace",
-        dependency_note=("Optional read-only member mount requirements are declared; startup dependency is visible, disconnect propagation is not verified." if any(path in dependencies for path in ("/media/manish/omnibioai-data", "/mnt/omnibioai-archive2tb-b")) else "Systemd dependency behavior is not verified from this collector."),
+        pool_mount_point=pool.mount_point if pool else "Not configured",
+        pool_status=pool.mount_status if pool else "UNKNOWN",
+        total_bytes=pool.total_bytes if pool else None,
+        used_bytes=pool.used_bytes if pool else None,
+        available_bytes=pool.available_bytes if pool else None,
+        utilization_percent=pool.utilization_percent if pool else None,
+        branches=[], create_policy=None, min_free_bytes=None,
+        min_free_policy_status="UNKNOWN", dependencies=[],
+        dependency_assessment="NOT_VERIFIED", configured_source="control_center.yaml",
+        dependency_note="Archive is configured as a single storage target.",
         runtime_policy_status="NOT_VERIFIED",
     )
-
-
-def _secure_password_file() -> Path | None:
-    value = os.environ.get(RESTIC_PASSWORD_FILE_ENV)
-    if not value:
-        return None
-    path = Path(value)
-    if not path.is_absolute():
-        return None
-    try:
-        details = path.lstat()
-        if not stat.S_ISREG(details.st_mode) or stat.S_ISLNK(details.st_mode):
-            return None
-        if details.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
-            return None
-        if details.st_uid not in {0, os.geteuid()} or not os.access(path, os.R_OK):
-            return None
-        return path
-    except OSError:
-        return None
-
-
-def _stop_process(process: subprocess.Popen[bytes]) -> None:
-    """Stop and reap a child with a bounded wait, including timeout paths."""
-    try:
-        if process.poll() is None:
-            process.kill()
-    except OSError:
-        pass
-    try:
-        process.wait(timeout=1)
-    except subprocess.TimeoutExpired:
-        # Do not turn a telemetry timeout into an unbounded request wait.
-        # Popen will arrange eventual child reaping if the process exits later.
-        pass
-
-
-def _bounded_process(argv: list[str], env: dict[str, str], timeout: int, max_bytes: int) -> tuple[str | None, str]:
-    """Run a fixed argv with bounded stdout, deadline, no stdin, and hidden stderr."""
-    process: subprocess.Popen[bytes] | None = None
-    selector: selectors.BaseSelector | None = None
-    output = bytearray()
-    try:
-        process = subprocess.Popen(
-            argv,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            env=env,
-            close_fds=True,
-        )
-        if process.stdout is None:
-            return None, "output_unavailable"
-        os.set_blocking(process.stdout.fileno(), False)
-        selector = selectors.DefaultSelector()
-        selector.register(process.stdout, selectors.EVENT_READ)
-        deadline = time.monotonic() + timeout
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                _stop_process(process)
-                return None, "timeout"
-            events = selector.select(min(remaining, 0.2))
-            for key, _ in events:
-                chunk = os.read(key.fd, min(65536, max_bytes + 1 - len(output)))
-                if not chunk:
-                    selector.unregister(key.fileobj)
-                    continue
-                output.extend(chunk)
-                if len(output) > max_bytes:
-                    _stop_process(process)
-                    return None, "output_limit"
-            if process.poll() is not None and not selector.get_map():
-                break
-        if process.wait(timeout=max(0.1, deadline - time.monotonic())) != 0:
-            return None, "command_failed"
-        return output.decode("utf-8", errors="strict"), "ok"
-    except subprocess.TimeoutExpired:
-        if process is not None:
-            _stop_process(process)
-        return None, "timeout"
-    except (OSError, UnicodeDecodeError, ValueError):
-        if process is not None and process.poll() is None:
-            _stop_process(process)
-        return None, "collector_error"
-    finally:
-        if selector is not None:
-            selector.close()
-        if process is not None and process.stdout is not None:
-            process.stdout.close()
 
 
 def parse_restic_snapshots(text: str, now: datetime | None = None) -> tuple[list[SnapshotItem], str | None, bool]:
@@ -613,134 +263,20 @@ def parse_restic_snapshots(text: str, now: datetime | None = None) -> tuple[list
     return snapshots, latest, len(raw) > 200
 
 
-def _restic_data(observed_at: str) -> BackupTelemetry:
-    password_file = _secure_password_file()
-    restic = next((path for path in ("/usr/bin/restic", "/usr/local/bin/restic") if os.path.isfile(path) and os.access(path, os.X_OK)), None)
-    if not password_file:
-        return BackupTelemetry(
-            repository_status="UNAVAILABLE", snapshots=[], schedule_status="UNKNOWN", schedules=[],
-            retention_status="UNKNOWN", restore_verification="NOT_VERIFIED", observed_at=observed_at,
-            detail="Noninteractive protected RESTIC_PASSWORD_FILE is not configured or not accessible; no Restic command was run.",
-        )
-    if not restic or not RESTIC_REPOSITORY.is_dir() or not os.access(RESTIC_REPOSITORY, os.R_OK | os.X_OK):
-        return BackupTelemetry(
-            repository_status="UNAVAILABLE", snapshots=[], schedule_status="UNKNOWN", schedules=[],
-            retention_status="UNKNOWN", restore_verification="NOT_VERIFIED", observed_at=observed_at,
-            detail="Restic executable or fixed repository is unavailable to this service.",
-        )
-    env = {"PATH": "/usr/bin:/bin", RESTIC_PASSWORD_FILE_ENV: str(password_file)}
-    text, result = _bounded_process(
-        [restic, "--no-lock", "--no-cache", "-r", str(RESTIC_REPOSITORY), "snapshots", "--json"],
-        env, RESTIC_TIMEOUT_SECONDS, MAX_RESTIC_OUTPUT_BYTES,
-    )
-    if result != "ok" or text is None:
-        safe_reason = {
-            "timeout": "Restic inventory collection timed out.",
-            "output_limit": "Restic inventory exceeded the configured output limit.",
-            "command_failed": "Restic inventory command failed; stderr is suppressed.",
-        }.get(result, "Restic inventory is unavailable; command output is suppressed.")
-        return BackupTelemetry(
-            repository_status="UNAVAILABLE", snapshots=[], schedule_status="UNKNOWN", schedules=[],
-            retention_status="UNKNOWN", restore_verification="NOT_VERIFIED", observed_at=observed_at,
-            detail=safe_reason,
-        )
-    snapshots, latest, truncated = parse_restic_snapshots(text)
-    if not snapshots and text.strip() not in {"[]", "null"}:
-        status: Literal["AVAILABLE", "PARTIAL", "UNAVAILABLE"] = "PARTIAL"
-        detail = "Restic returned malformed or empty snapshot metadata."
-    else:
-        status, detail = "AVAILABLE", "Snapshot inventory collected read-only."
-    return BackupTelemetry(
-        repository_status=status,
-        snapshots=snapshots,
-        snapshot_count=None if truncated else len(snapshots),
-        snapshots_truncated=truncated,
-        latest_snapshot_at=latest,
-        schedule_status="UNKNOWN",
-        schedules=[],
-        retention_status="UNKNOWN",
-        restore_verification="NOT_VERIFIED",
-        observed_at=observed_at,
-        detail=detail,
-    )
-
-
-def _schedule_inventory() -> tuple[Literal["AVAILABLE", "MISSING", "UNKNOWN"], list[str]]:
-    """Read only matching timer/cron schedule expressions, never job commands."""
-    schedules: list[str] = []
-    inspected = False
-    for directory in (Path("/etc/systemd/system"), Path("/lib/systemd/system"), Path("/usr/lib/systemd/system")):
-        try:
-            with os.scandir(directory) as entries:
-                for index, entry in enumerate(entries):
-                    if index >= 512:
-                        break
-                    if not entry.name.endswith(".timer") or not re.search(r"backup|restic|archive|snapshot", entry.name, re.I):
-                        continue
-                    inspected = True
-                    content = _read_bounded(Path(entry.path), 32 * 1024)
-                    if content is None:
-                        continue
-                    calendars = [line.split("=", 1)[1].strip() for line in content.splitlines()
-                                 if line.strip().startswith("OnCalendar=")]
-                    for calendar in calendars[:4]:
-                        # Unit names and calendar expressions only; no ExecStart or credential values.
-                        schedules.append(f"{entry.name}: {calendar} (unit-file activation unverified)")
-        except OSError:
-            continue
-    directory = Path("/etc/cron.d")
-    try:
-        with os.scandir(directory) as entries:
-            for index, entry in enumerate(entries):
-                if index >= 256:
-                    break
-                if not entry.is_file(follow_symlinks=False):
-                    continue
-                inspected = True
-                content = _read_bounded(Path(entry.path), 32 * 1024)
-                if content is None:
-                    continue
-                for line in content.splitlines():
-                    if line.lstrip().startswith("#") or not re.search(r"restic|backup|archive|snapshot", line, re.I):
-                        continue
-                    fields = line.split()
-                    if len(fields) >= 6:
-                        schedules.append(f"{entry.name}: {' '.join(fields[:6])} (cron expression; command redacted)")
-    except OSError:
-        pass
-    # Periodic directories express cadence by their directory name. Only
-    # matching filenames are reported; file contents are not inspected.
-    for directory in (Path("/etc/cron.daily"), Path("/etc/cron.weekly"), Path("/etc/cron.monthly")):
-        try:
-            with os.scandir(directory) as entries:
-                for index, entry in enumerate(entries):
-                    if index >= 256:
-                        break
-                    if not re.search(r"restic|backup|archive|snapshot", entry.name, re.I):
-                        continue
-                    inspected = True
-                    schedules.append(f"{directory.name}/{entry.name}: {directory.name.removeprefix('cron.')} (activation unverified)")
-        except OSError:
-            continue
-    if schedules:
-        return "AVAILABLE", sorted(set(schedules))[:40]
-    return ("MISSING", []) if inspected else ("UNKNOWN", [])
-
-
 def _health_alerts(devices: list[DeviceVolume], archive: ArchiveTelemetry, backups: BackupTelemetry, observed_at: str) -> list[HealthAlert]:
     alerts: list[HealthAlert] = []
     for device in devices:
         if device.mount_status == "MISSING":
             alerts.append(HealthAlert(
                 id=f"mount-missing:{device.role}", state="ACTIVE", severity="CRITICAL",
-                affected_device=device.label, source="host PID 1 mountinfo bind",
-                observed_at=observed_at, evidence=f"Expected host mount {device.mount_point} is absent from the supplied host mount table.",
-                suggested_action="Verify the host mount and bind provenance before changing storage configuration.",
+                affected_device=device.label, source=SIGNED_METADATA_SOURCE,
+                observed_at=observed_at, evidence=f"The collector reports {device.label} as missing.",
+                suggested_action="Ask the host maintainer to verify the collector's mount observation before changing storage configuration.",
             ))
         elif device.health in {"WARNING", "CRITICAL"}:
             alerts.append(HealthAlert(
                 id=f"capacity:{device.role}", state="ACTIVE", severity=device.health,
-                affected_device=device.label, source="statvfs",
+                affected_device=device.label, source=SIGNED_METADATA_SOURCE,
                 observed_at=observed_at, evidence=device.health_detail,
                 suggested_action=("Review available capacity and workload growth; do not delete data automatically." if "utilization" in device.health_detail else "Verify mount mode and host mount identity before changing configuration."),
             ))
@@ -748,27 +284,27 @@ def _health_alerts(devices: list[DeviceVolume], archive: ArchiveTelemetry, backu
     for branch in missing_branches:
         alerts.append(HealthAlert(
             id=f"archive-branch:{branch.role}", state="ACTIVE", severity="WARNING",
-            affected_device=branch.mount_point, source="host PID 1 mountinfo bind",
-            observed_at=observed_at, evidence="Configured archive branch is not mounted in the supplied host mount table.",
+            affected_device=branch.role, source=SIGNED_METADATA_SOURCE,
+            observed_at=observed_at, evidence="The collector reports this archive branch as missing.",
             suggested_action="Confirm the member mount and pool dependency behavior; preserve member contents.",
         ))
     if backups.repository_status == "UNAVAILABLE":
         alerts.append(HealthAlert(
             id="restic-unavailable", state="ACTIVE", severity="WARNING", affected_device=None,
-            source="Restic collector", observed_at=observed_at, evidence=backups.detail,
-            suggested_action="Configure an approved noninteractive, least-privilege password-file mechanism or keep repository telemetry unavailable.",
+            source="Restic telemetry unavailable", observed_at=observed_at, evidence=backups.detail,
+            suggested_action="Keep repository telemetry unavailable until separate Restic access approval and validation.",
         ))
     return alerts
 
 
 GATE_DEFINITIONS = (
-    ("nvme-health", "NVMe health", "sysfs/NVMe SMART", "BLOCKED", "Health and wear indicators require device access not available to this service."),
-    ("device-identification", "Device identification", "Host PID 1 mountinfo bind + /dev/disk/by-uuid", "PARTIAL", "Host mount identity requires verified bind provenance; UUID and USB topology may be unavailable to this service."),
-    ("mount-integrity", "Mount verification", "Host PID 1 mountinfo bind", "PARTIAL", "A read-only host mount table can show current mounts; it does not prove long-term stability or capacity."),
-    ("primary-reliability", "Primary disk reliability", "SMART + kernel log", "BLOCKED", "SMART and kernel I/O evidence are not available to this service."),
+    ("nvme-health", "Disk health", SIGNED_METADATA_SOURCE, "PARTIAL", "The host snapshot reports bounded SMART health and selected attributes."),
+    ("device-identification", "Device identification", SIGNED_METADATA_SOURCE, "PARTIAL", "Configured roles are mapped to host devices by the root-owned collector configuration."),
+    ("mount-integrity", "Mount verification", "Read-only target binds", "PARTIAL", "statvfs confirms readable collector binds; it does not prove filesystem integrity."),
+    ("primary-reliability", "Primary disk reliability", SIGNED_METADATA_SOURCE, "PARTIAL", "SMART and filtered 24-hour kernel evidence are read from the host snapshot."),
     ("archive-integrity", "Archive filesystem integrity", "Filesystem health evidence", "NOT_VERIFIED", "A mounted filesystem is not proof of integrity."),
-    ("mergerfs-resilience", "Mergerfs resilience", "fstab + runtime mount", "PARTIAL", "Configured branches can be compared with mounts; failover behavior requires isolated testing."),
-    ("restic-access", "Restic repository access", "Restic read-only inventory", "PARTIAL", "Only available when the protected noninteractive credential mechanism is configured."),
+    ("mergerfs-resilience", "Archive resilience", SIGNED_METADATA_SOURCE, "NOT_VERIFIED", "Capacity and health telemetry do not prove failover or disconnect resilience."),
+    ("restic-access", "Restic repository access", SIGNED_METADATA_SOURCE, "BLOCKED", "Restic repository status is supplied only by the host snapshot."),
     ("snapshot-inventory", "Snapshot inventory", "Restic snapshots", "PARTIAL", "Inventory is not verified when Restic access is unavailable."),
     ("snapshot-integrity", "Snapshot integrity", "Restic check", "NOT_VERIFIED", "No repository integrity scan is run by this dashboard."),
     ("isolated-restore", "Isolated restore", "Operator qualification record", "NOT_VERIFIED", "No restore verification evidence source is configured."),
@@ -805,8 +341,8 @@ def _readiness(observed_at: str, backups: BackupTelemetry | None = None) -> list
         else:
             inventory.state = "PASS"
             inventory.explanation = "Snapshot inventory was collected read-only."
-        access.evidence_source = "Restic read-only snapshots command"
-        inventory.evidence_source = "Restic snapshots JSON"
+        access.evidence_source = "Restic telemetry unavailable" if backups.repository_status == "UNAVAILABLE" else "Restic read-only snapshots command"
+        inventory.evidence_source = "Restic telemetry unavailable" if backups.repository_status == "UNAVAILABLE" else "Restic snapshots JSON"
     return values
 
 
@@ -815,50 +351,146 @@ _cache: tuple[float, StorageOverview] | None = None
 
 
 def _collect() -> StorageOverview:
-    observed_at = _now()
-    # These exact paths must be read-only binds of host /proc/1/mountinfo and
-    # /etc/fstab, verified from Docker's mount configuration at deployment.
-    # An absent or incomplete pair fails closed; never fall back to /proc/self.
-    mount_text = _read_bounded(HOST_MOUNTINFO, MAX_MOUNTINFO_BYTES)
-    fstab_text = _read_bounded(HOST_FSTAB, MAX_FSTAB_BYTES)
-    if mount_text is None or fstab_text is None:
-        mount_text = None
-        fstab_text = None
-    mounts = parse_mountinfo(mount_text or "")
-    fstab = parse_fstab(fstab_text or "")
-    devices = _device_records(mounts, fstab, capacity_from_collector_namespace=False)
-    archive = _archive_data(devices, fstab)
-    archive.configured_source = "Host /etc/fstab read-only bind" if fstab_text is not None else "Host fstab unavailable"
-    backups = _restic_data(observed_at)
-    schedule_status, schedules = _schedule_inventory()
-    backups.schedule_status = schedule_status
-    backups.schedules = schedules
-    alerts = _health_alerts(devices, archive, backups, observed_at)
-    sources = {
-        "mounts": SourceState(
-            status="PARTIAL" if mount_text is not None else "UNAVAILABLE",
-            observed_at=observed_at,
-            detail="Read bounded host PID 1 mountinfo bind; capacity and bind provenance require separate verification" if mount_text is not None else "Host mountinfo/fstab read-only bind pair is absent or unreadable; container mounts were not used",
-        ),
-        "configuration": SourceState(
-            status="PARTIAL" if fstab_text is not None else "UNAVAILABLE",
-            observed_at=observed_at,
-            detail="Read bounded host fstab bind; bind provenance requires separate verification" if fstab_text is not None else "Host mountinfo/fstab read-only bind pair is absent or unreadable; container configuration was not used",
-        ),
-        "smart": SourceState(status="UNAVAILABLE", observed_at=observed_at, detail="No privileged SMART helper is configured"),
-        "restic": SourceState(status=backups.repository_status, observed_at=observed_at, detail=backups.detail),
-        "docker": SourceState(status="UNAVAILABLE", observed_at=observed_at, detail="Docker socket is not accessed by this collector"),
+    targets = load_targets()
+    host_snapshot, snapshot_error = read_host_snapshot()
+    observed_at = host_snapshot.observed_at.isoformat() if host_snapshot else _now()
+    age = snapshot_age_seconds(host_snapshot) if host_snapshot else None
+    stale = age is not None and age > STALE_AFTER_SECONDS
+    smart_by_role = {
+        str(item.get("role")): item for item in (host_snapshot.smart if host_snapshot else [])
+        if isinstance(item, dict) and item.get("role")
     }
-    all_required_sources = mount_text is not None and fstab_text is not None
-    return StorageOverview(
+    devices: list[DeviceVolume] = []
+    alerts: list[HealthAlert] = []
+
+    for target in targets:
+        if not target.mount:
+            devices.append(DeviceVolume(
+                role=target.role, label=target.name, mount_point=target.host_path,
+                mount_status="MISSING", mount_mode="UNKNOWN", health="UNKNOWN",
+                health_detail="Not mounted", smart_status="UNKNOWN",
+                operational_state=target.state,
+                note="This target is being replaced." if target.state == "being_replaced" else None,
+            ))
+            continue
+        mount_record = host_snapshot.mounts.get(target.role) if host_snapshot else None
+        verified_mount = (
+            isinstance(mount_record, dict) and mount_record.get("mounted") is True
+            and mount_record.get("uuid") == target.expected_filesystem_uuid
+        )
+        total, used, available, percent = (
+            _capacity(str(target.collector_path)) if verified_mount else (None, None, None, None)
+        )
+        mounted = verified_mount and total is not None
+        smart = smart_by_role.get(target.role)
+        attributes = smart.get("attributes", {}) if smart else {}
+        failing = [number for number in ("5", "197", "198") if int(attributes.get(number, 0) or 0) > 0]
+        crc_rise = bool(smart and smart.get("udma_crc_error_count_rise"))
+        health: HealthState = "HEALTHY" if mounted else "UNKNOWN"
+        detail = "Capacity collected with statvfs from the read-only bind mount" if mounted else (
+            "Not mounted" if host_snapshot and (mount_record is None or not verified_mount or total is None)
+            else f"No data: {snapshot_error or 'mount verification is missing'}"
+        )
+        if percent is not None and percent >= 95:
+            health, detail = "CRITICAL", "Filesystem utilization is at least 95%"
+        elif percent is not None and percent >= 85:
+            health, detail = "WARNING", "Filesystem utilization is at least 85%"
+        if not mounted:
+            health = "UNKNOWN"
+        if not smart or smart.get("error"):
+            if health == "HEALTHY":
+                health = "UNKNOWN"
+                detail = f"No data: {snapshot_error or 'SMART observation is missing for this target'}"
+        if failing:
+            health = "WARNING"
+            detail = f"SMART attributes {', '.join(failing)} report non-zero failing values"
+        elif smart and smart.get("passed") is False:
+            health, detail = "WARNING", "SMART overall-health assessment failed"
+        note = "This target is being replaced." if target.state == "being_replaced" else None
+        if crc_rise:
+            cable_note = "SMART attribute 199 increased; check the cable or enclosure."
+            note = f"{note} {cable_note}".strip() if note else cable_note
+        device = DeviceVolume(
+            role=target.role, label=target.name, mount_point=target.host_path,
+            mount_status="MOUNTED" if mounted else "MISSING", mount_mode="READ_ONLY" if mounted else "UNKNOWN",
+            total_bytes=total, used_bytes=used, available_bytes=available, utilization_percent=percent,
+            smart_status="AVAILABLE" if smart and not smart.get("error") else "UNAVAILABLE",
+            health=health, health_detail=detail, last_successful_observation=observed_at if mounted else None,
+            last_observed_error=None if mounted else detail, operational_state=target.state, note=note,
+        )
+        devices.append(device)
+        if health in {"WARNING", "CRITICAL"}:
+            alerts.append(HealthAlert(
+                id=f"storage:{target.role}", state="ACTIVE", severity=health,
+                affected_device=target.name, source="statvfs/SMART snapshot", observed_at=observed_at,
+                evidence=detail, suggested_action="Review the filesystem or disk health; no automatic action was taken.",
+            ))
+
+    restic = host_snapshot.restic if host_snapshot else {}
+    snapshot_values = restic.get("snapshots", []) if isinstance(restic, dict) else []
+    raw_snapshots = snapshot_values if isinstance(snapshot_values, list) else []
+    snapshots, latest, truncated = parse_restic_snapshots(json.dumps(raw_snapshots))
+    restic_error = restic.get("error") if isinstance(restic, dict) else None
+    repository_available = host_snapshot is not None and not restic_error and isinstance(snapshot_values, list)
+    stats = restic.get("stats") if isinstance(restic, dict) and isinstance(restic.get("stats"), dict) else {}
+    stats_summary = ", ".join(f"{key.replace('_', ' ')}: {value}" for key, value in stats.items()) or None
+    backups = BackupTelemetry(
+        repository_status="AVAILABLE" if repository_available else "UNAVAILABLE",
+        repository_id=restic.get("repository_id") if isinstance(restic, dict) else None,
+        snapshot_count=len(raw_snapshots) if repository_available else None,
+        snapshots_truncated=truncated, snapshots=snapshots, latest_snapshot_at=latest,
+        schedule_status="UNKNOWN", schedules=[],
+        retention_status="UNKNOWN", retention_summary=stats_summary, restore_verification="NOT_VERIFIED",
         observed_at=observed_at,
-        freshness="CURRENT" if all_required_sources else "UNKNOWN",
-        sources=sources,
-        physical_devices=[device for device in devices if device.role in PHYSICAL_ROLES],
-        archive_pool=archive,
-        backups=backups,
-        alerts=alerts,
-        readiness_gates=_readiness(observed_at, backups),
+        detail="Restic inventory read from the host snapshot" if repository_available else f"No data: {restic_error or snapshot_error}",
+    )
+    if snapshots and max(item.age_seconds or 0 for item in snapshots) >= 0:
+        latest_item = min((item for item in snapshots if item.age_seconds is not None), key=lambda item: item.age_seconds, default=None)
+        if latest_item and latest_item.age_seconds is not None and latest_item.age_seconds > 7 * 86400:
+            alerts.append(HealthAlert(
+                id="restic:snapshot-old", state="ACTIVE", severity="WARNING", source="Restic snapshot",
+                observed_at=observed_at, evidence="The latest Restic snapshot is older than 7 days.",
+                suggested_action="Check the backup job and repository connectivity.",
+            ))
+    kernel = host_snapshot.kernel if host_snapshot else {}
+    kernel_counts = kernel.get("counts") if isinstance(kernel.get("counts"), dict) else {}
+    kernel_counts = {str(label): value for label, value in kernel_counts.items() if isinstance(value, int) and value > 0}
+    if kernel_counts:
+        kernel_devices = [str(name)[:32] for name in kernel.get("devices", [])[:16]] if isinstance(kernel.get("devices"), list) else []
+        counts_text = ", ".join(f"{label.replace('_', ' ')}: {value}" for label, value in sorted(kernel_counts.items()))
+        alerts.append(HealthAlert(
+            id="kernel:storage-errors", state="ACTIVE", severity="WARNING", source="dmesg (last 24 hours)",
+            affected_device=", ".join(kernel_devices) or None, observed_at=observed_at,
+            evidence=f"Storage-related kernel messages in the last 24 hours ({counts_text}).",
+            suggested_action="Review the host kernel log and affected disk or filesystem.",
+        ))
+
+    archive_device = next((item for item in devices if item.role == "archive"), None)
+    archive = ArchiveTelemetry(
+        pool_mount_point=archive_device.mount_point if archive_device else "Not configured",
+        pool_status=archive_device.mount_status if archive_device else "UNKNOWN",
+        total_bytes=archive_device.total_bytes if archive_device else None,
+        used_bytes=archive_device.used_bytes if archive_device else None,
+        available_bytes=archive_device.available_bytes if archive_device else None,
+        utilization_percent=archive_device.utilization_percent if archive_device else None,
+        branches=[], create_policy=None, min_free_bytes=None, min_free_policy_status="UNKNOWN",
+        dependencies=[], dependency_assessment="NOT_VERIFIED", configured_source="control_center.yaml",
+        dependency_note="Archive is configured as a single storage target.", runtime_policy_status="NOT_VERIFIED",
+    )
+    snapshot_detail = "Host snapshot is current" if host_snapshot and not stale else "Host snapshot is older than 2 hours" if stale else f"No data: {snapshot_error}"
+    sources = {
+        "mounts": SourceState(status="AVAILABLE" if targets else "UNAVAILABLE", observed_at=observed_at,
+                              detail="Configured read-only bind mounts measured with statvfs" if targets else "No storage targets configured"),
+        "configuration": SourceState(status="AVAILABLE" if targets else "UNAVAILABLE", observed_at=observed_at,
+                                     detail="Storage targets loaded from control_center.yaml" if targets else "No storage targets configured"),
+        "smart": SourceState(status="AVAILABLE" if host_snapshot and host_snapshot.smart else "UNAVAILABLE", observed_at=observed_at, detail=snapshot_detail),
+        "restic": SourceState(status=backups.repository_status, observed_at=observed_at, detail=backups.detail),
+        "docker": SourceState(status="UNAVAILABLE", observed_at=observed_at, detail="Docker socket is intentionally not mounted"),
+    }
+    return StorageOverview(
+        observed_at=observed_at, freshness="STALE" if stale else "CURRENT" if host_snapshot else "UNKNOWN", sources=sources,
+        physical_devices=devices, archive_pool=archive,
+        backups=backups, alerts=alerts, readiness_gates=_readiness(observed_at, backups),
         readiness_state="NOT_VERIFIED",
     )
 
@@ -873,16 +505,18 @@ def get_snapshot(force_refresh: bool = False) -> StorageOverview:
             snapshot = _collect()
         except Exception:
             if _cache is not None:
-                return _cache[1].copy(update={"freshness": "STALE"})
+                return _cache[1].model_copy(update={"freshness": "STALE"})
             observed_at = _now()
+            configured_targets = load_targets()
             unavailable_devices = [DeviceVolume(
-                role=role, label=ROLE_LABELS[role], mount_point=mount_point,
+                role=target.role, label=target.name, mount_point=target.host_path,
                 mount_status="UNKNOWN", mount_mode="UNKNOWN", health="UNKNOWN",
                 health_detail="Collector failed before this source could be observed",
-                aggregate=(role == "archive-pool"),
-            ) for role, mount_point in MOUNT_ROLES]
+                operational_state=target.state,
+            ) for target in configured_targets]
+            archive_target = next((target for target in configured_targets if target.role == "archive"), None)
             unavailable_archive = ArchiveTelemetry(
-                pool_mount_point="/mnt/omnibioai-archive", pool_status="UNKNOWN", branches=[],
+                pool_mount_point=archive_target.host_path if archive_target else "Not configured", pool_status="UNKNOWN", branches=[],
                 create_policy=None, min_free_bytes=None, min_free_policy_status="UNKNOWN",
                 dependencies=[], dependency_assessment="NOT_VERIFIED",
                 configured_source="Unavailable", dependency_note="Collector failed; dependencies were not observed.",
@@ -891,13 +525,13 @@ def get_snapshot(force_refresh: bool = False) -> StorageOverview:
             unavailable_backups = BackupTelemetry(
                 repository_status="UNAVAILABLE", snapshots=[], schedule_status="UNKNOWN", schedules=[],
                 retention_status="UNKNOWN", restore_verification="NOT_VERIFIED", observed_at=observed_at,
-                detail="Collector failed before Restic metadata could be observed.",
+                detail="No data: collector failed before the host snapshot could be read.",
             )
             return StorageOverview(
                 observed_at=observed_at, freshness="UNKNOWN",
                 sources={name: SourceState(status="UNAVAILABLE", observed_at=observed_at, detail="Collector failed; telemetry unavailable")
                          for name in ("mounts", "configuration", "smart", "restic", "docker")},
-                physical_devices=[device for device in unavailable_devices if device.role in PHYSICAL_ROLES],
+                physical_devices=unavailable_devices,
                 archive_pool=unavailable_archive, backups=unavailable_backups, alerts=[],
                 readiness_gates=_readiness(observed_at, unavailable_backups), readiness_state="NOT_VERIFIED",
             )

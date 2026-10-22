@@ -30,6 +30,25 @@ services:
     timeout_s: 2
 
 system:
+  storage_targets:
+    - name: Root filesystem
+      role: root
+      host_path: /
+      expected_filesystem_uuid: REPLACE_WITH_ROOT_FILESYSTEM_UUID
+    - name: Backup
+      role: backup
+      host_path: /mnt/omnibioai-backup20tb
+      expected_filesystem_uuid: REPLACE_WITH_SDD1_FILESYSTEM_UUID
+    - name: Archive
+      role: archive
+      host_path: /mnt/omnibioai-archive22tb
+      expected_filesystem_uuid: REPLACE_WITH_SDA1_FILESYSTEM_UUID
+    - name: Primary
+      role: primary
+      host_path: /mnt/wdpro26tb
+      expected_filesystem_uuid: REPLACE_WHEN_REPLACED
+      state: being_replaced
+      mount: false
   disk_checks:
     - path: /workspace/out
       warn_pct_free_below: 15

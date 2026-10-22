@@ -1,0 +1,6 @@
+# These role|host-path|expected-UUID mappings must match control_center.yaml.
+STORAGE_TELEMETRY_TARGETS="root|/|9f3cd4b6-f34e-435e-9fcf-ed7861f7cf99 backup|/mnt/omnibioai-backup20tb|9d872bab-a481-4fca-8ad8-8031d78c0dbc archive|/mnt/omnibioai-archive22tb|6a805bb7-2513-435f-9cd4-b9970a0e4fc4"
+# SAT SMART queries are limited to the two active external disks. Do not add primary.
+STORAGE_TELEMETRY_DISKS="backup:/dev/sdd archive:/dev/sda"
+RESTIC_REPOSITORY=/mnt/omnibioai-backup20tb/restic
+RESTIC_PASSWORD_FILE=/etc/omnibioai/restic-password

@@ -16,7 +16,7 @@ const sample: StorageOverview = {
     used_bytes: 400, available_bytes: 600, utilization_percent: 40, mount_options: ['rw'], transport: 'USB',
     transport_topology: '/sys/devices/usb1/1-1',
     smart_status: 'UNAVAILABLE', health: 'UNKNOWN', health_detail: 'SMART unavailable', aggregate: false,
-    last_observed_error: null, last_successful_observation: observedAt,
+    last_observed_error: null, last_successful_observation: observedAt, operational_state: null, note: null,
   }],
   archive_pool: {
     pool_mount_point: '/mnt/archive', pool_status: 'MOUNTED', total_bytes: 3000, used_bytes: 1200,
@@ -41,9 +41,8 @@ describe('StorageDashboardPage', () => {
   it('shows live observation states and does not add aggregate archive branches to physical capacity', async () => {
     render(<StorageDashboardPage />)
     expect(await screen.findByText('Storage & Backup')).toBeTruthy()
-    expect(screen.getByText('Archive pool (aggregate)')).toBeTruthy()
+    expect(screen.getByText('Primary')).toBeTruthy()
     expect(screen.getByText(/600 B available/)).toBeTruthy()
-    expect(screen.getByText('Branches are shown separately and not added to this total.')).toBeTruthy()
   })
 
   it('renders all six views using typed observations', async () => {
@@ -59,7 +58,7 @@ describe('StorageDashboardPage', () => {
     expect(screen.getByText('…/dataset')).toBeTruthy()
     fireEvent.click(screen.getByRole('tab', { name: 'Health & Alerts' }))
     expect(screen.getByText('Branch missing')).toBeTruthy()
-    expect(screen.getByText('ACTIVE')).toBeTruthy()
+    expect(screen.getByText('WARNING')).toBeTruthy()
     fireEvent.click(screen.getByRole('tab', { name: 'Recovery & Readiness' }))
     expect(screen.getByText('No restore evidence.')).toBeTruthy()
     expect(screen.getAllByText('NOT_VERIFIED').length).toBeGreaterThan(0)
@@ -71,5 +70,43 @@ describe('StorageDashboardPage', () => {
     expect(await screen.findByText('Storage telemetry is unavailable.')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     await waitFor(() => expect(fetchStorageOverview).toHaveBeenCalledTimes(2))
+  })
+
+  it('shows one no-data reason and marks stale snapshots', async () => {
+    fetchStorageOverview.mockResolvedValueOnce({
+      ...sample,
+      freshness: 'STALE',
+      physical_devices: [{
+        ...sample.physical_devices[0], total_bytes: null, used_bytes: null, available_bytes: null,
+        utilization_percent: null, health_detail: 'No data: snapshot file is missing',
+      }],
+    })
+    render(<StorageDashboardPage />)
+    expect(await screen.findByText('No data: snapshot file is missing')).toBeTruthy()
+    expect(screen.queryByText(/No data: No data/)).toBeNull()
+    expect(screen.getByText(/Last updated .+ \(stale\)/)).toBeTruthy()
+    expect(screen.queryByText(/Unavailable used/)).toBeNull()
+  })
+
+  it('renders being replaced as a neutral note', async () => {
+    fetchStorageOverview.mockResolvedValueOnce({
+      ...sample,
+      physical_devices: [{ ...sample.physical_devices[0], operational_state: 'being_replaced', note: 'This target is being replaced.' }],
+    })
+    render(<StorageDashboardPage />)
+    expect(await screen.findByText('This target is being replaced.')).toBeTruthy()
+  })
+
+  it('shows Not mounted without a no-data prefix', async () => {
+    fetchStorageOverview.mockResolvedValueOnce({
+      ...sample,
+      physical_devices: [{
+        ...sample.physical_devices[0], mount_status: 'MISSING', total_bytes: null, used_bytes: null,
+        available_bytes: null, utilization_percent: null, health_detail: 'Not mounted',
+      }],
+    })
+    render(<StorageDashboardPage />)
+    expect(await screen.findByText('Not mounted')).toBeTruthy()
+    expect(screen.queryByText(/No data: Not mounted/)).toBeNull()
   })
 })

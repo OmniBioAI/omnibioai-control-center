@@ -1,0 +1,12 @@
+[Unit]
+Description=Collect OmniBioAI storage telemetry hourly
+
+[Timer]
+OnBootSec=5min
+OnCalendar=hourly
+AccuracySec=1min
+Persistent=true
+Unit=omnibioai-storage-telemetry.service
+
+[Install]
+WantedBy=timers.target

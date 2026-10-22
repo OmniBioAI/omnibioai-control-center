@@ -1,0 +1,20 @@
+[Unit]
+Description=OmniBioAI host storage telemetry snapshot
+After=local-fs.target network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=/etc/omnibioai/storage-telemetry.conf
+Environment=RESTIC_CACHE_DIR=/var/cache/omnibioai-storage-telemetry
+ExecStart=/usr/local/libexec/omnibioai/collect-storage-telemetry.py
+# Two 10-minute Restic calls plus SMART/findmnt/dmesg must finish before the next hourly run.
+TimeoutStartSec=30min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/omnibioai
+CacheDirectory=omnibioai-storage-telemetry
+UMask=0022
