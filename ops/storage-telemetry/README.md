@@ -28,9 +28,13 @@ across reboots. exFAT volumes have a short `XXXX-XXXX` UUID.
 
 What the collector runs, once an hour (`OnCalendar=hourly`):
 
-- `findmnt -n -o UUID,FSTYPE <path>` for each target. A target counts as mounted
-  only when its UUID matches. Its filesystem type and whether the host mount is
-  read-only (`statvfs`) are recorded too.
+- `findmnt --task 1 -n -P -o UUID,FSTYPE,OPTIONS <path>` for each target.
+  - A target counts as mounted only when its UUID matches.
+  - Its filesystem type and host mount mode (`ro` in the options) are recorded
+    too.
+  - `--task 1` reads PID 1's mount table, the host's. The service's own view
+    is sandboxed by `ProtectSystem=strict`, where every mount appears
+    read-only.
 - For the mergerfs archive pool, `findmnt -n -o FSTYPE <path>`, which must be
   `fuse.mergerfs`.
   - The pool's settings are read from its control file,
