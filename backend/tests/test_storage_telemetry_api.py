@@ -43,13 +43,13 @@ def test_storage_api_reports_snapshot_scenarios_safely(monkeypatch, scenario):
                 "attributes": {"5": 0, "197": 0, "198": 0, "199": 0},
                 "udma_crc_error_count_rise": False, "error": None,
             }],
-            "mounts": {"backup": {"mounted": True, "uuid": "uuid-backup"}},
+            "mounts": {"backup": {"mounted": True, "uuid": "11111111-2222-3333-4444-555555555555"}},
             "kernel": {"counts": {}, "devices": []},
             "restic": {"snapshots": [], "stats": {}, "error": None},
         })
         reason = None
     monkeypatch.setattr(storage, "load_targets", lambda: [StorageTarget(
-        name="Backup", role="backup", host_path="/mnt/backup", expected_filesystem_uuid="uuid-backup",
+        name="Backup", role="backup", host_path="/mnt/backup", expected_filesystem_uuid="11111111-2222-3333-4444-555555555555",
     )])
     monkeypatch.setattr(storage, "read_host_snapshot", lambda: (snapshot, reason))
     monkeypatch.setattr(storage, "_capacity", lambda _path: (1000, 700, 300, 70.0))

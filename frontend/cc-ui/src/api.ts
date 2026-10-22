@@ -771,18 +771,30 @@ export interface StorageDevice {
   operational_state: string | null
   note: string | null
   power_state?: 'ACTIVE' | 'STANDBY' | null
+  smart_passed?: boolean | null
+  smart_attributes?: Record<string, number>
+  temperature_celsius?: number | null
+  nvme_percentage_used?: number | null
+  nvme_media_errors?: number | null
+  read_only: boolean
+  pool_role?: string | null
 }
 
 export interface StorageArchiveBranch {
   mount_point: string
   role: string
+  label?: string | null
   expected_mode: 'READ_ONLY' | 'READ_WRITE' | 'UNKNOWN'
   observed_mode: 'READ_ONLY' | 'READ_WRITE' | 'UNKNOWN'
   mount_status: 'MOUNTED' | 'MISSING' | 'UNKNOWN'
   filesystem: string | null
   filesystem_uuid: string | null
   total_bytes: number | null
+  used_bytes?: number | null
   available_bytes: number | null
+  utilization_percent?: number | null
+  read_only?: boolean
+  health?: StorageHealth
 }
 
 export interface StorageArchive {
@@ -792,6 +804,9 @@ export interface StorageArchive {
   used_bytes: number | null
   available_bytes: number | null
   utilization_percent: number | null
+  pool_detail?: string | null
+  mergerfs_version?: string | null
+  unreadable_settings?: string[]
   branches: StorageArchiveBranch[]
   create_policy: string | null
   min_free_bytes: number | null
@@ -822,6 +837,8 @@ export interface StorageBackups {
   schedules: string[]
   retention_status: 'AVAILABLE' | 'MISSING' | 'UNKNOWN'
   retention_summary: string | null
+  latest_snapshot_size_bytes?: number | null
+  latest_snapshot_file_count?: number | null
   restore_verification: StorageGateState
   observed_at: string
   detail: string

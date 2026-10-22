@@ -17,36 +17,59 @@ the install steps check this.
 
 Install steps: [INSTALL.md](INSTALL.md).
 
-Never place the Restic password in this repository. `/etc/omnibioai/storage-telemetry.conf` contains:
+Never place the Restic password in this repository. The host conf,
+`/etc/omnibioai/storage-telemetry.conf`, is a copy of
+[`storage-telemetry.conf.example`](storage-telemetry.conf.example). Its targets,
+pool and UUIDs must match `config/control_center.yaml`;
+`backend/tests/test_storage_config_consistency.py` fails if they drift apart.
 
-```ini
-STORAGE_TELEMETRY_TARGETS="root|/|9f3cd4b6-f34e-435e-9fcf-ed7861f7cf99 backup|/mnt/omnibioai-backup20tb|9d872bab-a481-4fca-8ad8-8031d78c0dbc archive|/mnt/omnibioai-archive22tb|6a805bb7-2513-435f-9cd4-b9970a0e4fc4"
-STORAGE_TELEMETRY_DISKS="backup:9d872bab-a481-4fca-8ad8-8031d78c0dbc archive:6a805bb7-2513-435f-9cd4-b9970a0e4fc4"
-RESTIC_REPOSITORY=/mnt/omnibioai-backup20tb/restic
-RESTIC_PASSWORD_FILE=/etc/omnibioai/restic-password
-```
-
-The UUIDs above are the current mapping: `/` → root filesystem UUID,
-`sdd1` → backup UUID, and `sda1` → archive UUID. The collector checks each
-with `findmnt -n -o UUID <path>`; re-check them the same way before installing
-if disks have changed. `STORAGE_TELEMETRY_DISKS` uses the same filesystem
-UUIDs, because `sdX` names can change across reboots.
+UUIDs, not `sdX` names, identify every disk, because kernel names can change
+across reboots. exFAT volumes have a short `XXXX-XXXX` UUID.
 
 What the collector runs, once an hour (`OnCalendar=hourly`):
 
-- `lsblk -no PKNAME /dev/disk/by-uuid/<uuid>` for each SMART role, to find
-  its whole disk. The result must be exactly one `sdX` or `nvmeXnY`, recorded
-  as `device`; otherwise the role gets an error and SMART is not run.
-- `smartctl -n standby -H -A -d sat --json=c` on that disk. A sleeping disk is
-  skipped (not woken) and recorded as `"state": "standby"` with no error; the
-  last attribute 199 reading is kept as `crc_baseline` for the next run.
-- `findmnt -n -o UUID <path>` for each target.
+- `findmnt -n -o UUID,FSTYPE <path>` for each target. A target counts as mounted
+  only when its UUID matches. Its filesystem type and whether the host mount is
+  read-only (`statvfs`) are recorded too.
+- For the mergerfs archive pool, `findmnt -n -o FSTYPE <path>`, which must be
+  `fuse.mergerfs`.
+  - The pool's settings are read from its control file,
+    `<path>/.mergerfs`: `user.mergerfs.branches`, `category.create`,
+    `minfreespace` and `version`.
+  - These are the same `getxattr` calls `getfattr -n` makes. `getfattr` itself
+    is not installed on the DGX.
+  - The branch list must match the configured paths exactly, in order.
+  - Branches are stored by target role name, never by path.
+  - mergerfs has no UUID. findmnt's SOURCE for it is a shortened fsname, so it
+    is not used.
+- `lsblk -no PKNAME /dev/disk/by-uuid/<uuid>` for each SMART role, to find its
+  whole disk. The result must be exactly one `sdX` or `nvmeXnY`, recorded as
+  `device`; otherwise the role gets an error and SMART is not run.
+- `smartctl -n standby -H -A --json=c` on that disk, with `-d nvme` for NVMe
+  and `-d sat` otherwise.
+  - A sleeping disk is skipped (not woken) and recorded as
+    `"state": "standby"` with no error.
+  - For SATA disks: attributes 5/197/198/199 and temperature. The last
+    attribute 199 reading is kept as `crc_baseline` for the next run.
+  - For NVMe: `percentage_used`, `media_errors` and `temperature`. The
+    dashboard warns when media errors are above 0 or wear reaches 80%.
 - `dmesg --since "24 hours ago"`, reduced to fixed-label counts (I/O errors,
   resets, ext4 errors) and the kernel device names (`sdd`, `sda1`,
   `nvme0n1p2`, …) on matching lines. Raw dmesg lines are never stored.
-- `restic snapshots --json --no-lock` and `restic stats latest --json
-  --no-lock`, each with a 10-minute timeout. No other Restic command is run.
+- `restic snapshots --json --no-lock`, with a 10-minute timeout. No other
+  Restic command is run.
+  - Size and file count come from the newest snapshot's backup summary
+    (`total_bytes_processed`, `total_files_processed`).
+  - Without a summary, which restic older than 0.17 doesn't write, `stats` is
+    `null` with no error.
 
 The whole service run is capped at 30 minutes. The atomically written JSON
-(`root:root 0644`) contains bounded SMART values and power state, mount UUIDs and match
-booleans, redacted Restic snapshot metadata and stats, and the kernel counts.
+(`root:root 0644`) contains:
+- bounded SMART values and power state
+- mount UUIDs, types and read-only flags
+- the pool's branch roles and settings
+- redacted Restic snapshot metadata and latest-snapshot stats
+- the kernel counts
+
+Read-only disks (the two 2 TB archive members) never raise a capacity warning:
+they are full by design.

@@ -18,6 +18,8 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from control_center.api.storage_telemetry import (
     STALE_AFTER_SECONDS,
+    HostSnapshot,
+    StorageTarget,
     load_targets,
     read_host_snapshot,
     snapshot_age_seconds,
@@ -57,6 +59,13 @@ class DeviceVolume(BaseModel):
     transport_topology: str | None = None
     smart_status: Literal["AVAILABLE", "UNAVAILABLE", "UNKNOWN"] = "UNKNOWN"
     power_state: Literal["ACTIVE", "STANDBY"] | None = None
+    smart_passed: bool | None = None
+    smart_attributes: dict[str, int] = {}
+    temperature_celsius: int | None = None
+    nvme_percentage_used: int | None = None
+    nvme_media_errors: int | None = None
+    read_only: bool = False
+    pool_role: str | None = None
     health: HealthState = "UNKNOWN"
     health_detail: str = "Health telemetry unavailable"
     last_observed_error: str | None = None
@@ -69,13 +78,18 @@ class DeviceVolume(BaseModel):
 class ArchiveBranch(BaseModel):
     mount_point: str
     role: str
+    label: str | None = None
     expected_mode: Literal["READ_ONLY", "READ_WRITE", "UNKNOWN"]
     observed_mode: Literal["READ_ONLY", "READ_WRITE", "UNKNOWN"]
     mount_status: Literal["MOUNTED", "MISSING", "UNKNOWN"]
     filesystem: str | None = None
     filesystem_uuid: str | None = None
     total_bytes: int | None = None
+    used_bytes: int | None = None
     available_bytes: int | None = None
+    utilization_percent: float | None = None
+    read_only: bool = False
+    health: HealthState = "UNKNOWN"
 
 
 class ArchiveTelemetry(BaseModel):
@@ -85,6 +99,10 @@ class ArchiveTelemetry(BaseModel):
     used_bytes: int | None = None
     available_bytes: int | None = None
     utilization_percent: float | None = None
+    pool_detail: str | None = None
+    mergerfs_version: str | None = None
+    # mergerfs settings the collector could not read, by name ("create policy").
+    unreadable_settings: list[str] = []
     branches: list[ArchiveBranch]
     create_policy: str | None = None
     min_free_bytes: int | None = None
@@ -115,6 +133,8 @@ class BackupTelemetry(BaseModel):
     schedules: list[str]
     retention_status: Literal["AVAILABLE", "MISSING", "UNKNOWN"]
     retention_summary: str | None = None
+    latest_snapshot_size_bytes: int | None = None
+    latest_snapshot_file_count: int | None = None
     restore_verification: GateState
     observed_at: str
     detail: str
@@ -196,12 +216,20 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _device_id(path: str) -> int:
+    return os.stat(path).st_dev
+
+
+def _filesystem_stats(path: str) -> os.statvfs_result:
+    return os.statvfs(path)
+
+
 def _capacity(mount_point: str) -> tuple[int | None, int | None, int | None, float | None]:
     try:
         # A missing bind leaves an empty directory on the container's own root.
-        if os.stat(mount_point).st_dev == os.stat("/").st_dev:
+        if _device_id(mount_point) == _device_id("/"):
             return None, None, None, None
-        statvfs = os.statvfs(mount_point)
+        statvfs = _filesystem_stats(mount_point)
         total = statvfs.f_blocks * statvfs.f_frsize
         available = statvfs.f_bavail * statvfs.f_frsize
         used = max(0, total - statvfs.f_bfree * statvfs.f_frsize)
@@ -226,6 +254,81 @@ def _archive_data(devices: list[DeviceVolume], fstab: dict[str, dict[str, object
         dependency_assessment="NOT_VERIFIED", configured_source="control_center.yaml",
         dependency_note="Archive is configured as a single storage target.",
         runtime_policy_status="NOT_VERIFIED",
+    )
+
+
+def _no_pool() -> ArchiveTelemetry:
+    return ArchiveTelemetry(
+        pool_mount_point="Not configured", pool_status="UNKNOWN", branches=[], create_policy=None,
+        min_free_bytes=None, min_free_policy_status="UNKNOWN", dependencies=[],
+        dependency_assessment="NOT_VERIFIED", configured_source="control_center.yaml",
+        dependency_note="No mergerfs archive pool is configured.", runtime_policy_status="NOT_VERIFIED",
+    )
+
+
+SETTING_NAMES = {"branches": "branches", "create_policy": "create policy",
+                 "min_free_bytes": "minimum free space", "version": "mergerfs version"}
+
+
+def _pool_telemetry(pool: StorageTarget, host_snapshot: HostSnapshot | None,
+                    devices: list[DeviceVolume]) -> ArchiveTelemetry:
+    """A mergerfs pool is verified by type and its exact, ordered branch list; it has no UUID.
+
+    The snapshot names branches by target role, never by path.
+    """
+    record = host_snapshot.mounts.get(pool.role) if host_snapshot else None
+    record = record if isinstance(record, dict) else {}
+    by_path = {device.mount_point: device for device in devices}
+    expected_roles = [by_path[path].role if path in by_path else None for path in pool.branches]
+    observed = [item for item in record.get("branches", []) if isinstance(item, dict)] \
+        if isinstance(record.get("branches"), list) else []
+    observed_roles = [item.get("role") for item in observed]
+    observed_modes = {item.get("role"): item.get("mode") for item in observed}
+    verified = (record.get("mounted") is True and record.get("fstype") == "fuse.mergerfs"
+                and None not in expected_roles and observed_roles == expected_roles)
+    total, used, available, percent = _capacity(str(pool.collector_path)) if verified else (None, None, None, None)
+    mounted = verified and total is not None
+    if mounted:
+        detail = None
+    elif host_snapshot is None:
+        detail = "No data: host snapshot is unavailable"
+    elif not record or record.get("fstype") is None:
+        detail = "Not mounted"
+    elif record.get("fstype") != "fuse.mergerfs":
+        detail = "Not mounted: not a mergerfs filesystem"
+    elif observed_roles != expected_roles or None in expected_roles:
+        detail = "Not mounted: mergerfs branches differ from the configuration"
+    else:
+        detail = "Not mounted"
+    branches = []
+    for path in pool.branches:
+        device = by_path.get(path)
+        mode = observed_modes.get(device.role) if device else None
+        branches.append(ArchiveBranch(
+            mount_point=path, role=device.role if device else path, label=device.label if device else None,
+            expected_mode="READ_ONLY" if device and device.read_only else "READ_WRITE" if device else "UNKNOWN",
+            observed_mode="READ_ONLY" if mode == "RO" else "READ_WRITE" if mode == "RW" else "UNKNOWN",
+            mount_status=device.mount_status if device else "UNKNOWN",
+            filesystem=device.filesystem if device else None, filesystem_uuid=device.filesystem_uuid if device else None,
+            total_bytes=device.total_bytes if device else None, used_bytes=device.used_bytes if device else None,
+            available_bytes=device.available_bytes if device else None,
+            utilization_percent=device.utilization_percent if device else None,
+            read_only=bool(device and device.read_only), health=device.health if device else "UNKNOWN",
+        ))
+    text = lambda key: record.get(key)[:32] if mounted and isinstance(record.get(key), str) else None  # noqa: E731
+    create_policy, version = text("create_policy"), text("version")
+    min_free = record.get("min_free_bytes") if mounted and isinstance(record.get("min_free_bytes"), int) else None
+    unreadable = record.get("unreadable") if mounted and isinstance(record.get("unreadable"), list) else []
+    return ArchiveTelemetry(
+        pool_mount_point=pool.host_path, pool_status="MOUNTED" if mounted else "MISSING" if host_snapshot else "UNKNOWN",
+        total_bytes=total, used_bytes=used, available_bytes=available, utilization_percent=percent,
+        pool_detail=detail, mergerfs_version=version,
+        unreadable_settings=[SETTING_NAMES[key] for key in unreadable if key in SETTING_NAMES],
+        branches=branches, create_policy=create_policy, min_free_bytes=min_free,
+        min_free_policy_status="CONFIGURED" if min_free is not None else "UNKNOWN",
+        dependencies=[], dependency_assessment="CONFIGURED" if mounted else "NOT_VERIFIED",
+        configured_source="control_center.yaml", dependency_note="",
+        runtime_policy_status="VERIFIED" if create_policy else "NOT_VERIFIED",
     )
 
 
@@ -364,36 +467,57 @@ def _collect() -> StorageOverview:
     devices: list[DeviceVolume] = []
     alerts: list[HealthAlert] = []
 
+    pool_targets = [target for target in targets if target.kind == "mergerfs"]
+    pool_member_role = {
+        branch: pool.role for pool in pool_targets for branch in pool.branches
+    }
     for target in targets:
+        if target.kind == "mergerfs":
+            continue
         if not target.mount:
             devices.append(DeviceVolume(
                 role=target.role, label=target.name, mount_point=target.host_path,
                 mount_status="MISSING", mount_mode="UNKNOWN", health="UNKNOWN",
                 health_detail="Not mounted", smart_status="UNKNOWN",
-                operational_state=target.state,
+                operational_state=target.state, read_only=target.read_only,
                 note="This target is being replaced." if target.state == "being_replaced" else None,
             ))
             continue
         mount_record = host_snapshot.mounts.get(target.role) if host_snapshot else None
+        reported_uuid = mount_record.get("uuid") if isinstance(mount_record, dict) else None
         verified_mount = (
             isinstance(mount_record, dict) and mount_record.get("mounted") is True
-            and mount_record.get("uuid") == target.expected_filesystem_uuid
+            and isinstance(reported_uuid, str) and target.expected_filesystem_uuid is not None
+            and reported_uuid.lower() == target.expected_filesystem_uuid.lower()
         )
         total, used, available, percent = (
             _capacity(str(target.collector_path)) if verified_mount else (None, None, None, None)
         )
         mounted = verified_mount and total is not None
+        host_read_only = mount_record.get("read_only") if mounted and isinstance(mount_record, dict) else None
+        fstype = mount_record.get("fstype") if mounted and isinstance(mount_record.get("fstype"), str) else None
         smart = smart_by_role.get(target.role)
-        standby = bool(smart and not smart.get("error") and smart.get("state") == "standby")
-        attributes = smart.get("attributes", {}) if smart else {}
-        failing = [number for number in ("5", "197", "198") if int(attributes.get(number, 0) or 0) > 0]
-        crc_rise = bool(smart and smart.get("udma_crc_error_count_rise"))
+        smart_ok = bool(smart and not smart.get("error"))
+        standby = smart_ok and smart.get("state") == "standby"
+        attributes = smart.get("attributes", {}) if smart_ok and isinstance(smart.get("attributes"), dict) else {}
+        attributes = {key: value for key, value in attributes.items()
+                      if key in {"5", "197", "198", "199"} and isinstance(value, int) and not isinstance(value, bool)}
+        nvme = smart.get("nvme") if smart_ok and isinstance(smart.get("nvme"), dict) else {}
+        nvme_used = nvme.get("percentage_used") if isinstance(nvme.get("percentage_used"), int) else None
+        nvme_errors = nvme.get("media_errors") if isinstance(nvme.get("media_errors"), int) else None
+        temperature = smart.get("temperature") if smart_ok and isinstance(smart.get("temperature"), int) else None
+        failing = [number for number in ("5", "197", "198") if attributes.get(number, 0) > 0]
+        crc_rise = bool(smart_ok and smart.get("udma_crc_error_count_rise"))
         health: HealthState = "HEALTHY" if mounted else "UNKNOWN"
         detail = "Capacity collected with statvfs from the read-only bind mount" if mounted else (
             "Not mounted" if host_snapshot and (mount_record is None or not verified_mount or total is None)
             else f"No data: {snapshot_error or 'mount verification is missing'}"
         )
-        if percent is not None and percent >= 95:
+        if target.read_only:
+            # Read-only disks fill up by design; their utilization is never a warning.
+            if mounted:
+                detail = "Read-only; capacity is shown without warnings"
+        elif percent is not None and percent >= 95:
             health, detail = "CRITICAL", "Filesystem utilization is at least 95%"
         elif percent is not None and percent >= 85:
             health, detail = "WARNING", "Filesystem utilization is at least 85%"
@@ -403,7 +527,7 @@ def _collect() -> StorageOverview:
             # SMART was skipped so the disk is not woken; not a fault.
             if health == "HEALTHY":
                 health, detail = "UNKNOWN", "Standby: SMART skipped so the disk is not woken"
-        elif not smart or smart.get("error"):
+        elif not smart_ok:
             if health == "HEALTHY":
                 health = "UNKNOWN"
                 smart_error = str(smart.get("error"))[:200] if smart and smart.get("error") else None
@@ -411,7 +535,11 @@ def _collect() -> StorageOverview:
         if failing:
             health = "WARNING"
             detail = f"SMART attributes {', '.join(failing)} report non-zero failing values"
-        elif smart and smart.get("passed") is False:
+        elif nvme_errors is not None and nvme_errors > 0:
+            health, detail = "WARNING", f"NVMe media errors: {nvme_errors:,}"
+        elif nvme_used is not None and nvme_used >= 80:
+            health, detail = "WARNING", f"NVMe endurance used: {nvme_used}%"
+        elif smart_ok and smart.get("passed") is False:
             health, detail = "WARNING", "SMART overall-health assessment failed"
         note = "This target is being replaced." if target.state == "being_replaced" else None
         if crc_rise:
@@ -419,10 +547,17 @@ def _collect() -> StorageOverview:
             note = f"{note} {cable_note}".strip() if note else cable_note
         device = DeviceVolume(
             role=target.role, label=target.name, mount_point=target.host_path,
-            mount_status="MOUNTED" if mounted else "MISSING", mount_mode="READ_ONLY" if mounted else "UNKNOWN",
+            device_identity=reported_uuid if mounted else None,
+            filesystem_uuid=reported_uuid if mounted else None, filesystem=fstype,
+            mount_status="MOUNTED" if mounted else "MISSING",
+            mount_mode="READ_ONLY" if host_read_only is True else "READ_WRITE" if host_read_only is False else "UNKNOWN",
             total_bytes=total, used_bytes=used, available_bytes=available, utilization_percent=percent,
-            smart_status="UNKNOWN" if standby else "AVAILABLE" if smart and not smart.get("error") else "UNAVAILABLE",
-            power_state="STANDBY" if standby else "ACTIVE" if smart and smart.get("state") == "active" else None,
+            smart_status="UNKNOWN" if standby else "AVAILABLE" if smart_ok else "UNAVAILABLE",
+            power_state="STANDBY" if standby else "ACTIVE" if smart_ok and smart.get("state") == "active" else None,
+            smart_passed=smart.get("passed") if smart_ok and isinstance(smart.get("passed"), bool) else None,
+            smart_attributes=attributes, temperature_celsius=temperature,
+            nvme_percentage_used=nvme_used, nvme_media_errors=nvme_errors,
+            read_only=target.read_only, pool_role=pool_member_role.get(target.host_path),
             health=health, health_detail=detail, last_successful_observation=observed_at if mounted else None,
             last_observed_error=None if mounted else detail, operational_state=target.state, note=note,
         )
@@ -434,6 +569,8 @@ def _collect() -> StorageOverview:
                 evidence=detail, suggested_action="Review the filesystem or disk health; no automatic action was taken.",
             ))
 
+    archive = _pool_telemetry(pool_targets[0], host_snapshot, devices) if pool_targets else _no_pool()
+
     restic = host_snapshot.restic if host_snapshot else {}
     snapshot_values = restic.get("snapshots", []) if isinstance(restic, dict) else []
     raw_snapshots = snapshot_values if isinstance(snapshot_values, list) else []
@@ -441,15 +578,18 @@ def _collect() -> StorageOverview:
     restic_error = restic.get("error") if isinstance(restic, dict) else None
     repository_available = host_snapshot is not None and not restic_error and isinstance(snapshot_values, list)
     stats = restic.get("stats") if isinstance(restic, dict) and isinstance(restic.get("stats"), dict) else {}
-    stats_summary = ", ".join(f"{key.replace('_', ' ')}: {value}" for key, value in stats.items()) or None
+    latest_size = stats.get("total_size") if isinstance(stats.get("total_size"), int) else None
+    latest_files = stats.get("total_file_count") if isinstance(stats.get("total_file_count"), int) else None
     backups = BackupTelemetry(
         repository_status="AVAILABLE" if repository_available else "UNAVAILABLE",
         repository_id=restic.get("repository_id") if isinstance(restic, dict) else None,
         snapshot_count=len(raw_snapshots) if repository_available else None,
         snapshots_truncated=truncated, snapshots=snapshots, latest_snapshot_at=latest,
         schedule_status="UNKNOWN", schedules=[],
-        retention_status="UNKNOWN", retention_summary=stats_summary, restore_verification="NOT_VERIFIED",
-        observed_at=observed_at,
+        retention_status="UNKNOWN", retention_summary=None,
+        latest_snapshot_size_bytes=latest_size if repository_available else None,
+        latest_snapshot_file_count=latest_files if repository_available else None,
+        restore_verification="NOT_VERIFIED", observed_at=observed_at,
         detail="Restic inventory read from the host snapshot" if repository_available else f"No data: {restic_error or snapshot_error}",
     )
     if snapshots and max(item.age_seconds or 0 for item in snapshots) >= 0:
@@ -473,18 +613,6 @@ def _collect() -> StorageOverview:
             suggested_action="Review the host kernel log and affected disk or filesystem.",
         ))
 
-    archive_device = next((item for item in devices if item.role == "archive"), None)
-    archive = ArchiveTelemetry(
-        pool_mount_point=archive_device.mount_point if archive_device else "Not configured",
-        pool_status=archive_device.mount_status if archive_device else "UNKNOWN",
-        total_bytes=archive_device.total_bytes if archive_device else None,
-        used_bytes=archive_device.used_bytes if archive_device else None,
-        available_bytes=archive_device.available_bytes if archive_device else None,
-        utilization_percent=archive_device.utilization_percent if archive_device else None,
-        branches=[], create_policy=None, min_free_bytes=None, min_free_policy_status="UNKNOWN",
-        dependencies=[], dependency_assessment="NOT_VERIFIED", configured_source="control_center.yaml",
-        dependency_note="Archive is configured as a single storage target.", runtime_policy_status="NOT_VERIFIED",
-    )
     snapshot_detail = "Host snapshot is current" if host_snapshot and not stale else "Host snapshot is older than 2 hours" if stale else f"No data: {snapshot_error}"
     sources = {
         "mounts": SourceState(status="AVAILABLE" if targets else "UNAVAILABLE", observed_at=observed_at,
@@ -520,9 +648,9 @@ def get_snapshot(force_refresh: bool = False) -> StorageOverview:
                 role=target.role, label=target.name, mount_point=target.host_path,
                 mount_status="UNKNOWN", mount_mode="UNKNOWN", health="UNKNOWN",
                 health_detail="Collector failed before this source could be observed",
-                operational_state=target.state,
-            ) for target in configured_targets]
-            archive_target = next((target for target in configured_targets if target.role == "archive"), None)
+                operational_state=target.state, read_only=target.read_only,
+            ) for target in configured_targets if target.kind != "mergerfs"]
+            archive_target = next((target for target in configured_targets if target.kind == "mergerfs"), None)
             unavailable_archive = ArchiveTelemetry(
                 pool_mount_point=archive_target.host_path if archive_target else "Not configured", pool_status="UNKNOWN", branches=[],
                 create_policy=None, min_free_bytes=None, min_free_policy_status="UNKNOWN",

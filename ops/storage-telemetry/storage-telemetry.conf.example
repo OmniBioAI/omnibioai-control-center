@@ -1,8 +1,12 @@
-# These role|host-path|expected-UUID mappings must match control_center.yaml.
-STORAGE_TELEMETRY_TARGETS="root|/|9f3cd4b6-f34e-435e-9fcf-ed7861f7cf99 backup|/mnt/omnibioai-backup20tb|9d872bab-a481-4fca-8ad8-8031d78c0dbc archive|/mnt/omnibioai-archive22tb|6a805bb7-2513-435f-9cd4-b9970a0e4fc4"
-# role:filesystem-UUID for SAT SMART queries, limited to the two active external
-# disks. Each UUID is resolved to its whole disk at run time with
-# lsblk -no PKNAME; never put a /dev/sdX name here. Do not add primary.
-STORAGE_TELEMETRY_DISKS="backup:9d872bab-a481-4fca-8ad8-8031d78c0dbc archive:6a805bb7-2513-435f-9cd4-b9970a0e4fc4"
+# role|host-path|expected-UUID, matching control_center.yaml. Checked with
+# findmnt -n -o UUID,FSTYPE <path>. exFAT UUIDs are the short XXXX-XXXX form.
+STORAGE_TELEMETRY_TARGETS="root|/|9f3cd4b6-f34e-435e-9fcf-ed7861f7cf99 backup|/mnt/omnibioai-backup20tb|9d872bab-a481-4fca-8ad8-8031d78c0dbc archive|/mnt/omnibioai-archive22tb|6a805bb7-2513-435f-9cd4-b9970a0e4fc4 data2tb|/media/manish/omnibioai-data|39b9324a-640e-4d64-9980-b1f1c9d5578b archive2tb-b|/mnt/omnibioai-archive2tb-b|6A7F-D1A6"
+# role|mountpoint|branch:branch:branch for mergerfs pools. mergerfs has no UUID:
+# the pool is verified as fuse.mergerfs with exactly these branches, in order.
+STORAGE_TELEMETRY_POOLS="archive-pool|/mnt/omnibioai-archive|/mnt/omnibioai-archive22tb:/media/manish/omnibioai-data:/mnt/omnibioai-archive2tb-b"
+# role:filesystem-UUID for SMART. Each UUID is resolved to its whole disk at run
+# time with lsblk -no PKNAME (root -> nvme0n1, queried with -d nvme; the others
+# with -d sat). Never put a /dev name here. Do not add primary.
+STORAGE_TELEMETRY_DISKS="root:9f3cd4b6-f34e-435e-9fcf-ed7861f7cf99 backup:9d872bab-a481-4fca-8ad8-8031d78c0dbc archive:6a805bb7-2513-435f-9cd4-b9970a0e4fc4 data2tb:39b9324a-640e-4d64-9980-b1f1c9d5578b archive2tb-b:6A7F-D1A6"
 RESTIC_REPOSITORY=/mnt/omnibioai-backup20tb/restic
 RESTIC_PASSWORD_FILE=/etc/omnibioai/restic-password

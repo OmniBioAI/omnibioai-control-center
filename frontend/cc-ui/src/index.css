@@ -286,3 +286,21 @@ select option { background: var(--surface); color: var(--text); }
   --login-error: #991b1b;
 }
 :root[data-theme='light'] .admin-password-toggle { color: var(--login-link); }
+
+/* Storage page tabs: same look as Studio's Billing tabs. On narrow screens the
+   bar scrolls sideways instead of wrapping. */
+.storage-tabs {
+  display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto;
+  border-bottom: 1px solid var(--border); margin-bottom: 18px;
+  scrollbar-width: thin; -webkit-overflow-scrolling: touch;
+}
+.storage-tabs button {
+  flex: 0 0 auto; min-height: 44px; padding: 10px 16px; white-space: nowrap;
+  border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500;
+  cursor: pointer; transition: color 0.15s ease, border-color 0.15s ease;
+}
+.storage-tabs button:hover { color: var(--text); border-bottom-color: var(--border); }
+.storage-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; color: var(--text); }
+.storage-tabs button[aria-selected='true'] { color: var(--text); font-weight: 700; border-bottom-color: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .storage-tabs button { transition: none; } }
