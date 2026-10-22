@@ -117,10 +117,15 @@ Check the snapshot:
 - `smart`:
   - `root` is `/dev/nvme0n1`, with `"type": "nvme"` and `nvme.percentage_used`,
     `media_errors` and `temperature`.
-  - backup, archive, data2tb and archive2tb-b are `/dev/sdd`, `/dev/sda`,
-    `/dev/sdg` and `/dev/sdh`, with `"type": "sat"`.
-  - Every entry has `"error": null`, and `state` is `active` or `standby`
-    (asleep: SMART was skipped so the disk isn't woken).
+  - backup and archive are `/dev/sdd` and `/dev/sda`, with `"type": "sat"`.
+  - data2tb and archive2tb-b are `/dev/sdg` and `/dev/sdh`. Their enclosures
+    reject SAT, so expect `"smart_mode": "scsi_health_only"`,
+    `"power_state": "unknown"`, `passed` and a `checked_at` time.
+  - On later runs within 6 hours, those two entries carry `"reused": true`
+    and the same `checked_at`, so the disks aren't queried or woken.
+  - Every entry has `"error": null`. `state` is `active` or `standby`
+    (asleep: SMART was skipped so the disk isn't woken), or `null` for the
+    two 2 TB disks, whose power state can't be read.
 - `kernel`: only `counts`, `devices`, `window_hours` and `error`, with no raw
   log lines.
 - `restic`: `"error": null`.

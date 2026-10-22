@@ -49,8 +49,10 @@ function date(value?: string | null): string {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString()
 }
 
+const BASIC_HEALTH = 'Health OK (basic, enclosure limits SMART)'
+
 const WORDS: Record<string, string> = {
-  READ_ONLY: 'Read-only', READ_WRITE: 'Read-write', MISSING: 'Not mounted',
+  READ_ONLY: 'Read-only', READ_WRITE: 'Read-write', MISSING: 'Not mounted', 'basic-health': BASIC_HEALTH,
 }
 
 // API enum values as plain words: READ_ONLY -> "Read-only", NOT_VERIFIED -> "Not verified".
@@ -78,15 +80,22 @@ function validOverview(value: unknown): value is StorageOverview {
     && Array.isArray(data.alerts) && Array.isArray(data.readiness_gates) && !!data.sources
 }
 
+// Enclosures that only pass a SCSI health status: a passed check is neutral, not a full SMART "Healthy".
+function basicHealthOk(device: StorageDevice): boolean {
+  return device.smart_mode === 'scsi_health_only' && device.smart_passed === true && device.health === 'HEALTHY'
+}
+
 // A disk being replaced is a plan, not a fault; a sleeping disk is skipped, not faulty.
 function deviceStatus(device: StorageDevice): string {
   if (device.operational_state === 'being_replaced') return 'replacing'
+  if (basicHealthOk(device)) return 'basic-health'
   if (device.power_state === 'STANDBY' && device.health === 'UNKNOWN') return 'standby'
   return device.health !== 'UNKNOWN' ? device.health : device.mount_status
 }
 
 function healthStatus(device: StorageDevice): string {
   if (device.operational_state === 'being_replaced') return 'replacing'
+  if (basicHealthOk(device)) return 'basic-health'
   return device.power_state === 'STANDBY' && device.health === 'UNKNOWN' ? 'standby' : device.health
 }
 
@@ -155,7 +164,8 @@ function PoolCard({ pool, members }: { pool: StorageOverview['archive_pool']; me
 function smartLines(device: StorageDevice): string[] {
   if (device.power_state === 'STANDBY') return ['Standby: SMART skipped so the disk is not woken']
   const lines: string[] = []
-  if (device.smart_passed != null) lines.push(device.smart_passed ? 'SMART passed' : 'SMART failed')
+  if (device.smart_mode === 'scsi_health_only') lines.push(device.smart_passed ? BASIC_HEALTH : device.smart_passed === false ? 'Basic health check failed' : '')
+  else if (device.smart_passed != null) lines.push(device.smart_passed ? 'SMART passed' : 'SMART failed')
   const attributes = Object.entries(device.smart_attributes ?? {})
   if (attributes.length) lines.push(attributes.map(([id, value]) => `${id}: ${num(value)}`).join(' · '))
   const nvme = [
@@ -164,7 +174,9 @@ function smartLines(device: StorageDevice): string[] {
   ].filter(Boolean)
   if (nvme.length) lines.push(nvme.join(' · '))
   if (device.temperature_celsius != null) lines.push(`${device.temperature_celsius} °C`)
-  return lines
+  // Disks whose power state can't be read are checked at most every 6 hours so they aren't woken.
+  if (device.power_state === 'UNKNOWN' && device.smart_checked_at) lines.push(`Checked ${date(device.smart_checked_at)} · every 6 hours`)
+  return lines.filter(Boolean)
 }
 
 type DeviceRow = { kind: 'device'; device: StorageDevice; member: boolean } | { kind: 'pool'; pool: StorageOverview['archive_pool'] }
@@ -194,7 +206,7 @@ function DeviceTable({ devices, pool }: { devices: StorageDevice[]; pool: Storag
     { key: 'health', header: 'Health', render: row => {
       if (row.kind === 'pool') return <div style={muted}>{row.pool.pool_detail}</div>
       const device = row.device
-      return <><Badge status={healthStatus(device)} /><div style={muted}>{device.health_detail}</div>{smartLines(device).map(line => <div key={line} style={muted}>{line}</div>)}{device.transport && <div style={{ ...muted, fontSize: 10 }}>Transport: {device.transport}{device.transport_topology ? ` · ${device.transport_topology}` : ''}</div>}{device.last_observed_error && device.last_observed_error !== device.health_detail && <div style={{ ...muted, fontSize: 10 }}>Last observed error: {device.last_observed_error}</div>}</>
+      return <><Badge status={healthStatus(device)} /><div style={muted}>{device.health_detail}</div>{smartLines(device).filter(line => line !== words(healthStatus(device))).map(line => <div key={line} style={muted}>{line}</div>)}{device.transport && <div style={{ ...muted, fontSize: 10 }}>Transport: {device.transport}{device.transport_topology ? ` · ${device.transport_topology}` : ''}</div>}{device.last_observed_error && device.last_observed_error !== device.health_detail && <div style={{ ...muted, fontSize: 10 }}>Last observed error: {device.last_observed_error}</div>}</>
     } },
   ]} /></div>
 }

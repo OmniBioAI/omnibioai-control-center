@@ -8,7 +8,7 @@ import re
 import stat
 import subprocess
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 OUTPUT = Path("/var/lib/omnibioai/storage-telemetry.json")
@@ -25,6 +25,15 @@ MERGERFS_CONTROL = ".mergerfs"
 ROLE = re.compile(r"[a-z][a-z0-9_-]{0,31}")
 WHOLE_DISK = re.compile(r"sd[a-z]{1,2}|nvme\d+n\d+")
 STANDBY_MESSAGE = re.compile(r"Device is in (STANDBY|SLEEP)", re.IGNORECASE)
+# smartctl 7.4 messages when a USB bridge cannot pass ATA commands through SAT.
+SAT_UNSUPPORTED = re.compile(r"Read Device Identity failed|A mandatory SMART command failed")
+# ...and when it rejects the power-mode check (ILLEGAL REQUEST, sense 05/24).
+POWER_CHECK_REJECTED = re.compile(
+    r"CHECK POWER MODE(?: not implemented|: incomplete response| returned unknown value)"
+    r"|Illegal Request|unsupported field in scsi command|\b05/24\b", re.IGNORECASE)
+# A disk whose power state can't be read could be woken by any query, so its
+# health is checked at most this often; the last result is kept in between.
+UNKNOWN_POWER_INTERVAL = timedelta(hours=6)
 DEVICE_NAME = re.compile(r"\b(sd[a-z]{1,2}\d*|nvme\d+(?:n\d+(?:p\d+)?)?|dm-\d+)\b")
 MAX_KERNEL_DEVICES = 16
 
@@ -45,21 +54,63 @@ def run(argv: list[str], env: dict[str, str] | None = None, timeout: int = 120,
         return None, "command could not be completed"
 
 
-def previous_crc_counts() -> dict[str, int]:
-    """Last known attribute 199 per role; roles without a reading have no baseline."""
+def previous_smart_records() -> dict[str, dict[str, object]]:
+    """The last snapshot's SMART record per role."""
     try:
         prior = json.loads(OUTPUT.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
+    items = prior.get("smart") if isinstance(prior, dict) else None
+    return {str(item["role"]): item for item in items or [] if isinstance(item, dict) and item.get("role")} \
+        if isinstance(items, list) else {}
+
+
+def previous_crc_counts(records: dict[str, dict[str, object]] | None = None) -> dict[str, int]:
+    """Last known attribute 199 per role; roles without a reading have no baseline."""
     baselines = {}
-    for item in prior.get("smart", []) if isinstance(prior, dict) and isinstance(prior.get("smart"), list) else []:
-        if not isinstance(item, dict) or not item.get("role"):
-            continue
+    for role, item in (previous_smart_records() if records is None else records).items():
         attributes = item.get("attributes") if isinstance(item.get("attributes"), dict) else {}
         value = attributes.get("199", item.get("crc_baseline"))
         if isinstance(value, int) and not isinstance(value, bool):
-            baselines[str(item["role"])] = value
+            baselines[role] = value
     return baselines
+
+
+def recently_checked_unknown_power(last: dict[str, object] | None, now: datetime) -> bool:
+    if not last or last.get("power_state") != "unknown" or not isinstance(last.get("checked_at"), str):
+        return False
+    try:
+        checked = datetime.fromisoformat(str(last["checked_at"]))
+    except ValueError:
+        return False
+    if checked.tzinfo is None:
+        return False
+    return timedelta(0) <= now - checked < UNKNOWN_POWER_INTERVAL
+
+
+def smartctl_messages(raw: object) -> list[str]:
+    messages = raw.get("smartctl", {}).get("messages") if isinstance(raw, dict) and isinstance(raw.get("smartctl"), dict) else None
+    return [str(item.get("string", "")) for item in messages if isinstance(item, dict)] if isinstance(messages, list) else []
+
+
+def scsi_health(record: dict[str, object], device: str) -> dict[str, object]:
+    """Health status only, for a bridge that rejects SAT pass-through. Never -T permissive."""
+    text, error = run(["smartctl", "-H", "-d", "scsi", "--json=c", device], timeout=45,
+                      accepted_statuses=set(range(256)))
+    record.update({"smart_mode": "scsi_health_only", "power_state": "unknown", "state": None,
+                   "type": "scsi", "attributes": {}, "error": error})
+    if text is None:
+        record["error"] = error or "smartctl -d scsi returned no output"
+        return record
+    try:
+        smart_status = json.loads(text).get("smart_status")
+    except (AttributeError, ValueError):
+        smart_status = None
+    if isinstance(smart_status, dict) and isinstance(smart_status.get("passed"), bool):
+        record.update({"passed": smart_status["passed"], "error": None})
+    else:
+        record["error"] = "smartctl -d scsi returned no health status"
+    return record
 
 
 def resolve_disk(uuid: str) -> tuple[str | None, str | None]:
@@ -73,7 +124,9 @@ def resolve_disk(uuid: str) -> tuple[str | None, str | None]:
     return f"/dev/{lines[0].strip()}", None
 
 
-def smart_record(role: str, uuid: str, previous: dict[str, int]) -> dict[str, object]:
+def smart_record(role: str, uuid: str, previous: dict[str, int], last: dict[str, object] | None = None,
+                 now: datetime | None = None) -> dict[str, object]:
+    moment = now or datetime.now(timezone.utc)
     device, error = resolve_disk(uuid)
     record: dict[str, object] = {"role": role, "device": device, "state": None, "passed": None,
                                  "attributes": {}, "error": error}
@@ -82,6 +135,10 @@ def smart_record(role: str, uuid: str, previous: dict[str, int]) -> dict[str, ob
         record["crc_baseline"] = previous[role]
     if device is None:
         return record
+    if recently_checked_unknown_power(last, moment):
+        kept = {**(last or {}), "device": device, "reused": True}
+        return kept
+    record["checked_at"] = moment.isoformat()
     # -n standby skips (and does not wake) a sleeping disk. smartctl uses an
     # eight-bit status bitmask; its JSON stays useful for every normal result.
     nvme = device.startswith("/dev/nvme")
@@ -92,11 +149,15 @@ def smart_record(role: str, uuid: str, previous: dict[str, int]) -> dict[str, ob
         return record
     try:
         raw = json.loads(text)
-        messages = raw.get("smartctl", {}).get("messages")
-        if isinstance(messages, list) and any(
-                isinstance(item, dict) and STANDBY_MESSAGE.search(str(item.get("string", ""))) for item in messages):
+        messages = smartctl_messages(raw)
+        if not nvme and any(SAT_UNSUPPORTED.search(message) for message in messages):
+            return scsi_health(record, device)
+        power_rejected = any(POWER_CHECK_REJECTED.search(message) for message in messages)
+        if not power_rejected and any(STANDBY_MESSAGE.search(message) for message in messages):
             record.update({"state": "standby", "error": None})
             return record
+        if power_rejected:
+            record["power_state"] = "unknown"
         smart_status = raw.get("smart_status")
         if not isinstance(smart_status, dict) or not isinstance(smart_status.get("passed"), bool):
             raise ValueError("SMART health status missing")
@@ -105,7 +166,7 @@ def smart_record(role: str, uuid: str, previous: dict[str, int]) -> dict[str, ob
             if not isinstance(log, dict):
                 raise ValueError("NVMe health log missing")
             record.update({
-                "state": "active", "type": "nvme", "passed": smart_status["passed"],
+                "state": "active", "smart_mode": "full", "type": "nvme", "passed": smart_status["passed"],
                 "nvme": {key: int(log[key]) for key in ("percentage_used", "media_errors", "temperature")},
                 "temperature": int(log["temperature"]),
                 "error": None,
@@ -121,7 +182,8 @@ def smart_record(role: str, uuid: str, previous: dict[str, int]) -> dict[str, ob
         }
         temperature = raw.get("temperature", {}).get("current") if isinstance(raw.get("temperature"), dict) else None
         record.update({
-            "state": "active",
+            "state": None if power_rejected else "active",
+            "smart_mode": "full",
             "type": "sat",
             "passed": smart_status["passed"],
             "attributes": attributes,
@@ -302,11 +364,12 @@ def latest_summary(snapshots: list[dict]) -> dict[str, object] | None:
 def main() -> int:
     if os.geteuid() != 0:
         raise SystemExit("collector must run as root")
-    previous = previous_crc_counts()
+    last_records = previous_smart_records()
+    previous = previous_crc_counts(last_records)
     document = {
         "schema_version": 1,
         "observed_at": datetime.now(timezone.utc).isoformat(),
-        "smart": [smart_record(role, uuid, previous) for role, uuid in disk_list()],
+        "smart": [smart_record(role, uuid, previous, last_records.get(role)) for role, uuid in disk_list()],
         "mounts": {**mount_records(), **pool_records()},
         "kernel": kernel_summary(),
         "restic": restic_snapshot(),

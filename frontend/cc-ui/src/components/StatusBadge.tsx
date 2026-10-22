@@ -103,6 +103,8 @@ const KNOWN: Record<string, { bg: string; color: string }> = {
   // Storage: a planned disk replacement and a read-only disk are neutral facts, never faults.
   replacing: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
   'read-only': { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
+  // A passed health check from an enclosure that limits SMART: neutral, never green.
+  'basic-health': { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
 }
 
 export default function StatusBadge({ status, label }: Props) {

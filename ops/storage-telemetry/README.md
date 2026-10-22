@@ -53,6 +53,25 @@ What the collector runs, once an hour (`OnCalendar=hourly`):
     attribute 199 reading is kept as `crc_baseline` for the next run.
   - For NVMe: `percentage_used`, `media_errors` and `temperature`. The
     dashboard warns when media errors are above 0 or wear reaches 80%.
+  - **SCSI fallback:** some USB enclosures reject SAT pass-through. On this
+    host that's `sdg` and `sdh`, the two 2 TB disks. When smartctl reports
+    `Read Device Identity failed` or `A mandatory SMART command failed`, the
+    collector runs `smartctl -H -d scsi --json=c` instead.
+    - It records `"smart_mode": "scsi_health_only"`, with `passed` from the
+      SCSI health status and no attributes.
+    - It never uses `-T permissive`.
+  - **Unknown power state:** when the bridge rejects the power-mode check
+    (ILLEGAL REQUEST, sense 05/24, or `CHECK POWER MODE not implemented`), or
+    the SCSI fallback is used, the disk is recorded as
+    `"power_state": "unknown"`, never `standby`.
+    - Any query could wake such a disk, so it is checked at most once every 6
+      hours (`checked_at`).
+    - Runs in between keep the last record unchanged (`"reused": true`), and
+      resolving its UUID with `lsblk` doesn't wake it.
+    - With the hourly timer the check lands every 6–7 hours, because a run a
+      few seconds early waits for the next one.
+    - The dashboard shows a passed check as a neutral
+      "Health OK (basic, enclosure limits SMART)".
 - `dmesg --since "24 hours ago"`, reduced to fixed-label counts (I/O errors,
   resets, ext4 errors) and the kernel device names (`sdd`, `sda1`,
   `nvme0n1p2`, …) on matching lines. Raw dmesg lines are never stored.
