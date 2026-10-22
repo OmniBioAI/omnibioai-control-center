@@ -15,24 +15,120 @@ collector = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(collector)
 
 
-def test_mount_check_matches_configured_uuid_with_findmnt(monkeypatch):
-    monkeypatch.setenv("STORAGE_TELEMETRY_TARGETS", "backup|/mnt/backup|12345678-aaaa")
+def test_mount_check_matches_configured_uuid_with_findmnt(monkeypatch, tmp_path):
+    mountpoint = str(tmp_path)  # a real directory, so the read-only flag comes from a real statvfs
+    monkeypatch.setenv("STORAGE_TELEMETRY_TARGETS", f"backup|{mountpoint}|12345678-aaaa-bbbb-cccc-1234567890ab")
     calls = []
 
     def fake_run(argv, **kwargs):
         calls.append(argv)
-        return "12345678-aaaa\n", None
+        return "12345678-AAAA-bbbb-cccc-1234567890ab ext4\n", None
 
     monkeypatch.setattr(collector, "run", fake_run)
-    assert collector.mount_records() == {"backup": {"mounted": True, "uuid": "12345678-aaaa"}}
-    assert calls == [["findmnt", "-n", "-o", "UUID", "/mnt/backup"]]
+    assert collector.mount_records() == {"backup": {
+        "mounted": True, "uuid": "12345678-AAAA-bbbb-cccc-1234567890ab", "fstype": "ext4", "read_only": False}}
+    assert calls == [["findmnt", "-n", "-o", "UUID,FSTYPE", mountpoint]]
 
-    monkeypatch.setattr(collector, "run", lambda *_args, **_kwargs: ("other-uuid\n", None))
-    assert collector.mount_records() == {"backup": {"mounted": False, "uuid": "other-uuid"}}
+    monkeypatch.setattr(collector, "run", lambda *_args, **_kwargs: ("00000000-0000-0000-0000-000000000000 ext4\n", None))
+    assert collector.mount_records()["backup"] == {
+        "mounted": False, "uuid": "00000000-0000-0000-0000-000000000000", "fstype": "ext4", "read_only": None}
+
+    # A filesystem without a UUID (mergerfs, tmpfs) prints only its type.
+    monkeypatch.setattr(collector, "run", lambda *_args, **_kwargs: ("     fuse.mergerfs\n", None))
+    assert collector.mount_records()["backup"] == {"mounted": False, "uuid": None, "fstype": "fuse.mergerfs", "read_only": None}
 
     # findmnt exits 1 when the path is not a mountpoint.
     monkeypatch.setattr(collector, "run", lambda *_args, **_kwargs: (None, "command exited with status 1"))
-    assert collector.mount_records() == {"backup": {"mounted": False, "uuid": None}}
+    assert collector.mount_records()["backup"] == {"mounted": False, "uuid": None, "fstype": None, "read_only": None}
+
+
+def test_short_exfat_uuid_is_accepted_and_matched(monkeypatch, tmp_path):
+    monkeypatch.setenv("STORAGE_TELEMETRY_TARGETS", f"archive2tb-b|{tmp_path}|6A7F-D1A6")
+    monkeypatch.setattr(collector, "run", lambda *_args, **_kwargs: ("6A7F-D1A6                            exfat\n", None))
+    assert collector.mount_records()["archive2tb-b"]["mounted"] is True
+
+
+@pytest.mark.parametrize("uuid", ("12345678-aaaa", "6A7F-D1A", "6A7FD1A6", "not-a-uuid-at-all", "../etc"))
+def test_target_list_rejects_malformed_uuids(monkeypatch, uuid):
+    monkeypatch.setenv("STORAGE_TELEMETRY_TARGETS", f"backup|/mnt/backup|{uuid}")
+    assert collector.target_list() == []
+
+
+POOL = "archive-pool|/mnt/pool|/mnt/a:/mnt/b:/mnt/c"
+TARGETS = ("big|/mnt/a|11111111-2222-3333-4444-555555555555 small-a|/mnt/b|6A7F-D1A6 "
+           "small-b|/mnt/c|22222222-3333-4444-5555-666666666666")
+BRANCHES = "/mnt/a=RW:/mnt/b=RO:/mnt/c=RO"
+SETTINGS = {"category.create": "ff", "minfreespace": "4294967295", "version": "2.33.5"}
+
+
+def fake_pool(monkeypatch, fstype="fuse.mergerfs", branches=BRANCHES, settings=SETTINGS):
+    monkeypatch.setenv("STORAGE_TELEMETRY_POOLS", POOL)
+    monkeypatch.setenv("STORAGE_TELEMETRY_TARGETS", TARGETS)
+    calls = []
+
+    def fake_run(argv, **_kwargs):
+        calls.append(argv)
+        return f"{fstype}\n", None
+
+    values = {"branches": branches, **settings}
+    monkeypatch.setattr(collector, "run", fake_run)
+    monkeypatch.setattr(collector, "mergerfs_value", lambda mountpoint, key: (calls.append(["xattr", mountpoint, key]), values.get(key))[1])
+    return calls
+
+
+def test_pool_is_verified_by_type_and_exact_branch_list_and_stores_roles_not_paths(monkeypatch):
+    calls = fake_pool(monkeypatch)
+    record = collector.pool_records()["archive-pool"]
+    assert record == {
+        "kind": "mergerfs", "fstype": "fuse.mergerfs", "mounted": True, "error": None, "unreadable": [],
+        "branches": [{"role": "big", "mode": "RW"}, {"role": "small-a", "mode": "RO"}, {"role": "small-b", "mode": "RO"}],
+        "create_policy": "ff", "min_free_bytes": 4294967295, "version": "2.33.5",
+    }
+    assert "/mnt/" not in json.dumps(record)
+    assert calls[0] == ["findmnt", "-n", "-o", "FSTYPE", "/mnt/pool"]
+    assert {tuple(call[2:]) for call in calls if call[0] == "xattr"} == {
+        ("branches",), ("category.create",), ("minfreespace",), ("version",)}
+
+
+@pytest.mark.parametrize("branches", (
+    "/mnt/a=RW:/mnt/b=RO",                       # a branch is missing
+    "/mnt/a=RW:/mnt/b=RO:/mnt/c=RO:/mnt/d=RO",   # an extra branch
+    "/mnt/b=RO:/mnt/a=RW:/mnt/c=RO",             # same paths, different order
+    "/mnt/a=RW:/mnt/b=RO:/mnt/cc=RO",
+    None,                                        # control file unreadable
+))
+def test_pool_with_different_branches_is_not_mounted(monkeypatch, branches):
+    fake_pool(monkeypatch, branches=branches)
+    record = collector.pool_records()["archive-pool"]
+    assert record["mounted"] is False
+    assert "/mnt/" not in json.dumps(record)
+
+
+def test_unknown_branch_is_stored_as_unlisted(monkeypatch):
+    fake_pool(monkeypatch, branches="/mnt/a=RW:/home/someone/private=RO:/mnt/c=RO")
+    record = collector.pool_records()["archive-pool"]
+    assert [branch["role"] for branch in record["branches"]] == ["big", "unlisted", "small-b"]
+    assert "private" not in json.dumps(record)
+
+
+def test_unreadable_settings_are_listed_once_each(monkeypatch):
+    fake_pool(monkeypatch, settings={"category.create": "ff", "minfreespace": "lots"})
+    record = collector.pool_records()["archive-pool"]
+    assert record["mounted"] is True
+    assert (record["min_free_bytes"], record["version"]) == (None, None)
+    assert record["unreadable"] == ["min_free_bytes", "version"]
+
+
+def test_non_mergerfs_mount_is_rejected_without_reading_the_control_file(monkeypatch):
+    calls = fake_pool(monkeypatch, fstype="ext4")
+    record = collector.pool_records()["archive-pool"]
+    assert record["mounted"] is False and record["error"] == "not a mergerfs mount"
+    assert not [call for call in calls if call[0] == "xattr"]
+
+
+def test_pool_list_rejects_malformed_entries(monkeypatch):
+    monkeypatch.setenv("STORAGE_TELEMETRY_POOLS", "Bad|/mnt/pool|/mnt/a pool|relative|/mnt/a ok|/mnt/pool|/mnt/a:bad")
+    assert collector.pool_list() == []
 
 
 def test_kernel_summary_persists_only_counts_and_device_names(monkeypatch):
@@ -58,24 +154,51 @@ def password_file(tmp_path: Path, mode: int) -> Path:
     return path
 
 
-def test_restic_uses_only_bounded_read_only_commands(monkeypatch, tmp_path):
+def test_restic_runs_only_snapshots_and_takes_stats_from_the_newest_summary(monkeypatch, tmp_path):
     monkeypatch.setenv("RESTIC_PASSWORD_FILE", str(password_file(tmp_path, 0o400)))
     monkeypatch.setenv("RESTIC_REPOSITORY", "/backup/restic")
     monkeypatch.setenv("UNRELATED_SECRET", "must-not-reach-restic")
+    snapshots = [
+        {"short_id": "old", "time": "2026-10-01T00:00:00Z", "paths": ["/data/a"],
+         "summary": {"total_bytes_processed": 1, "total_files_processed": 1}},
+        {"short_id": "new", "time": "2026-10-20T00:00:00Z", "paths": ["/data/b"], "tags": ["daily"],
+         "summary": {"total_bytes_processed": 3089592662016, "total_files_processed": 75600000}},
+    ]
     calls = []
 
     def fake_run(argv, **kwargs):
         calls.append((argv, kwargs["timeout"]))
         assert "UNRELATED_SECRET" not in kwargs["env"]
-        return ("[]" if argv[1] == "snapshots" else '{"total_size": 1}', None)
+        return json.dumps(snapshots), None
 
     monkeypatch.setattr(collector, "run", fake_run)
     result = collector.restic_snapshot()
-    assert result == {"snapshots": [], "stats": {"total_size": 1}, "error": None}
-    assert calls == [
-        (["restic", "snapshots", "--json", "--no-lock"], 600),
-        (["restic", "stats", "latest", "--json", "--no-lock"], 600),
-    ]
+    assert calls == [(["restic", "snapshots", "--json", "--no-lock"], 600)]
+    assert result["error"] is None
+    assert result["stats"] == {"snapshot_id": "new", "total_size": 3089592662016, "total_file_count": 75600000}
+    assert [item["id"] for item in result["snapshots"]] == ["old", "new"]
+    assert "summary" not in json.dumps(result["snapshots"])
+
+
+@pytest.mark.parametrize("newest", (
+    {"short_id": "new", "time": "2026-10-20T00:00:00Z"},                                    # restic < 0.17
+    {"short_id": "new", "time": "2026-10-20T00:00:00Z", "summary": {"total_bytes_processed": -1}},
+    {"short_id": "new", "time": "2026-10-20T00:00:00Z", "summary": "corrupt"},
+))
+def test_missing_or_invalid_summary_reports_null_stats_without_error(monkeypatch, tmp_path, newest):
+    monkeypatch.setenv("RESTIC_PASSWORD_FILE", str(password_file(tmp_path, 0o400)))
+    older = {"short_id": "old", "time": "2026-10-01T00:00:00Z",
+             "summary": {"total_bytes_processed": 1, "total_files_processed": 1}}
+    monkeypatch.setattr(collector, "run", lambda *_args, **_kwargs: (json.dumps([older, newest]), None))
+    result = collector.restic_snapshot()
+    assert result["stats"] is None and result["error"] is None
+    assert len(result["snapshots"]) == 2
+
+
+def test_empty_repository_reports_null_stats(monkeypatch, tmp_path):
+    monkeypatch.setenv("RESTIC_PASSWORD_FILE", str(password_file(tmp_path, 0o400)))
+    monkeypatch.setattr(collector, "run", lambda *_args, **_kwargs: ("[]", None))
+    assert collector.restic_snapshot() == {"snapshots": [], "stats": None, "error": None}
 
 
 @pytest.mark.parametrize("setup", ("group-readable", "symlink", "directory", "missing", "unset"))
@@ -153,6 +276,7 @@ def smartctl_json(*, standby=False, crc=0, passed=True):
     return json.dumps({
         "smartctl": {"exit_status": 0},
         "smart_status": {"passed": passed},
+        "temperature": {"current": 34},
         "ata_smart_attributes": {"table": [
             {"id": 5, "raw": {"value": 0}}, {"id": 199, "raw": {"value": crc}}, {"id": 9, "raw": {"value": 123}},
         ]},
@@ -177,8 +301,9 @@ def test_smart_record_queries_the_resolved_disk_without_waking_it(monkeypatch):
     calls = fake_host(monkeypatch, smartctl_json(crc=4))
     record = collector.smart_record("backup", BACKUP_UUID, {})
     assert calls[1] == ["smartctl", "-n", "standby", "-H", "-A", "-d", "sat", "--json=c", "/dev/sdd"]
-    assert record == {"role": "backup", "device": "/dev/sdd", "state": "active", "passed": True,
-                      "attributes": {"5": 0, "199": 4}, "udma_crc_error_count_rise": False, "error": None}
+    assert record == {"role": "backup", "device": "/dev/sdd", "state": "active", "type": "sat", "passed": True,
+                      "attributes": {"5": 0, "199": 4}, "udma_crc_error_count_rise": False, "temperature": 34,
+                      "error": None}
 
 
 def test_unresolved_disk_records_an_error_and_never_runs_smartctl(monkeypatch):
@@ -226,3 +351,38 @@ def test_previous_crc_counts_ignores_records_without_a_reading(monkeypatch, tmp_
     assert collector.previous_crc_counts() == {"archive": 2}
     collector.OUTPUT.write_text("not json", encoding="utf-8")
     assert collector.previous_crc_counts() == {}
+
+
+ROOT_UUID = "9f3cd4b6-f34e-435e-9fcf-ed7861f7cf99"
+
+
+def nvme_json(*, used=3, media_errors=0, temperature=41, passed=True):
+    return json.dumps({
+        "smartctl": {"exit_status": 0}, "smart_status": {"passed": passed},
+        "nvme_smart_health_information_log": {
+            "percentage_used": used, "media_errors": media_errors, "temperature": temperature,
+            "available_spare": 100, "power_on_hours": 1234,
+        },
+    })
+
+
+def test_root_nvme_is_resolved_by_uuid_and_queried_as_nvme(monkeypatch):
+    calls = fake_host(monkeypatch, nvme_json(), lsblk_output="nvme0n1\n")
+    record = collector.smart_record("root", ROOT_UUID, {})
+    assert calls == [
+        ["lsblk", "-no", "PKNAME", f"/dev/disk/by-uuid/{ROOT_UUID}"],
+        ["smartctl", "-n", "standby", "-H", "-A", "-d", "nvme", "--json=c", "/dev/nvme0n1"],
+    ]
+    assert record == {"role": "root", "device": "/dev/nvme0n1", "state": "active", "type": "nvme", "passed": True,
+                      "attributes": {}, "nvme": {"percentage_used": 3, "media_errors": 0, "temperature": 41},
+                      "temperature": 41, "error": None}
+
+
+def test_nvme_without_a_health_log_is_an_error(monkeypatch):
+    fake_host(monkeypatch, json.dumps({"smart_status": {"passed": True}}), lsblk_output="nvme0n1\n")
+    assert collector.smart_record("root", ROOT_UUID, {})["error"] == "smartctl returned invalid JSON"
+
+
+def test_non_object_smartctl_json_is_an_error(monkeypatch):
+    fake_host(monkeypatch, "[]")
+    assert collector.smart_record("backup", BACKUP_UUID, {})["error"] == "smartctl returned invalid JSON"

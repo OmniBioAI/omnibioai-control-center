@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -16,7 +15,7 @@ NOW = datetime.now(timezone.utc)
 
 def targets(state: str | None = None) -> list[StorageTarget]:
     return [StorageTarget(name="Backup", role="backup", host_path="/mnt/backup",
-                          expected_filesystem_uuid="uuid-backup")]
+                          expected_filesystem_uuid="11111111-2222-3333-4444-555555555555")]
 
 
 def snapshot(*, age: timedelta = timedelta(), smart: list[dict] | None = None,
@@ -25,7 +24,7 @@ def snapshot(*, age: timedelta = timedelta(), smart: list[dict] | None = None,
         "schema_version": 1,
         "observed_at": (NOW - age).isoformat(),
         "smart": smart or [],
-        "mounts": {"backup": {"mounted": True, "uuid": "uuid-backup"}},
+        "mounts": {"backup": {"mounted": True, "uuid": "11111111-2222-3333-4444-555555555555"}},
         "kernel": {"window_hours": 24, "counts": {"io_errors": 0}, "devices": [], "error": None},
         "restic": {"snapshots": [{
             "id": "abc123", "time": (NOW - snapshot_age).isoformat(), "paths": ["…/data"], "tags": ["daily"],
@@ -85,7 +84,7 @@ def test_latest_restic_snapshot_older_than_seven_days_warns(monkeypatch):
 def test_being_replaced_target_is_not_stat_or_smart_queried(monkeypatch):
     monkeypatch.setattr(dashboard, "load_targets", lambda: [StorageTarget(
         name="Primary", role="primary", host_path="/mnt/wdpro26tb",
-        expected_filesystem_uuid="uuid-primary", state="being_replaced", mount=False,
+        expected_filesystem_uuid="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", state="being_replaced", mount=False,
     )])
     monkeypatch.setattr(dashboard, "read_host_snapshot", lambda: (snapshot(smart=[{
         "role": "primary", "passed": False, "attributes": {"5": 99}, "error": None,
@@ -101,10 +100,10 @@ def test_being_replaced_target_is_not_stat_or_smart_queried(monkeypatch):
 
 
 @pytest.mark.parametrize("record", (
-    {"mounted": False, "uuid": "uuid-other"},
+    {"mounted": False, "uuid": "00000000-0000-0000-0000-00000000beef"},
     {"mounted": False, "uuid": None},
     # The host and API configs disagree: the API's expected UUID wins.
-    {"mounted": True, "uuid": "uuid-other"},
+    {"mounted": True, "uuid": "00000000-0000-0000-0000-00000000beef"},
     {"mounted": True},
 ))
 def test_uuid_mismatch_reports_not_mounted_without_capacity(monkeypatch, record):
@@ -122,13 +121,13 @@ def test_uuid_mismatch_reports_not_mounted_without_capacity(monkeypatch, record)
 def test_root_target_bind_on_container_root_reports_not_mounted(monkeypatch):
     # The root target gets no st_dev exemption: an absent bind must not report the container's overlay.
     host = snapshot()
-    host.mounts["root"] = {"mounted": True, "uuid": "uuid-root"}
+    host.mounts["root"] = {"mounted": True, "uuid": "99999999-8888-7777-6666-555555555555"}
     monkeypatch.setattr(dashboard, "load_targets", lambda: [StorageTarget(
-        name="Root filesystem", role="root", host_path="/", expected_filesystem_uuid="uuid-root",
+        name="Root filesystem", role="root", host_path="/", expected_filesystem_uuid="99999999-8888-7777-6666-555555555555",
     )])
     monkeypatch.setattr(dashboard, "read_host_snapshot", lambda: (host, None))
-    monkeypatch.setattr(dashboard.os, "stat", lambda _path: SimpleNamespace(st_dev=42))
-    monkeypatch.setattr(dashboard.os, "statvfs", lambda _path: pytest.fail("must reject before statvfs"))
+    monkeypatch.setattr(dashboard, "_device_id", lambda _path: 42)
+    monkeypatch.setattr(dashboard, "_filesystem_stats", lambda _path: pytest.fail("must reject before statvfs"))
     device = dashboard._collect().physical_devices[0]
     assert device.mount_status == "MISSING"
     assert device.health_detail == "Not mounted"
@@ -151,16 +150,16 @@ def test_zero_kernel_counts_raise_no_alert(monkeypatch):
 
 
 def test_bind_sharing_container_root_device_is_not_counted_as_mounted(monkeypatch):
-    monkeypatch.setattr(dashboard.os, "stat", lambda _path: SimpleNamespace(st_dev=42))
-    monkeypatch.setattr(dashboard.os, "statvfs", lambda _path: (_ for _ in ()).throw(AssertionError("must reject before statvfs")))
+    monkeypatch.setattr(dashboard, "_device_id", lambda _path: 42)
+    monkeypatch.setattr(dashboard, "_filesystem_stats", lambda _path: pytest.fail("must reject before statvfs"))
     assert dashboard._capacity("/run/storage-targets/backup") == (None, None, None, None)
 
 
 TARGETS_YAML = """
 system:
   storage_targets:
-    - {name: Backup, role: backup, host_path: /mnt/backup, expected_filesystem_uuid: uuid-backup}
-    - {name: Primary, role: primary, host_path: /mnt/primary, expected_filesystem_uuid: uuid-primary,
+    - {name: Backup, role: backup, host_path: /mnt/backup, expected_filesystem_uuid: 11111111-2222-3333-4444-555555555555}
+    - {name: Primary, role: primary, host_path: /mnt/primary, expected_filesystem_uuid: aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee,
        state: being_replaced, mount: false}
 """
 
@@ -254,3 +253,209 @@ def test_unresolved_smart_disk_shows_the_collector_reason(monkeypatch):
     assert device.health == "UNKNOWN"
     assert device.power_state is None
     assert device.health_detail == "No data: SMART filesystem UUID did not resolve to exactly one whole disk"
+
+
+A22, DATA, B2 = "/mnt/omnibioai-archive22tb", "/media/manish/omnibioai-data", "/mnt/omnibioai-archive2tb-b"
+POOL_TARGETS = [
+    StorageTarget(name="Archive", role="archive", host_path=A22,
+                  expected_filesystem_uuid="6a805bb7-2513-435f-9cd4-b9970a0e4fc4"),
+    StorageTarget(name="OmniBioAI data 2 TB", role="data2tb", host_path=DATA,
+                  expected_filesystem_uuid="39b9324a-640e-4d64-9980-b1f1c9d5578b", read_only=True),
+    StorageTarget(name="Archive 2 TB B", role="archive2tb-b", host_path=B2,
+                  expected_filesystem_uuid="6A7F-D1A6", read_only=True),
+    StorageTarget(name="Archive pool", role="archive-pool", kind="mergerfs", host_path="/mnt/omnibioai-archive",
+                  branches=[A22, DATA, B2]),
+]
+CAPACITY = {  # collector bind path -> (total, used, available, percent)
+    "/run/storage-targets/archive": (20_000, 2_400, 17_600, 12.0),
+    "/run/storage-targets/data2tb": (1_800, 1_746, 54, 97.0),
+    "/run/storage-targets/archive2tb-b": (1_900, 1_786, 114, 94.0),
+    "/run/storage-targets/archive-pool": (23_700, 5_932, 17_768, 25.0),
+}
+
+
+def pool_snapshot(branches=("archive", "data2tb", "archive2tb-b"), fstype="fuse.mergerfs", unreadable=()) -> HostSnapshot:
+    modes = {"archive": "RW", "data2tb": "RO", "archive2tb-b": "RO"}
+    return HostSnapshot.model_validate({
+        "schema_version": 1, "observed_at": NOW.isoformat(),
+        "smart": [{"role": role, "state": "active", "type": "sat", "passed": True,
+                   "attributes": {"5": 0, "197": 0, "198": 0, "199": 0}, "temperature": 33, "error": None}
+                  for role in ("archive", "data2tb", "archive2tb-b")],
+        "mounts": {
+            "archive": {"mounted": True, "uuid": "6a805bb7-2513-435f-9cd4-b9970a0e4fc4", "fstype": "ext4", "read_only": False},
+            "data2tb": {"mounted": True, "uuid": "39b9324a-640e-4d64-9980-b1f1c9d5578b", "fstype": "ext4", "read_only": True},
+            "archive2tb-b": {"mounted": True, "uuid": "6A7F-D1A6", "fstype": "exfat", "read_only": True},
+            "archive-pool": {"kind": "mergerfs", "fstype": fstype,
+                             "mounted": fstype == "fuse.mergerfs" and list(branches) == ["archive", "data2tb", "archive2tb-b"],
+                             "branches": [{"role": role, "mode": modes.get(role)} for role in branches],
+                             "create_policy": None if "create_policy" in unreadable else "ff",
+                             "min_free_bytes": None if "min_free_bytes" in unreadable else 4294967295,
+                             "version": "2.33.5", "unreadable": list(unreadable), "error": None},
+        },
+        "kernel": {"counts": {}, "devices": []},
+        "restic": {"snapshots": [], "stats": None, "error": None},
+    })
+
+
+def arrange_pool(monkeypatch, host):
+    monkeypatch.setattr(dashboard, "load_targets", lambda: POOL_TARGETS)
+    monkeypatch.setattr(dashboard, "read_host_snapshot", lambda: (host, None))
+    monkeypatch.setattr(dashboard, "_capacity", lambda path: CAPACITY[path])
+
+
+def test_read_only_disks_never_raise_a_capacity_warning(monkeypatch):
+    arrange_pool(monkeypatch, pool_snapshot())
+    result = dashboard._collect()
+    by_role = {device.role: device for device in result.physical_devices}
+    data = by_role["data2tb"]
+    assert (data.utilization_percent, data.health, data.read_only, data.mount_mode) == (97.0, "HEALTHY", True, "READ_ONLY")
+    assert data.health_detail == "Read-only; capacity is shown without warnings"
+    assert by_role["archive2tb-b"].health == "HEALTHY"
+    assert not result.alerts
+
+
+def test_snapshot_fills_filesystem_identity_and_host_mount_mode(monkeypatch):
+    arrange_pool(monkeypatch, pool_snapshot())
+    by_role = {device.role: device for device in dashboard._collect().physical_devices}
+    exfat = by_role["archive2tb-b"]
+    assert (exfat.filesystem, exfat.filesystem_uuid, exfat.device_identity) == ("exfat", "6A7F-D1A6", "6A7F-D1A6")
+    assert by_role["archive"].mount_mode == "READ_WRITE"
+    assert by_role["archive"].smart_attributes == {"5": 0, "197": 0, "198": 0, "199": 0}
+    assert by_role["archive"].temperature_celsius == 33 and by_role["archive"].smart_passed is True
+
+
+def test_verified_pool_reports_total_and_ordered_member_rows(monkeypatch):
+    arrange_pool(monkeypatch, pool_snapshot())
+    result = dashboard._collect()
+    pool = result.archive_pool
+    assert "archive-pool" not in {device.role for device in result.physical_devices}
+    assert {device.role: device.pool_role for device in result.physical_devices} == {
+        "archive": "archive-pool", "data2tb": "archive-pool", "archive2tb-b": "archive-pool"}
+    assert (pool.pool_status, pool.total_bytes, pool.used_bytes, pool.available_bytes) == ("MOUNTED", 23_700, 5_932, 17_768)
+    assert pool.pool_detail is None
+    assert (pool.mergerfs_version, pool.unreadable_settings) == ("2.33.5", [])
+    assert [(b.role, b.observed_mode, b.read_only, b.used_bytes) for b in pool.branches] == [
+        ("archive", "READ_WRITE", False, 2_400), ("data2tb", "READ_ONLY", True, 1_746), ("archive2tb-b", "READ_ONLY", True, 1_786)]
+    assert (pool.create_policy, pool.min_free_bytes, pool.runtime_policy_status) == ("ff", 4294967295, "VERIFIED")
+
+
+@pytest.mark.parametrize(("branches", "fstype", "detail"), (
+    (("archive", "data2tb"), "fuse.mergerfs", "Not mounted: mergerfs branches differ from the configuration"),
+    (("data2tb", "archive", "archive2tb-b"), "fuse.mergerfs", "Not mounted: mergerfs branches differ from the configuration"),
+    (("archive", "unlisted", "archive2tb-b"), "fuse.mergerfs", "Not mounted: mergerfs branches differ from the configuration"),
+    (("archive", "data2tb", "archive2tb-b"), "ext4", "Not mounted: not a mergerfs filesystem"),
+))
+def test_unverified_pool_reports_not_mounted_without_capacity(monkeypatch, branches, fstype, detail):
+    host = pool_snapshot(branches=branches, fstype=fstype)
+    host.mounts["archive-pool"]["mounted"] = True  # the API re-checks rather than trusting the flag
+    arrange_pool(monkeypatch, host)
+    pool = dashboard._collect().archive_pool
+    assert (pool.pool_status, pool.total_bytes, pool.pool_detail) == ("MISSING", None, detail)
+
+
+def test_no_pool_configured(monkeypatch):
+    arrange(monkeypatch, snapshot())
+    pool = dashboard._collect().archive_pool
+    assert (pool.pool_mount_point, pool.branches) == ("Not configured", [])
+
+
+NVME_UUID = "99999999-8888-7777-6666-555555555555"
+
+
+@pytest.mark.parametrize(("nvme", "health", "detail"), (
+    ({"percentage_used": 3, "media_errors": 0, "temperature": 41}, "HEALTHY", "Capacity collected with statvfs from the read-only bind mount"),
+    ({"percentage_used": 79, "media_errors": 0, "temperature": 41}, "HEALTHY", "Capacity collected with statvfs from the read-only bind mount"),
+    ({"percentage_used": 80, "media_errors": 0, "temperature": 41}, "WARNING", "NVMe endurance used: 80%"),
+    ({"percentage_used": 3, "media_errors": 1200, "temperature": 41}, "WARNING", "NVMe media errors: 1,200"),
+))
+def test_nvme_warns_on_media_errors_or_wear(monkeypatch, nvme, health, detail):
+    host = snapshot(smart=[{"role": "root", "device": "/dev/nvme0n1", "state": "active", "type": "nvme",
+                            "passed": True, "attributes": {}, "nvme": nvme, "temperature": 41, "error": None}])
+    host.mounts["root"] = {"mounted": True, "uuid": NVME_UUID, "fstype": "ext4", "read_only": False}
+    monkeypatch.setattr(dashboard, "load_targets", lambda: [StorageTarget(
+        name="Root filesystem", role="root", host_path="/", expected_filesystem_uuid=NVME_UUID)])
+    monkeypatch.setattr(dashboard, "read_host_snapshot", lambda: (host, None))
+    monkeypatch.setattr(dashboard, "_capacity", lambda _path: (1000, 200, 800, 20.0))
+    result = dashboard._collect()
+    device = result.physical_devices[0]
+    assert (device.health, device.health_detail) == (health, detail)
+    assert (device.nvme_percentage_used, device.nvme_media_errors, device.temperature_celsius) == (
+        nvme["percentage_used"], nvme["media_errors"], 41)
+    assert bool(result.alerts) is (health == "WARNING")
+
+
+def test_restic_stats_come_from_the_snapshot_summary(monkeypatch):
+    host = snapshot()
+    host.restic["stats"] = {"snapshot_id": "abc123", "total_size": 3089592662016, "total_file_count": 75600000}
+    arrange(monkeypatch, host)
+    backups = dashboard._collect().backups
+    assert (backups.latest_snapshot_size_bytes, backups.latest_snapshot_file_count) == (3089592662016, 75600000)
+    assert backups.retention_summary is None
+
+
+def test_null_restic_stats_are_not_an_error(monkeypatch):
+    host = snapshot()
+    host.restic["stats"] = None
+    arrange(monkeypatch, host)
+    backups = dashboard._collect().backups
+    assert backups.repository_status == "AVAILABLE"
+    assert (backups.latest_snapshot_size_bytes, backups.latest_snapshot_file_count) == (None, None)
+
+
+@pytest.mark.parametrize("uuid", ("6A7F-D1A6", "6a805bb7-2513-435f-9cd4-b9970a0e4fc4"))
+def test_storage_target_accepts_standard_and_short_exfat_uuids(uuid):
+    assert StorageTarget(name="x", role="x", host_path="/x", expected_filesystem_uuid=uuid).expected_filesystem_uuid == uuid
+
+
+@pytest.mark.parametrize("fields", (
+    {"expected_filesystem_uuid": "6A7F-D1A"},
+    {"expected_filesystem_uuid": "REPLACE_ME"},
+    {},
+    {"expected_filesystem_uuid": "6A7F-D1A6", "branches": ["/a"]},
+    {"kind": "mergerfs", "branches": []},
+    {"kind": "mergerfs", "branches": ["relative"]},
+    {"kind": "mergerfs", "branches": ["/a"], "expected_filesystem_uuid": "6A7F-D1A6"},
+))
+def test_storage_target_rejects_invalid_identity(fields):
+    with pytest.raises(ValueError):
+        StorageTarget(name="x", role="x", host_path="/x", **fields)
+
+
+def test_unreadable_pool_settings_are_named_once(monkeypatch):
+    arrange_pool(monkeypatch, pool_snapshot(unreadable=("create_policy", "min_free_bytes")))
+    pool = dashboard._collect().archive_pool
+    assert pool.pool_status == "MOUNTED"
+    assert (pool.create_policy, pool.min_free_bytes) == (None, None)
+    assert pool.unreadable_settings == ["create policy", "minimum free space"]
+
+
+def test_capacity_reads_a_real_directory_on_its_own_filesystem(monkeypatch, tmp_path):
+    assert dashboard._device_id(str(tmp_path)) == os.stat(tmp_path).st_dev
+    assert dashboard._filesystem_stats(str(tmp_path)).f_blocks == os.statvfs(tmp_path).f_blocks
+    # Pretend the directory is a separate mount so its real statvfs numbers are used.
+    monkeypatch.setattr(dashboard, "_device_id", lambda path: 1 if path == "/" else 2)
+    total, used, available, percent = dashboard._capacity(str(tmp_path))
+    assert total > 0 and 0 <= used <= total and available >= 0 and 0 <= percent <= 100
+    assert dashboard._capacity(str(tmp_path / "absent")) == (None, None, None, None)
+
+
+def test_pool_without_a_snapshot_has_no_data(monkeypatch):
+    arrange_pool(monkeypatch, None)
+    monkeypatch.setattr(dashboard, "read_host_snapshot", lambda: (None, "snapshot file is missing"))
+    pool = dashboard._collect().archive_pool
+    assert (pool.pool_status, pool.pool_detail) == ("UNKNOWN", "No data: host snapshot is unavailable")
+
+
+def test_pool_missing_from_the_snapshot_is_not_mounted(monkeypatch):
+    host = pool_snapshot()
+    del host.mounts["archive-pool"]
+    arrange_pool(monkeypatch, host)
+    pool = dashboard._collect().archive_pool
+    assert (pool.pool_status, pool.pool_detail) == ("MISSING", "Not mounted")
+
+
+def test_pool_whose_bind_cannot_be_measured_is_not_mounted(monkeypatch):
+    arrange_pool(monkeypatch, pool_snapshot())
+    monkeypatch.setattr(dashboard, "_capacity", lambda path: (None, None, None, None) if path.endswith("archive-pool") else CAPACITY[path])
+    pool = dashboard._collect().archive_pool
+    assert (pool.pool_status, pool.pool_detail, pool.total_bytes) == ("MISSING", "Not mounted", None)

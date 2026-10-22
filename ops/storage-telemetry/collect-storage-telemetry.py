@@ -18,7 +18,10 @@ ERROR_PATTERNS = {
     "resets": re.compile(r"reset", re.IGNORECASE),
     "ext4_errors": re.compile(r"EXT4-fs error", re.IGNORECASE),
 }
-UUID = re.compile(r"[A-Fa-f0-9-]{8,80}")
+# Standard filesystem UUIDs, or the short FAT/exFAT volume serial (6A7F-D1A6).
+UUID = re.compile(r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}|[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}")
+HOST_PATH = re.compile(r"/[A-Za-z0-9._/-]*")
+MERGERFS_CONTROL = ".mergerfs"
 ROLE = re.compile(r"[a-z][a-z0-9_-]{0,31}")
 WHOLE_DISK = re.compile(r"sd[a-z]{1,2}|nvme\d+n\d+")
 STANDBY_MESSAGE = re.compile(r"Device is in (STANDBY|SLEEP)", re.IGNORECASE)
@@ -81,8 +84,9 @@ def smart_record(role: str, uuid: str, previous: dict[str, int]) -> dict[str, ob
         return record
     # -n standby skips (and does not wake) a sleeping disk. smartctl uses an
     # eight-bit status bitmask; its JSON stays useful for every normal result.
-    text, error = run(["smartctl", "-n", "standby", "-H", "-A", "-d", "sat", "--json=c", device], timeout=45,
-                      accepted_statuses=set(range(256)))
+    nvme = device.startswith("/dev/nvme")
+    text, error = run(["smartctl", "-n", "standby", "-H", "-A", "-d", "nvme" if nvme else "sat", "--json=c", device],
+                      timeout=45, accepted_statuses=set(range(256)))
     record["error"] = error
     if text is None:
         return record
@@ -93,20 +97,35 @@ def smart_record(role: str, uuid: str, previous: dict[str, int]) -> dict[str, ob
                 isinstance(item, dict) and STANDBY_MESSAGE.search(str(item.get("string", ""))) for item in messages):
             record.update({"state": "standby", "error": None})
             return record
-        table = raw.get("ata_smart_attributes", {}).get("table")
-        if not isinstance(table, list):
-            raise ValueError("SMART attribute table missing")
         smart_status = raw.get("smart_status")
         if not isinstance(smart_status, dict) or not isinstance(smart_status.get("passed"), bool):
             raise ValueError("SMART health status missing")
+        if nvme:
+            log = raw.get("nvme_smart_health_information_log")
+            if not isinstance(log, dict):
+                raise ValueError("NVMe health log missing")
+            record.update({
+                "state": "active", "type": "nvme", "passed": smart_status["passed"],
+                "nvme": {key: int(log[key]) for key in ("percentage_used", "media_errors", "temperature")},
+                "temperature": int(log["temperature"]),
+                "error": None,
+            })
+            record.pop("crc_baseline", None)
+            return record
+        table = raw.get("ata_smart_attributes", {}).get("table")
+        if not isinstance(table, list):
+            raise ValueError("SMART attribute table missing")
         attributes = {
             str(item["id"]): int(item.get("raw", {}).get("value", 0))
             for item in table if isinstance(item, dict) and item.get("id") in {5, 197, 198, 199}
         }
+        temperature = raw.get("temperature", {}).get("current") if isinstance(raw.get("temperature"), dict) else None
         record.update({
             "state": "active",
+            "type": "sat",
             "passed": smart_status["passed"],
             "attributes": attributes,
+            "temperature": temperature if isinstance(temperature, int) and not isinstance(temperature, bool) else None,
             "udma_crc_error_count_rise": attributes.get("199", 0) > previous.get(role, attributes.get("199", 0)),
             "error": None,
         })
@@ -131,18 +150,93 @@ def target_list() -> list[tuple[str, str, str]]:
     values = []
     for item in os.environ.get("STORAGE_TELEMETRY_TARGETS", "").split():
         parts = item.split("|", 2)
-        if (len(parts) == 3 and ROLE.fullmatch(parts[0])
-                and re.fullmatch(r"/[A-Za-z0-9._/-]*", parts[1]) and UUID.fullmatch(parts[2])):
+        if len(parts) == 3 and ROLE.fullmatch(parts[0]) and HOST_PATH.fullmatch(parts[1]) and UUID.fullmatch(parts[2]):
             values.append((parts[0], parts[1], parts[2]))
     return values
 
 
+def host_read_only(path: str) -> bool | None:
+    try:
+        return bool(os.statvfs(path).f_flag & os.ST_RDONLY)
+    except OSError:
+        return None
+
+
 def mount_records() -> dict[str, dict[str, object]]:
-    records = {}
+    records: dict[str, dict[str, object]] = {}
     for role, mountpoint, expected_uuid in target_list():
-        output, error = run(["findmnt", "-n", "-o", "UUID", mountpoint], timeout=15)
-        actual_uuid = None if error else (output or "").strip() or None
-        records[role] = {"mounted": actual_uuid == expected_uuid, "uuid": actual_uuid}
+        output, error = run(["findmnt", "-n", "-o", "UUID,FSTYPE", mountpoint], timeout=15)
+        fields = [] if error else (output or "").split()
+        # A filesystem without a UUID prints only its type; never read that as a UUID.
+        actual_uuid, fstype = (fields[0], fields[1]) if len(fields) == 2 else (None, fields[0] if len(fields) == 1 else None)
+        mounted = actual_uuid is not None and actual_uuid.lower() == expected_uuid.lower()
+        records[role] = {"mounted": mounted, "uuid": actual_uuid, "fstype": fstype,
+                         "read_only": host_read_only(mountpoint) if mounted else None}
+    return records
+
+
+def pool_list() -> list[tuple[str, str, list[str]]]:
+    """Read role|mountpoint|branch:branch:... from the root-owned unit config."""
+    values = []
+    for item in os.environ.get("STORAGE_TELEMETRY_POOLS", "").split():
+        parts = item.split("|", 2)
+        if len(parts) != 3 or not ROLE.fullmatch(parts[0]) or not HOST_PATH.fullmatch(parts[1]):
+            continue
+        branches = parts[2].split(":")
+        if branches and all(HOST_PATH.fullmatch(branch) for branch in branches):
+            values.append((parts[0], parts[1], branches))
+    return values
+
+
+def mergerfs_value(mountpoint: str, key: str) -> str | None:
+    try:
+        return os.getxattr(os.path.join(mountpoint, MERGERFS_CONTROL), f"user.mergerfs.{key}").decode()
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+# mergerfs runtime settings read from the pool's control file, by snapshot key.
+MERGERFS_SETTINGS = {"create_policy": "category.create", "min_free_bytes": "minfreespace", "version": "version"}
+UNLISTED_BRANCH = "unlisted"
+
+
+def pool_records() -> dict[str, dict[str, object]]:
+    """Verify each mergerfs pool by filesystem type and its exact, ordered branch list.
+
+    findmnt's SOURCE for mergerfs is a shortened fsname, so the branches and
+    settings come from mergerfs's own control file (the getxattr calls that
+    `getfattr -n user.mergerfs.<key>` makes). mergerfs has no filesystem UUID.
+    Branch paths are stored as target role names, never as paths.
+    """
+    roles_by_path = {path: role for role, path, _uuid in target_list()}
+    records: dict[str, dict[str, object]] = {}
+    for role, mountpoint, expected in pool_list():
+        output, error = run(["findmnt", "-n", "-o", "FSTYPE", mountpoint], timeout=15)
+        fstype = None if error else (output or "").strip() or None
+        record: dict[str, object] = {"kind": "mergerfs", "fstype": fstype, "mounted": False, "branches": [],
+                                     "unreadable": [], "error": None}
+        records[role] = record
+        if fstype != "fuse.mergerfs":
+            record["error"] = "not a mergerfs mount"
+            continue
+        raw_branches = mergerfs_value(mountpoint, "branches")
+        paths, branches = [], []
+        for entry in (raw_branches or "").split(":"):
+            path, _, options = entry.partition("=")
+            if path:
+                paths.append(path)
+                branches.append({"role": roles_by_path.get(path, UNLISTED_BRANCH), "mode": options.split(",", 1)[0] or None})
+        settings = {key: mergerfs_value(mountpoint, name) for key, name in MERGERFS_SETTINGS.items()}
+        minfree = settings["min_free_bytes"]
+        settings["min_free_bytes"] = int(minfree) if minfree and minfree.isdigit() else None
+        record.update({
+            "mounted": paths == expected, "branches": branches,
+            "create_policy": settings["create_policy"][:32] if settings["create_policy"] else None,
+            "min_free_bytes": settings["min_free_bytes"],
+            "version": settings["version"][:32] if settings["version"] else None,
+            "unreadable": (["branches"] if raw_branches is None else [])
+                          + [key for key, value in settings.items() if value is None],
+        })
     return records
 
 
@@ -173,23 +267,36 @@ def restic_snapshot() -> dict[str, object]:
         return {"snapshots": [], "stats": None, "error": "RESTIC_PASSWORD_FILE must be root-owned mode 0400"}
     env = {key: value for key, value in os.environ.items()
            if key in {"PATH", "RESTIC_REPOSITORY", "RESTIC_PASSWORD_FILE", "RESTIC_CACHE_DIR"}}
-    snapshots_text, snapshots_error = run(["restic", "snapshots", "--json", "--no-lock"], env=env, timeout=600)
-    stats_text, stats_error = run(["restic", "stats", "latest", "--json", "--no-lock"], env=env, timeout=600)
-    if snapshots_error or stats_error:
-        return {"snapshots": [], "stats": None, "error": snapshots_error or stats_error}
+    text, error = run(["restic", "snapshots", "--json", "--no-lock"], env=env, timeout=600)
+    if error:
+        return {"snapshots": [], "stats": None, "error": error}
     try:
-        snapshots = json.loads(snapshots_text or "[]")
-        stats = json.loads(stats_text or "{}")
-        safe_snapshots = [{
-            "id": str(item.get("short_id") or item.get("id", ""))[:64],
-            "time": item.get("time"),
-            "paths": [f"…/{Path(path).name}" for path in item.get("paths", [])[:10]],
-            "tags": [str(tag)[:80] for tag in item.get("tags", [])[:20]],
-        } for item in snapshots[:200] if isinstance(item, dict)]
-        safe_stats = {key: stats.get(key) for key in ("total_size", "total_file_count", "snapshots_count") if key in stats}
-        return {"snapshots": safe_snapshots, "stats": safe_stats, "error": None}
+        snapshots = [item for item in json.loads(text or "[]") if isinstance(item, dict)]
     except (ValueError, TypeError):
         return {"snapshots": [], "stats": None, "error": "restic returned invalid JSON"}
+    safe_snapshots = [{
+        "id": str(item.get("short_id") or item.get("id", ""))[:64],
+        "time": item.get("time"),
+        "paths": [f"…/{Path(str(path)).name}" for path in (item.get("paths") or [])[:10]],
+        "tags": [str(tag)[:80] for tag in (item.get("tags") or [])[:20]],
+    } for item in snapshots[:200]]
+    return {"snapshots": safe_snapshots, "stats": latest_summary(snapshots), "error": None}
+
+
+def latest_summary(snapshots: list[dict]) -> dict[str, object] | None:
+    """Size and file count from the newest snapshot's backup summary (restic 0.17+)."""
+    dated = [item for item in snapshots if isinstance(item.get("time"), str)]
+    if not dated:
+        return None
+    newest = max(dated, key=lambda item: item["time"])
+    summary = newest.get("summary")
+    if not isinstance(summary, dict):
+        return None
+    size, files = summary.get("total_bytes_processed"), summary.get("total_files_processed")
+    if not all(isinstance(value, int) and not isinstance(value, bool) and value >= 0 for value in (size, files)):
+        return None
+    return {"snapshot_id": str(newest.get("short_id") or newest.get("id", ""))[:64],
+            "total_size": size, "total_file_count": files}
 
 
 def main() -> int:
@@ -200,7 +307,7 @@ def main() -> int:
         "schema_version": 1,
         "observed_at": datetime.now(timezone.utc).isoformat(),
         "smart": [smart_record(role, uuid, previous) for role, uuid in disk_list()],
-        "mounts": mount_records(),
+        "mounts": {**mount_records(), **pool_records()},
         "kernel": kernel_summary(),
         "restic": restic_snapshot(),
     }

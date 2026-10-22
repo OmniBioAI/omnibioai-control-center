@@ -146,6 +146,24 @@ system:
       role: archive
       host_path: /mnt/omnibioai-archive22tb
       expected_filesystem_uuid: 6a805bb7-2513-435f-9cd4-b9970a0e4fc4
+    - name: OmniBioAI data 2 TB
+      role: data2tb
+      host_path: /media/manish/omnibioai-data
+      expected_filesystem_uuid: 39b9324a-640e-4d64-9980-b1f1c9d5578b
+      read_only: true
+    - name: Archive 2 TB B
+      role: archive2tb-b
+      host_path: /mnt/omnibioai-archive2tb-b
+      expected_filesystem_uuid: 6A7F-D1A6
+      read_only: true
+    - name: Archive pool
+      role: archive-pool
+      kind: mergerfs
+      host_path: /mnt/omnibioai-archive
+      branches:
+        - /mnt/omnibioai-archive22tb
+        - /media/manish/omnibioai-data
+        - /mnt/omnibioai-archive2tb-b
     - name: Primary
       role: primary
       host_path: /mnt/wdpro26tb

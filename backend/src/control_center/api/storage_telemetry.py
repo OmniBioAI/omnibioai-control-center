@@ -10,13 +10,16 @@ import os
 import stat
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
 STALE_AFTER_SECONDS = 2 * 60 * 60
+# Standard filesystem UUIDs, or the short FAT/exFAT volume serial (6A7F-D1A6).
+FILESYSTEM_UUID = (r"^(?:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"
+                   r"|[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4})$")
 SNAPSHOT_PATH = Path(os.environ.get("STORAGE_TELEMETRY_PATH", "/run/storage-telemetry/storage-telemetry.json"))
 
 
@@ -25,9 +28,22 @@ class StorageTarget(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     role: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,31}$")
     host_path: str = Field(pattern=r"^/")
-    expected_filesystem_uuid: str = Field(min_length=1, max_length=80)
+    kind: Literal["filesystem", "mergerfs"] = "filesystem"
+    # Required for a filesystem; mergerfs has no UUID and is verified by its branches.
+    expected_filesystem_uuid: str | None = Field(default=None, pattern=FILESYSTEM_UUID)
+    branches: list[str] = Field(default_factory=list)
+    read_only: bool = False
     mount: bool = True
     state: str | None = None
+
+    @model_validator(mode="after")
+    def identity_matches_kind(self) -> "StorageTarget":
+        if self.kind == "filesystem" and (self.expected_filesystem_uuid is None or self.branches):
+            raise ValueError("a filesystem target needs expected_filesystem_uuid and no branches")
+        if self.kind == "mergerfs" and (self.expected_filesystem_uuid is not None or not self.branches
+                                        or any(not branch.startswith("/") for branch in self.branches)):
+            raise ValueError("a mergerfs target needs absolute branches and no expected_filesystem_uuid")
+        return self
 
     @property
     def collector_path(self) -> Path:

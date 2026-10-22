@@ -11,6 +11,8 @@
 // Center, without importing from that page (its badge isn't exported).
 interface Props {
   status: string
+  // Shown instead of `status`, as written (not uppercased); colour still comes from `status`.
+  label?: string
 }
 
 const KNOWN: Record<string, { bg: string; color: string }> = {
@@ -98,9 +100,12 @@ const KNOWN: Record<string, { bg: string; color: string }> = {
   not_applicable: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
   // Storage: a disk skipped while asleep is a neutral state, never a fault.
   standby: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
+  // Storage: a planned disk replacement and a read-only disk are neutral facts, never faults.
+  replacing: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
+  'read-only': { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
 }
 
-export default function StatusBadge({ status }: Props) {
+export default function StatusBadge({ status, label }: Props) {
   const cfg = KNOWN[status.toLowerCase()] ?? { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' }
   return (
     <span
@@ -112,11 +117,11 @@ export default function StatusBadge({ status }: Props) {
         background: cfg.bg,
         color: cfg.color,
         whiteSpace: 'nowrap',
-        textTransform: 'uppercase',
-        letterSpacing: '0.04em',
+        textTransform: label ? 'none' : 'uppercase',
+        letterSpacing: label ? undefined : '0.04em',
       }}
     >
-      {status}
+      {label ?? status}
     </span>
   )
 }

@@ -37,6 +37,27 @@ services:
         bind:
           propagation: rslave
           create_host_path: false
+      - type: bind
+        source: /media/manish/omnibioai-data
+        target: /run/storage-targets/data2tb
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+      - type: bind
+        source: /mnt/omnibioai-archive2tb-b
+        target: /run/storage-targets/archive2tb-b
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+      - type: bind
+        source: /mnt/omnibioai-archive
+        target: /run/storage-targets/archive-pool
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
       # Bind the directory so the collector sees atomic file replacements.
       - type: bind
         source: /var/lib/omnibioai
