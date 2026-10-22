@@ -9,10 +9,41 @@ services:
       WORKSPACE_ROOT: /workspace
       REGRESSION_HEALTH_ARTIFACT_PATH: /app/data/regression-health.json
       REGRESSION_HEALTH_STALE_AFTER_HOURS: "168"
+      STORAGE_TELEMETRY_PATH: /run/storage-telemetry/storage-telemetry.json
     volumes:
       - ./:/workspace
       - ${REGRESSION_HEALTH_ARTIFACT_HOST_PATH:?set a regression-only certification artifact path}:/app/data/regression-health.json:ro
       - ./deploy/control-center/config:/config:ro
+      # statvfs of an empty directory on the root filesystem; binding host /
+      # itself would expose /etc and the Restic password file to the API.
+      - type: bind
+        source: /var/lib/omnibioai-storage-probe
+        target: /run/storage-targets/root
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+      - type: bind
+        source: /mnt/omnibioai-backup20tb
+        target: /run/storage-targets/backup
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+      - type: bind
+        source: /mnt/omnibioai-archive22tb
+        target: /run/storage-targets/archive
+        read_only: true
+        bind:
+          propagation: rslave
+          create_host_path: false
+      # Bind the directory so the collector sees atomic file replacements.
+      - type: bind
+        source: /var/lib/omnibioai
+        target: /run/storage-telemetry
+        read_only: true
+        bind:
+          create_host_path: false
     ports:
       - "${CONTROL_CENTER_PORT:-7070}:7070"
     restart: unless-stopped

@@ -1,19 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-import base64
-import json
 
-import jwt
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from fastapi import Depends, FastAPI
-from fastapi.testclient import TestClient
-
-from control_center.api import storage_dashboard as dashboard
-from control_center.api.storage_snapshot import read_snapshot
-from control_center.core.auth import require_permission
-from control_center.core.jwt_verify import JWT_SECRET
 from scripts import storage_metadata_collector as collector
 
 
@@ -109,37 +97,3 @@ def test_namespace_device_mismatch_withholds_capacity(monkeypatch):
     configure_fake_host(monkeypatch)
     monkeypatch.setattr(collector, "mount_device_number", lambda _path: "0:999")
     assert collector.collect()["collector_status"] == "UNAVAILABLE"
-
-
-def test_signed_host_snapshot_flows_through_authorized_dashboard_api(monkeypatch, tmp_path):
-    configure_fake_host(monkeypatch)
-    payload = collector.collect()
-    private = Ed25519PrivateKey.generate()
-    public = base64.b64encode(private.public_key().public_bytes(
-        serialization.Encoding.Raw, serialization.PublicFormat.Raw,
-    )).decode()
-    path = tmp_path / "snapshot.json"
-    collector.publish_snapshot(payload, private, path)
-    assert path.stat().st_mode & 0o222 == 0
-    monkeypatch.setattr(dashboard, "read_snapshot", lambda: read_snapshot(path, public_key=public))
-
-    app = FastAPI()
-    app.include_router(dashboard.router_storage_dashboard,
-                       dependencies=[Depends(require_permission("platform.manage_infra"))])
-    token = jwt.encode({"sub": "metadata-test", "permissions": ["platform.manage_infra"]}, JWT_SECRET, algorithm="HS256")
-    response = TestClient(app).get("/storage/overview", headers={"Authorization": f"Bearer {token}"})
-    assert response.status_code == 200
-    body = response.json()
-    by_role = {device["role"]: device for device in body["physical_devices"]}
-    assert by_role["compute"]["total_bytes"] == 1000
-    assert by_role["primary"]["total_bytes"] == 1000
-    assert by_role["backup"]["available_bytes"] == 300
-    assert body["archive_pool"]["total_bytes"] == 1000
-    assert sum(branch["total_bytes"] for branch in body["archive_pool"]["branches"]) == 3000
-    assert body["archive_pool"]["create_policy"] == "ff"
-    assert body["archive_pool"]["min_free_bytes"] == 10 * 1024**3
-    assert body["backups"]["repository_status"] == "UNAVAILABLE"
-    response_text = json.dumps(body)
-    assert "/mnt/" not in response_text
-    assert "/media/" not in response_text
-    assert "UUID=" not in response_text

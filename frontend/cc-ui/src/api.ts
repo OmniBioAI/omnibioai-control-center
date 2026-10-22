@@ -768,6 +768,9 @@ export interface StorageDevice {
   last_observed_error: string | null
   last_successful_observation: string | null
   aggregate: boolean
+  operational_state: string | null
+  note: string | null
+  power_state?: 'ACTIVE' | 'STANDBY' | null
 }
 
 export interface StorageArchiveBranch {

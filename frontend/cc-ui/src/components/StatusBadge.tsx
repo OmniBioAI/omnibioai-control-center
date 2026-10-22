@@ -96,6 +96,8 @@ const KNOWN: Record<string, { bg: string; color: string }> = {
   match: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
   drifted: { bg: 'rgba(168,85,247,0.15)', color: 'var(--purple)' },
   not_applicable: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
+  // Storage: a disk skipped while asleep is a neutral state, never a fault.
+  standby: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
 }
 
 export default function StatusBadge({ status }: Props) {

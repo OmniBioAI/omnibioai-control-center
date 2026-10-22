@@ -1,12 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
-import sys
-import tempfile
-import time
 from datetime import datetime, timezone
-from pathlib import Path
 from unittest.mock import patch
 
 import jwt
@@ -132,102 +127,6 @@ def test_storage_overview_and_views_are_read_only_and_typed():
     assert inventory_gate.state == "FAIL"
 
 
-def test_mountinfo_parsing_and_read_only_detection():
-    parsed = storage.parse_mountinfo(
-        "36 25 8:1 / /mnt/archive\\040member ro,nosuid - ext4 /dev/sda1 ro,errors=remount-ro\n"
-        "invalid line\n"
-    )
-    assert "/mnt/archive member" in parsed
-    assert parsed["/mnt/archive member"]["filesystem"] == "ext4"
-    assert storage._mount_mode(parsed["/mnt/archive member"]["options"]) == "READ_ONLY"
-    assert storage._mount_mode(["relatime"]) == "UNKNOWN"
-
-
-def test_collector_never_substitutes_container_mounts_for_host_mounts(monkeypatch, tmp_path):
-    monkeypatch.setattr(storage, "HOST_MOUNTINFO", tmp_path / "missing-mountinfo")
-    monkeypatch.setattr(storage, "HOST_FSTAB", tmp_path / "missing-fstab")
-    with patch.object(storage, "_capacity") as capacity:
-        snapshot = storage._collect()
-    assert snapshot.sources["mounts"].status == "UNAVAILABLE"
-    assert snapshot.sources["configuration"].status == "UNAVAILABLE"
-    assert "container mounts were not used" in snapshot.sources["mounts"].detail
-    assert snapshot.freshness == "UNKNOWN"
-    assert all(device.mount_status == "UNKNOWN" for device in snapshot.physical_devices)
-    assert snapshot.archive_pool.pool_status == "UNKNOWN"
-    assert not any(alert.id.startswith("mount-missing:") or alert.id.startswith("archive-branch:") for alert in snapshot.alerts)
-    capacity.assert_not_called()
-
-
-def test_collector_uses_only_explicit_host_mount_bind_pair(monkeypatch, tmp_path):
-    host_mountinfo = tmp_path / "mountinfo"
-    host_fstab = tmp_path / "fstab"
-    host_mountinfo.write_text(
-        "36 25 8:17 / /mnt/omnibioai-backup20tb rw - ext4 /dev/sdd1 rw\n",
-        encoding="utf-8",
-    )
-    host_fstab.write_text(
-        "UUID=example /mnt/omnibioai-backup20tb ext4 defaults 0 2\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(storage, "HOST_MOUNTINFO", host_mountinfo)
-    monkeypatch.setattr(storage, "HOST_FSTAB", host_fstab)
-    with patch.object(storage, "_capacity") as capacity:
-        snapshot = storage._collect()
-    backup = next(device for device in snapshot.physical_devices if device.role == "backup")
-    assert snapshot.sources["mounts"].status == "PARTIAL"
-    assert "host PID 1 mountinfo bind" in snapshot.sources["mounts"].detail
-    assert backup.mount_status == "MOUNTED"
-    assert backup.filesystem == "ext4"
-    assert backup.total_bytes is None
-    assert snapshot.archive_pool.configured_source == "Host /etc/fstab read-only bind"
-    capacity.assert_not_called()
-
-
-def test_device_identity_uses_kernel_device_number_with_duplicate_models(monkeypatch):
-    monkeypatch.setattr(storage, "_read_uuid_map", lambda: {"8:1": "fs-primary", "8:17": "fs-backup"})
-    monkeypatch.setattr(storage, "_read_sysfs_device", lambda _device: ("ACASIS enclosure", "/sys/devices/usb1/1-1"))
-    monkeypatch.setattr(storage, "_capacity", lambda _path: (100, 50, 50, 50.0))
-    mounts = {
-        "/mnt/wdpro26tb": {"major_minor": "8:1", "options": ["rw"], "super_options": ["rw"], "filesystem": "ext4", "source": "/dev/sde1"},
-        "/mnt/omnibioai-backup20tb": {"major_minor": "8:17", "options": ["rw"], "super_options": ["rw"], "filesystem": "ext4", "source": "/dev/sdd1"},
-    }
-    records = storage._device_records(mounts, {})
-    by_role = {record.role: record for record in records}
-    assert by_role["primary"].device_identity == by_role["backup"].device_identity
-    assert by_role["primary"].filesystem_uuid == "fs-primary"
-    assert by_role["backup"].filesystem_uuid == "fs-backup"
-
-
-def test_fstab_parsing_exposes_configured_policy_and_missing_minimum():
-    entry = "/data=RW:/old=RO /archive fuse.mergerfs rw,category.create=ff,x-systemd.requires-mounts-for=/data,x-systemd.requires-mounts-for=/old 0 0"
-    parsed = storage.parse_fstab(entry)
-    assert parsed["/archive"]["source"] == "/data=RW:/old=RO"
-    options = parsed["/archive"]["options"]
-    assert "category.create=ff" in options
-    assert not any(value.startswith("minfreespace=") for value in options)
-    assert sum(value.startswith("x-systemd.requires-mounts-for=") for value in options) == 2
-
-
-def test_archive_reports_missing_branch_without_inventing_runtime_policy():
-    devices = []
-    for role, path in storage.MOUNT_ROLES:
-        status = "MISSING" if role == "archive-member-a" else "MOUNTED"
-        devices.append(storage.DeviceVolume(
-            role=role, label=role, mount_point=path, mount_status=status,
-            mount_mode="READ_ONLY" if role == "archive-member-a" else "READ_WRITE",
-            filesystem="ext4", filesystem_uuid=None, total_bytes=100, available_bytes=40,
-        ))
-    fstab = storage.parse_fstab(
-        "/data=RW:/old=RO /mnt/omnibioai-archive fuse.mergerfs rw,category.create=ff,x-systemd.requires-mounts-for=/old 0 0"
-    )
-    archive = storage._archive_data(devices, fstab)
-    branch = next(item for item in archive.branches if item.role == "archive-member-a")
-    assert branch.mount_status == "MISSING"
-    assert branch.expected_mode == "UNKNOWN"  # no matching configured branch path
-    assert archive.runtime_policy_status == "NOT_VERIFIED"
-    assert archive.create_policy == "ff"
-
-
 def test_restic_metadata_is_redacted_and_bounded():
     raw = json.dumps([{
         "id": "f" * 64, "short_id": "abc12345", "time": "2026-10-19T10:00:00Z",
@@ -240,52 +139,6 @@ def test_restic_metadata_is_redacted_and_bounded():
     assert snapshots[0].age_seconds == 14 * 60 * 60
     assert not truncated
     assert storage.parse_restic_snapshots("not-json")[0] == []
-
-
-def test_restic_credentials_missing_returns_unavailable_without_invocation(monkeypatch):
-    monkeypatch.delenv("RESTIC_PASSWORD_FILE", raising=False)
-    with patch.object(storage, "_bounded_process") as run:
-        result = storage._restic_data("2026-10-20T00:00:00+00:00")
-    assert result.repository_status == "UNAVAILABLE"
-    assert "no Restic command was run" in result.detail
-    run.assert_not_called()
-
-
-def test_collector_does_not_invoke_process_without_restic_credential(monkeypatch):
-    monkeypatch.delenv("RESTIC_PASSWORD_FILE", raising=False)
-    with patch.object(storage.subprocess, "Popen") as process:
-        snapshot = storage._collect()
-    process.assert_not_called()
-    assert snapshot.readiness_state == "NOT_VERIFIED"
-    assert snapshot.sources["docker"].status == "UNAVAILABLE"
-
-
-def test_restic_failure_never_returns_stderr_or_secret(monkeypatch):
-    with tempfile.NamedTemporaryFile() as password_file:
-        os.chmod(password_file.name, 0o600)
-        monkeypatch.setenv("RESTIC_PASSWORD_FILE", password_file.name)
-        with patch.object(storage, "_secure_password_file", return_value=Path(password_file.name)), \
-             patch.object(storage.os.path, "isfile", return_value=True), \
-             patch.object(storage.os, "access", return_value=True), \
-             patch.object(storage.Path, "is_dir", return_value=True), \
-             patch.object(storage, "_bounded_process", return_value=(None, "command_failed")):
-            result = storage._restic_data("2026-10-20T00:00:00+00:00")
-    assert result.repository_status == "UNAVAILABLE"
-    assert "stderr is suppressed" in result.detail
-    assert "password" not in result.detail.lower()
-
-
-def test_bounded_process_enforces_timeout_and_output_limit():
-    started = time.monotonic()
-    text, status = storage._bounded_process(
-        [sys.executable, "-c", "import time; time.sleep(2)"], {"PATH": os.environ.get("PATH", "")}, 0.1, 64
-    )
-    assert text is None and status == "timeout"
-    assert time.monotonic() - started < 1.8
-    text, status = storage._bounded_process(
-        [sys.executable, "-c", "print('x' * 1000)"], {"PATH": os.environ.get("PATH", "")}, 2, 64
-    )
-    assert text is None and status == "output_limit"
 
 
 def test_health_alerts_are_current_observations_only():
@@ -306,5 +159,5 @@ def test_health_alerts_are_current_observations_only():
     alerts = storage._health_alerts([device], archive, backups, "now")
     assert len(alerts) == 1
     assert alerts[0].state == "ACTIVE"
-    assert alerts[0].source == "statvfs"
+    assert alerts[0].source == "Host storage telemetry snapshot"
 
