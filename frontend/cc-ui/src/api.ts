@@ -770,6 +770,7 @@ export interface StorageDevice {
   aggregate: boolean
   operational_state: string | null
   note: string | null
+  power_state?: 'ACTIVE' | 'STANDBY' | null
 }
 
 export interface StorageArchiveBranch {

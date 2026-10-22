@@ -19,17 +19,25 @@ findmnt -n -o UUID /mnt/omnibioai-archive22tb
 # The probe directory must be on the root filesystem: this must print the root UUID.
 findmnt -n -o UUID -T /var/lib
 
-# SMART is queried for whole disks by kernel name, which can change across
-# reboots. Confirm backup is sdd (sdd1) and archive is sda (sda1).
-lsblk -o NAME,UUID,MOUNTPOINT
+# SMART disks are configured by filesystem UUID and resolved to the whole disk
+# at run time, exactly like this. Each must print exactly one line, a whole disk
+# (today: sdd for backup, sda for archive). Anything else, and the collector
+# records an error for that role instead of guessing.
+lsblk -no PKNAME /dev/disk/by-uuid/9d872bab-a481-4fca-8ad8-8031d78c0dbc
+lsblk -no PKNAME /dev/disk/by-uuid/6a805bb7-2513-435f-9cd4-b9970a0e4fc4
+
+# The Restic repository is present. Expect: config  data  index  keys  snapshots
+sudo ls /mnt/omnibioai-backup20tb/restic
 
 # Tools the collector runs.
 command -v smartctl findmnt dmesg restic python3
 dmesg --help | grep -q -- --since && echo "dmesg supports --since"
 ```
 
-If any UUID or disk name differs, stop. Update `config/control_center.yaml`
-and the conf file in step 2 to match before continuing.
+If any UUID differs, a `lsblk` line is not a single whole disk, or the Restic
+listing is missing any of those five entries, stop. Update
+`config/control_center.yaml` and the conf file in step 2 to match before
+continuing.
 
 ## 2. Install the collector (sudo)
 
@@ -43,8 +51,10 @@ sudo install -o root -g root -m 0600 ops/storage-telemetry/storage-telemetry.con
 sudo systemd-analyze verify /etc/systemd/system/omnibioai-storage-telemetry.service /etc/systemd/system/omnibioai-storage-telemetry.timer
 ```
 
-Do not add the primary disk (`/mnt/wdpro26tb`, `sde`) to either variable in
-`/etc/omnibioai/storage-telemetry.conf`.
+The installed conf maps roles to filesystem UUIDs only:
+`STORAGE_TELEMETRY_DISKS="backup:9d872bab-… archive:6a805bb7-…"`. Never put a
+`/dev/sdX` name there. Do not add the primary disk (`/mnt/wdpro26tb`,
+`f9b2ec0f-…`) to either variable.
 
 ## 3. Restic password (sudo)
 
@@ -73,7 +83,11 @@ Check the snapshot before enabling the timer:
 
 - `mounts`: root, backup and archive each show `"mounted": true` with the
   expected `uuid`. There is no `primary` entry.
-- `smart`: entries for `backup` and `archive` only, each with `"error": null`.
+- `smart`: entries for `backup` and `archive` only, each with the resolved
+  `device` (`/dev/sdd`, `/dev/sda`) and `"error": null`. `state` is `active`
+  (with attributes) or `standby` (disk asleep, SMART skipped so it isn't woken,
+  previous attribute 199 kept as `crc_baseline`). The dashboard shows
+  `standby` as a neutral "Standby".
 - `kernel`: only `counts`, `devices`, `window_hours` and `error`, with no raw
   log lines.
 - `restic`: `"error": null`. Snapshot paths are reduced to `…/<name>`.
@@ -83,24 +97,48 @@ sudo systemctl enable --now omnibioai-storage-telemetry.timer
 systemctl list-timers omnibioai-storage-telemetry.timer --no-pager
 ```
 
-## 5. Wire the live control-center (no sudo, not part of this PR)
+## 5. Deploy control-center (no sudo, after #108 merges)
 
 The live stack loads `release-candidates/compose.release-pin.yml`, whose
-control-center block uses `volumes: !override`. Both changes below are needed:
+control-center block uses `volumes: !override`. Steps 2 and 4 must be done
+first: the new binds use `create_host_path: false`, so a recreate fails if
+`/var/lib/omnibioai-storage-probe` or `/var/lib/omnibioai` is missing.
 
-1. **Binds:** merge OmniBioAI/omnibioai-ecosystem#18. It adds the four
-   read-only binds and `STORAGE_TELEMETRY_PATH`. Steps 2 and 4 must be done
-   first, because the binds use `create_host_path: false` and a recreate fails
-   if `/var/lib/omnibioai-storage-probe` or `/var/lib/omnibioai` is missing.
-2. **Image:** pin an image built from this PR. The current pin
-   (`obai-control-center:2572cd551bdb`) predates it and ignores the binds.
+1. Merge OmniBioAI/omnibioai-ecosystem#18 (the four read-only binds and
+   `STORAGE_TELEMETRY_PATH`). Then confirm the live pin file differs from
+   `origin/main` only by #18 before bringing that change in:
 
-Then, from `omnibioai-studio/`, render the config, check it, and recreate only
-control-center:
+   ```bash
+   cd ~/Desktop/omnibioai-ecosystem && git fetch origin
+   git diff --no-index release-candidates/compose.release-pin.yml <(git show origin/main:release-candidates/compose.release-pin.yml)
+   ```
+
+2. Update the control-center checkout to a clean `main` that includes #108.
+   `obai-deploy` builds from its committed `HEAD`.
+
+   ```bash
+   git -C ~/Desktop/omnibioai-ecosystem/omnibioai-control-center switch main
+   git -C ~/Desktop/omnibioai-ecosystem/omnibioai-control-center pull --ff-only
+   ```
+
+3. Build, pin and deploy control-center only:
+
+   ```bash
+   ~/bin/obai-deploy check
+   ~/bin/obai-deploy release control-center
+   ```
+
+   This writes the new image tag into the pin file, tags the old image for
+   rollback, and waits for the service to be healthy.
+
+4. Open a pin PR in `omnibioai-ecosystem` with the updated
+   `release-candidates/compose.release-pin.yml` (the new control-center image
+   tag).
+
+Check the result:
 
 ```bash
-docker compose config control-center | grep -E 'image:|storage-t'
-docker compose up -d --no-deps control-center
+~/bin/obai-deploy status
 docker exec omnibioai-studio-control-center-1 ls /run/storage-targets /run/storage-telemetry
 ```
 
@@ -114,6 +152,7 @@ being replaced."
 sudo systemctl disable --now omnibioai-storage-telemetry.timer
 ```
 
-Revert the pin-file change and recreate control-center. The installed files
+Run `~/bin/obai-deploy rollback control-center` to go back to the previous
+image. Revert the pin-file change if the binds must go too. The installed files
 under `/usr/local/libexec/omnibioai`, `/etc/omnibioai` and `/var/lib/omnibioai*`
 do nothing without the timer. Remove them only if you no longer want them.

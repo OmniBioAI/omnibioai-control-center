@@ -41,10 +41,16 @@ function validOverview(value: unknown): value is StorageOverview {
     && Array.isArray(data.alerts) && Array.isArray(data.readiness_gates) && !!data.sources
 }
 
+// A sleeping disk is skipped, not faulty: show a neutral "Standby" unless a real warning applies.
+function healthLabel(device: StorageDevice): string {
+  return device.power_state === 'STANDBY' && device.health === 'UNKNOWN' ? 'Standby' : device.health
+}
+
 function CapacityCard({ device }: { device: StorageDevice }) {
   const utilization = device.utilization_percent
   const hasCapacity = device.total_bytes != null && device.used_bytes != null && device.available_bytes != null
-  const status = device.health !== 'UNKNOWN' ? device.health : device.mount_status
+  const health = healthLabel(device)
+  const status = health !== 'UNKNOWN' ? health : device.mount_status
   return (
     <Card style={{ minWidth: 0 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
@@ -74,7 +80,7 @@ function DeviceTable({ devices }: { devices: StorageDevice[] }) {
     { key: 'filesystem', header: 'Filesystem', render: row => row.filesystem ?? 'Unavailable' },
     { key: 'mount', header: 'Mount', render: row => <><code>{row.mount_point}</code><div><StatusBadge status={row.mount_status} /> <StatusBadge status={row.mount_mode} /></div></> },
     { key: 'capacity', header: 'Capacity / Available', render: row => <>{bytes(row.total_bytes)}<div style={{ color: 'var(--muted)', fontSize: 11 }}>{bytes(row.available_bytes)} available</div></> },
-    { key: 'health', header: 'Health', render: row => <><StatusBadge status={row.health} /><div style={{ color: 'var(--muted)', fontSize: 11 }}>{row.smart_status === 'UNAVAILABLE' ? 'SMART unavailable' : row.health_detail}</div><div style={{ color: 'var(--muted)', fontSize: 10 }}>Transport: {row.transport ?? 'Unknown'}{row.transport_topology ? ` · ${row.transport_topology}` : ''}</div><div style={{ color: 'var(--muted)', fontSize: 10 }}>Last observed error: {row.last_observed_error ?? 'None available'} · Last successful observation: {date(row.last_successful_observation)}</div></> },
+    { key: 'health', header: 'Health', render: row => <><StatusBadge status={healthLabel(row)} /><div style={{ color: 'var(--muted)', fontSize: 11 }}>{row.smart_status === 'UNAVAILABLE' ? 'SMART unavailable' : row.health_detail}</div><div style={{ color: 'var(--muted)', fontSize: 10 }}>Transport: {row.transport ?? 'Unknown'}{row.transport_topology ? ` · ${row.transport_topology}` : ''}</div><div style={{ color: 'var(--muted)', fontSize: 10 }}>Last observed error: {row.last_observed_error ?? 'None available'} · Last successful observation: {date(row.last_successful_observation)}</div></> },
   ]} /></div>
 }
 

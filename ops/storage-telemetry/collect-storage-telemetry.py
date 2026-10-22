@@ -18,6 +18,10 @@ ERROR_PATTERNS = {
     "resets": re.compile(r"reset", re.IGNORECASE),
     "ext4_errors": re.compile(r"EXT4-fs error", re.IGNORECASE),
 }
+UUID = re.compile(r"[A-Fa-f0-9-]{8,80}")
+ROLE = re.compile(r"[a-z][a-z0-9_-]{0,31}")
+WHOLE_DISK = re.compile(r"sd[a-z]{1,2}|nvme\d+n\d+")
+STANDBY_MESSAGE = re.compile(r"Device is in (STANDBY|SLEEP)", re.IGNORECASE)
 DEVICE_NAME = re.compile(r"\b(sd[a-z]{1,2}\d*|nvme\d+(?:n\d+(?:p\d+)?)?|dm-\d+)\b")
 MAX_KERNEL_DEVICES = 16
 
@@ -39,26 +43,56 @@ def run(argv: list[str], env: dict[str, str] | None = None, timeout: int = 120,
 
 
 def previous_crc_counts() -> dict[str, int]:
+    """Last known attribute 199 per role; roles without a reading have no baseline."""
     try:
         prior = json.loads(OUTPUT.read_text(encoding="utf-8"))
-        return {
-            str(item["role"]): int(item.get("attributes", {}).get("199", 0))
-            for item in prior.get("smart", []) if isinstance(item, dict) and item.get("role")
-        }
-    except (OSError, ValueError, TypeError, KeyError):
+    except (OSError, ValueError):
         return {}
+    baselines = {}
+    for item in prior.get("smart", []) if isinstance(prior, dict) and isinstance(prior.get("smart"), list) else []:
+        if not isinstance(item, dict) or not item.get("role"):
+            continue
+        attributes = item.get("attributes") if isinstance(item.get("attributes"), dict) else {}
+        value = attributes.get("199", item.get("crc_baseline"))
+        if isinstance(value, int) and not isinstance(value, bool):
+            baselines[str(item["role"])] = value
+    return baselines
 
 
-def smart_record(role: str, device: str, previous: dict[str, int]) -> dict[str, object]:
-    # smartctl uses an eight-bit health bitmask; JSON remains useful for every
-    # normal bitmask result, including failing attributes.
-    text, error = run(["smartctl", "-H", "-A", "-d", "sat", "--json=c", device], timeout=45,
+def resolve_disk(uuid: str) -> tuple[str | None, str | None]:
+    """Map a filesystem UUID to its whole disk; never guess a device name."""
+    text, error = run(["lsblk", "-no", "PKNAME", f"/dev/disk/by-uuid/{uuid}"], timeout=15)
+    if error:
+        return None, "filesystem UUID did not resolve to a block device"
+    lines = (text or "").splitlines()
+    if len(lines) != 1 or not WHOLE_DISK.fullmatch(lines[0].strip()):
+        return None, "filesystem UUID did not resolve to exactly one whole disk"
+    return f"/dev/{lines[0].strip()}", None
+
+
+def smart_record(role: str, uuid: str, previous: dict[str, int]) -> dict[str, object]:
+    device, error = resolve_disk(uuid)
+    record: dict[str, object] = {"role": role, "device": device, "state": None, "passed": None,
+                                 "attributes": {}, "error": error}
+    # Carried forward until a fresh attribute 199 reading replaces it.
+    if role in previous:
+        record["crc_baseline"] = previous[role]
+    if device is None:
+        return record
+    # -n standby skips (and does not wake) a sleeping disk. smartctl uses an
+    # eight-bit status bitmask; its JSON stays useful for every normal result.
+    text, error = run(["smartctl", "-n", "standby", "-H", "-A", "-d", "sat", "--json=c", device], timeout=45,
                       accepted_statuses=set(range(256)))
-    record: dict[str, object] = {"role": role, "device": device, "passed": None, "attributes": {}, "error": error}
+    record["error"] = error
     if text is None:
         return record
     try:
         raw = json.loads(text)
+        messages = raw.get("smartctl", {}).get("messages")
+        if isinstance(messages, list) and any(
+                isinstance(item, dict) and STANDBY_MESSAGE.search(str(item.get("string", ""))) for item in messages):
+            record.update({"state": "standby", "error": None})
+            return record
         table = raw.get("ata_smart_attributes", {}).get("table")
         if not isinstance(table, list):
             raise ValueError("SMART attribute table missing")
@@ -70,22 +104,25 @@ def smart_record(role: str, device: str, previous: dict[str, int]) -> dict[str, 
             for item in table if isinstance(item, dict) and item.get("id") in {5, 197, 198, 199}
         }
         record.update({
+            "state": "active",
             "passed": smart_status["passed"],
             "attributes": attributes,
             "udma_crc_error_count_rise": attributes.get("199", 0) > previous.get(role, attributes.get("199", 0)),
             "error": None,
         })
-    except (ValueError, TypeError, KeyError):
+        record.pop("crc_baseline", None)
+    except (AttributeError, ValueError, TypeError, KeyError):
         record["error"] = "smartctl returned invalid JSON"
     return record
 
 
 def disk_list() -> list[tuple[str, str]]:
+    """Read role:filesystem-UUID pairs; the disk is resolved from the UUID at run time."""
     values = []
     for item in os.environ.get("STORAGE_TELEMETRY_DISKS", "").split():
-        role, separator, device = item.partition(":")
-        if separator and re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", role) and re.fullmatch(r"/dev/[A-Za-z0-9._/-]+", device):
-            values.append((role, device))
+        role, separator, uuid = item.partition(":")
+        if separator and ROLE.fullmatch(role) and UUID.fullmatch(uuid):
+            values.append((role, uuid))
     return values
 
 
@@ -94,9 +131,8 @@ def target_list() -> list[tuple[str, str, str]]:
     values = []
     for item in os.environ.get("STORAGE_TELEMETRY_TARGETS", "").split():
         parts = item.split("|", 2)
-        if (len(parts) == 3 and re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", parts[0])
-                and re.fullmatch(r"/[A-Za-z0-9._/-]*", parts[1])
-                and re.fullmatch(r"[A-Fa-f0-9-]{8,80}", parts[2])):
+        if (len(parts) == 3 and ROLE.fullmatch(parts[0])
+                and re.fullmatch(r"/[A-Za-z0-9._/-]*", parts[1]) and UUID.fullmatch(parts[2])):
             values.append((parts[0], parts[1], parts[2]))
     return values
 
@@ -163,7 +199,7 @@ def main() -> int:
     document = {
         "schema_version": 1,
         "observed_at": datetime.now(timezone.utc).isoformat(),
-        "smart": [smart_record(role, device, previous) for role, device in disk_list()],
+        "smart": [smart_record(role, uuid, previous) for role, uuid in disk_list()],
         "mounts": mount_records(),
         "kernel": kernel_summary(),
         "restic": restic_snapshot(),

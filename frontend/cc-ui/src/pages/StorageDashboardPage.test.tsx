@@ -97,6 +97,23 @@ describe('StorageDashboardPage', () => {
     expect(await screen.findByText('This target is being replaced.')).toBeTruthy()
   })
 
+  it('shows a sleeping disk as a neutral Standby', async () => {
+    fetchStorageOverview.mockResolvedValueOnce({
+      ...sample,
+      physical_devices: [{
+        ...sample.physical_devices[0], power_state: 'STANDBY', health: 'UNKNOWN',
+        health_detail: 'Standby: SMART skipped so the disk is not woken',
+      }],
+    })
+    render(<StorageDashboardPage />)
+    const badges = await screen.findAllByText('Standby')
+    expect(badges.length).toBeGreaterThan(0)
+    expect(screen.getByText('Standby: SMART skipped so the disk is not woken')).toBeTruthy()
+    expect(screen.queryByText('UNKNOWN')).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: 'Devices & Volumes' }))
+    expect(screen.getAllByText('Standby').length).toBeGreaterThan(0)
+  })
+
   it('shows Not mounted without a no-data prefix', async () => {
     fetchStorageOverview.mockResolvedValueOnce({
       ...sample,

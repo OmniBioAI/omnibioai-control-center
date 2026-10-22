@@ -214,3 +214,43 @@ def test_snapshot_reader_rejects_non_regular_files(tmp_path, kind):
     else:
         path.mkdir()
     assert read_host_snapshot(path) == (None, "snapshot file is not a safe regular file")
+
+
+STANDBY = {"role": "backup", "device": "/dev/sdd", "state": "standby", "passed": None,
+           "attributes": {}, "error": None, "crc_baseline": 4}
+
+
+def test_standby_disk_is_neutral_not_a_fault(monkeypatch):
+    arrange(monkeypatch, snapshot(smart=[STANDBY]))
+    result = dashboard._collect()
+    device = result.physical_devices[0]
+    assert device.power_state == "STANDBY"
+    assert device.health == "UNKNOWN"
+    assert device.health_detail == "Standby: SMART skipped so the disk is not woken"
+    assert device.smart_status == "UNKNOWN"
+    assert device.total_bytes == 1000
+    assert not [alert for alert in result.alerts if alert.affected_device == "Backup"]
+
+
+def test_standby_does_not_hide_a_capacity_warning(monkeypatch):
+    arrange(monkeypatch, snapshot(smart=[STANDBY]))
+    monkeypatch.setattr(dashboard, "_capacity", lambda _path: (1000, 900, 100, 90.0))
+    device = dashboard._collect().physical_devices[0]
+    assert device.health == "WARNING"
+    assert device.power_state == "STANDBY"
+
+
+def test_active_smart_reading_reports_active_power_state(monkeypatch):
+    arrange(monkeypatch, snapshot(smart=[{**STANDBY, "state": "active", "passed": True,
+                                          "attributes": {"5": 0, "199": 4}}]))
+    device = dashboard._collect().physical_devices[0]
+    assert (device.power_state, device.health, device.smart_status) == ("ACTIVE", "HEALTHY", "AVAILABLE")
+
+
+def test_unresolved_smart_disk_shows_the_collector_reason(monkeypatch):
+    arrange(monkeypatch, snapshot(smart=[{"role": "backup", "device": None, "state": None, "passed": None,
+                                          "attributes": {}, "error": "filesystem UUID did not resolve to exactly one whole disk"}]))
+    device = dashboard._collect().physical_devices[0]
+    assert device.health == "UNKNOWN"
+    assert device.power_state is None
+    assert device.health_detail == "No data: SMART filesystem UUID did not resolve to exactly one whole disk"

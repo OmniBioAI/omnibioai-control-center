@@ -21,7 +21,7 @@ Never place the Restic password in this repository. `/etc/omnibioai/storage-tele
 
 ```ini
 STORAGE_TELEMETRY_TARGETS="root|/|9f3cd4b6-f34e-435e-9fcf-ed7861f7cf99 backup|/mnt/omnibioai-backup20tb|9d872bab-a481-4fca-8ad8-8031d78c0dbc archive|/mnt/omnibioai-archive22tb|6a805bb7-2513-435f-9cd4-b9970a0e4fc4"
-STORAGE_TELEMETRY_DISKS="backup:/dev/sdd archive:/dev/sda"
+STORAGE_TELEMETRY_DISKS="backup:9d872bab-a481-4fca-8ad8-8031d78c0dbc archive:6a805bb7-2513-435f-9cd4-b9970a0e4fc4"
 RESTIC_REPOSITORY=/mnt/omnibioai-backup20tb/restic
 RESTIC_PASSWORD_FILE=/etc/omnibioai/restic-password
 ```
@@ -29,12 +29,17 @@ RESTIC_PASSWORD_FILE=/etc/omnibioai/restic-password
 The UUIDs above are the current mapping: `/` → root filesystem UUID,
 `sdd1` → backup UUID, and `sda1` → archive UUID. The collector checks each
 with `findmnt -n -o UUID <path>`; re-check them the same way before installing
-if disks have changed. `sdX` names can change across reboots, so confirm
-`STORAGE_TELEMETRY_DISKS` with `lsblk -o NAME,UUID,MOUNTPOINT` as well.
+if disks have changed. `STORAGE_TELEMETRY_DISKS` uses the same filesystem
+UUIDs, because `sdX` names can change across reboots.
 
 What the collector runs, once an hour (`OnCalendar=hourly`):
 
-- `smartctl -H -A -d sat --json=c` on the listed whole-disk devices only.
+- `lsblk -no PKNAME /dev/disk/by-uuid/<uuid>` for each SMART role, to find
+  its whole disk. The result must be exactly one `sdX` or `nvmeXnY`, recorded
+  as `device`; otherwise the role gets an error and SMART is not run.
+- `smartctl -n standby -H -A -d sat --json=c` on that disk. A sleeping disk is
+  skipped (not woken) and recorded as `"state": "standby"` with no error; the
+  last attribute 199 reading is kept as `crc_baseline` for the next run.
 - `findmnt -n -o UUID <path>` for each target.
 - `dmesg --since "24 hours ago"`, reduced to fixed-label counts (I/O errors,
   resets, ext4 errors) and the kernel device names (`sdd`, `sda1`,
@@ -43,5 +48,5 @@ What the collector runs, once an hour (`OnCalendar=hourly`):
   --no-lock`, each with a 10-minute timeout. No other Restic command is run.
 
 The whole service run is capped at 30 minutes. The atomically written JSON
-(`root:root 0644`) contains bounded SMART values, mount UUIDs and match
+(`root:root 0644`) contains bounded SMART values and power state, mount UUIDs and match
 booleans, redacted Restic snapshot metadata and stats, and the kernel counts.

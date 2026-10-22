@@ -56,6 +56,7 @@ class DeviceVolume(BaseModel):
     transport: str | None = None
     transport_topology: str | None = None
     smart_status: Literal["AVAILABLE", "UNAVAILABLE", "UNKNOWN"] = "UNKNOWN"
+    power_state: Literal["ACTIVE", "STANDBY"] | None = None
     health: HealthState = "UNKNOWN"
     health_detail: str = "Health telemetry unavailable"
     last_observed_error: str | None = None
@@ -383,6 +384,7 @@ def _collect() -> StorageOverview:
         )
         mounted = verified_mount and total is not None
         smart = smart_by_role.get(target.role)
+        standby = bool(smart and not smart.get("error") and smart.get("state") == "standby")
         attributes = smart.get("attributes", {}) if smart else {}
         failing = [number for number in ("5", "197", "198") if int(attributes.get(number, 0) or 0) > 0]
         crc_rise = bool(smart and smart.get("udma_crc_error_count_rise"))
@@ -397,10 +399,15 @@ def _collect() -> StorageOverview:
             health, detail = "WARNING", "Filesystem utilization is at least 85%"
         if not mounted:
             health = "UNKNOWN"
-        if not smart or smart.get("error"):
+        if standby:
+            # SMART was skipped so the disk is not woken; not a fault.
+            if health == "HEALTHY":
+                health, detail = "UNKNOWN", "Standby: SMART skipped so the disk is not woken"
+        elif not smart or smart.get("error"):
             if health == "HEALTHY":
                 health = "UNKNOWN"
-                detail = f"No data: {snapshot_error or 'SMART observation is missing for this target'}"
+                smart_error = str(smart.get("error"))[:200] if smart and smart.get("error") else None
+                detail = f"No data: {snapshot_error or (f'SMART {smart_error}' if smart_error else 'SMART observation is missing for this target')}"
         if failing:
             health = "WARNING"
             detail = f"SMART attributes {', '.join(failing)} report non-zero failing values"
@@ -414,7 +421,8 @@ def _collect() -> StorageOverview:
             role=target.role, label=target.name, mount_point=target.host_path,
             mount_status="MOUNTED" if mounted else "MISSING", mount_mode="READ_ONLY" if mounted else "UNKNOWN",
             total_bytes=total, used_bytes=used, available_bytes=available, utilization_percent=percent,
-            smart_status="AVAILABLE" if smart and not smart.get("error") else "UNAVAILABLE",
+            smart_status="UNKNOWN" if standby else "AVAILABLE" if smart and not smart.get("error") else "UNAVAILABLE",
+            power_state="STANDBY" if standby else "ACTIVE" if smart and smart.get("state") == "active" else None,
             health=health, health_detail=detail, last_successful_observation=observed_at if mounted else None,
             last_observed_error=None if mounted else detail, operational_state=target.state, note=note,
         )
