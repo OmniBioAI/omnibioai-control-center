@@ -7,6 +7,8 @@ copied verbatim from the installed binary (`strings $(command -v smartctl)`):
 - `Read Device Identity failed: %s`
 - `A mandatory SMART command failed: exiting. To continue, add one or more '-T permissive' options.`
 - `CHECK POWER MODE not implemented, ignoring -n option`
+- `Device is in SLEEP mode, exit(2)`: what the Seagate bridges on `sdg`/`sdh` report for
+  `-n standby` even when the disk is awake (`sdg-sat-sleep-mode-false.json`)
 
 To replace them with real output from the 2 TB disks (read-only; may spin them up):
 

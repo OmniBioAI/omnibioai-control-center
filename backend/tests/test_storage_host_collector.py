@@ -517,3 +517,88 @@ def test_previous_smart_records_reads_the_last_snapshot(monkeypatch, tmp_path):
     assert list(collector.previous_smart_records()) == ["data2tb"]
     collector.OUTPUT.write_text(json.dumps({"smart": "junk"}), encoding="utf-8")
     assert collector.previous_smart_records() == {}
+
+
+SLEEP_MESSAGE = "Device is in SLEEP mode, exit(2)"
+
+
+def test_sleep_mode_fixture_carries_the_exact_message():
+    raw = json.loads(fixture("sdg-sat-sleep-mode-false.json"))
+    assert collector.smartctl_messages(raw) == [SLEEP_MESSAGE]
+    assert raw["smartctl"]["exit_status"] == 2
+
+
+def test_sleep_mode_is_standby_for_a_disk_with_a_working_power_check(monkeypatch):
+    monkeypatch.delenv("STORAGE_TELEMETRY_NO_POWER_CHECK", raising=False)
+    calls = bridge(monkeypatch, fixture("sdg-sat-sleep-mode-false.json"), fixture("sdg-scsi-health-ok.json"), disk="sdd")
+    record = collector.smart_record("backup", BACKUP_UUID, {"backup": 4}, now=NOW)
+    assert (record["state"], record["error"], record.get("power_state")) == ("standby", None, None)
+    assert record["crc_baseline"] == 4
+    assert [argv for argv in calls if argv[0] == "smartctl"] == [
+        ["smartctl", "-n", "standby", "-H", "-A", "-d", "sat", "--json=c", "/dev/sdd"]]   # no SCSI fallback
+
+
+def test_without_the_opt_out_a_false_sleep_answer_hides_the_disk(monkeypatch):
+    # The bug this opt-out fixes: the bridge always answers SLEEP, so the fallback never runs.
+    monkeypatch.delenv("STORAGE_TELEMETRY_NO_POWER_CHECK", raising=False)
+    calls = bridge(monkeypatch, fixture("sdg-sat-sleep-mode-false.json"), fixture("sdg-scsi-health-ok.json"))
+    record = collector.smart_record("data2tb", DATA_UUID, {}, now=NOW)
+    assert record["state"] == "standby" and record["passed"] is None
+    assert not [argv for argv in calls if "scsi" in argv]
+
+
+@pytest.mark.parametrize(("role", "uuid", "disk", "sat_fixture"), (
+    ("data2tb", DATA_UUID, "sdg", "sdg-sat-read-device-identity-failed.json"),
+    ("archive2tb-b", B_UUID, "sdh", "sdh-sat-mandatory-command-failed.json"),
+))
+def test_opted_out_roles_skip_the_power_check_and_fall_back_to_scsi(monkeypatch, role, uuid, disk, sat_fixture):
+    monkeypatch.setenv("STORAGE_TELEMETRY_NO_POWER_CHECK", "data2tb archive2tb-b")
+    calls = bridge(monkeypatch, fixture(sat_fixture), fixture("sdg-scsi-health-ok.json"), disk=disk)
+    record = collector.smart_record(role, uuid, {}, now=NOW)
+    assert [argv for argv in calls if argv[0] == "smartctl"] == [
+        ["smartctl", "-H", "-A", "-d", "sat", "--json=c", f"/dev/{disk}"],
+        ["smartctl", "-H", "-d", "scsi", "--json=c", f"/dev/{disk}"],
+    ]
+    assert not [argv for argv in calls if "-n" in argv or "standby" in argv or "-T" in argv]
+    assert (record["smart_mode"], record["power_state"], record["passed"], record["error"]) == (
+        "scsi_health_only", "unknown", True, None)
+
+
+def test_opted_out_role_ignores_a_sleep_answer(monkeypatch):
+    monkeypatch.setenv("STORAGE_TELEMETRY_NO_POWER_CHECK", "data2tb")
+    raw = json.loads(fixture("sat-check-power-mode-rejected.json"))
+    raw["smartctl"]["messages"] = [{"string": SLEEP_MESSAGE, "severity": "information"}]
+    bridge(monkeypatch, json.dumps(raw))
+    record = collector.smart_record("data2tb", DATA_UUID, {}, now=NOW)
+    assert (record["state"], record["power_state"], record["smart_mode"], record["passed"]) == (None, "unknown", "full", True)
+    assert record["attributes"] == {"5": 0, "197": 0, "198": 0, "199": 2}
+
+
+def test_opted_out_role_that_answers_sat_records_full_smart_with_unknown_power(monkeypatch):
+    monkeypatch.setenv("STORAGE_TELEMETRY_NO_POWER_CHECK", "data2tb")
+    raw = json.loads(fixture("sat-check-power-mode-rejected.json"))
+    raw["smartctl"]["messages"] = []
+    bridge(monkeypatch, json.dumps(raw))
+    record = collector.smart_record("data2tb", DATA_UUID, {}, now=NOW)
+    assert (record["state"], record["power_state"], record["smart_mode"]) == (None, "unknown", "full")
+
+
+def test_opted_out_role_is_checked_at_most_every_six_hours(monkeypatch, tmp_path):
+    monkeypatch.setenv("STORAGE_TELEMETRY_NO_POWER_CHECK", "data2tb archive2tb-b")
+    monkeypatch.setattr(collector, "OUTPUT", tmp_path / "storage-telemetry.json")
+    calls = bridge(monkeypatch, fixture("sdg-sat-read-device-identity-failed.json"), fixture("sdg-scsi-health-ok.json"))
+    for hour in range(13):
+        last = collector.previous_smart_records().get("data2tb")
+        record = collector.smart_record("data2tb", DATA_UUID, {}, last, now=NOW + timedelta(hours=hour))
+        collector.OUTPUT.write_text(json.dumps({"smart": [record]}), encoding="utf-8")
+        assert record["power_state"] == "unknown" and record["passed"] is True
+    smartctl = [argv for argv in calls if argv[0] == "smartctl"]
+    assert len([argv for argv in smartctl if "sat" in argv]) == 3        # hours 0, 6 and 12
+    assert not [argv for argv in smartctl if "-n" in argv]
+
+
+def test_opted_out_roles_ignore_malformed_entries(monkeypatch):
+    monkeypatch.setenv("STORAGE_TELEMETRY_NO_POWER_CHECK", "data2tb Bad ../x archive2tb-b")
+    assert collector.power_check_disabled_roles() == {"data2tb", "archive2tb-b"}
+    monkeypatch.delenv("STORAGE_TELEMETRY_NO_POWER_CHECK")
+    assert collector.power_check_disabled_roles() == set()

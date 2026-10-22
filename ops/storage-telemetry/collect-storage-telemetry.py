@@ -124,6 +124,15 @@ def resolve_disk(uuid: str) -> tuple[str | None, str | None]:
     return f"/dev/{lines[0].strip()}", None
 
 
+def power_check_disabled_roles() -> set[str]:
+    """Roles whose bridge misreports power mode, so -n standby must not be used.
+
+    The Seagate bridges here answer "Device is in SLEEP mode, exit(2)" even
+    right after a read woke the disk, which would hide them forever.
+    """
+    return {role for role in os.environ.get("STORAGE_TELEMETRY_NO_POWER_CHECK", "").split() if ROLE.fullmatch(role)}
+
+
 def smart_record(role: str, uuid: str, previous: dict[str, int], last: dict[str, object] | None = None,
                  now: datetime | None = None) -> dict[str, object]:
     moment = now or datetime.now(timezone.utc)
@@ -142,9 +151,13 @@ def smart_record(role: str, uuid: str, previous: dict[str, int], last: dict[str,
     # -n standby skips (and does not wake) a sleeping disk. smartctl uses an
     # eight-bit status bitmask; its JSON stays useful for every normal result.
     nvme = device.startswith("/dev/nvme")
-    text, error = run(["smartctl", "-n", "standby", "-H", "-A", "-d", "nvme" if nvme else "sat", "--json=c", device],
+    no_power_check = role in power_check_disabled_roles()
+    power_check = [] if no_power_check else ["-n", "standby"]
+    text, error = run(["smartctl", *power_check, "-H", "-A", "-d", "nvme" if nvme else "sat", "--json=c", device],
                       timeout=45, accepted_statuses=set(range(256)))
     record["error"] = error
+    if no_power_check:
+        record["power_state"] = "unknown"
     if text is None:
         return record
     try:
@@ -152,7 +165,7 @@ def smart_record(role: str, uuid: str, previous: dict[str, int], last: dict[str,
         messages = smartctl_messages(raw)
         if not nvme and any(SAT_UNSUPPORTED.search(message) for message in messages):
             return scsi_health(record, device)
-        power_rejected = any(POWER_CHECK_REJECTED.search(message) for message in messages)
+        power_rejected = no_power_check or any(POWER_CHECK_REJECTED.search(message) for message in messages)
         if not power_rejected and any(STANDBY_MESSAGE.search(message) for message in messages):
             record.update({"state": "standby", "error": None})
             return record

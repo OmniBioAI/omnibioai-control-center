@@ -47,5 +47,7 @@ def test_host_conf_matches_the_api_configuration(host_conf):
     smart_roles = {role for role, _uuid in collector.disk_list()}
     assert smart_roles == {role for role, _path, _uuid in filesystems}
     assert dict(collector.disk_list()) == {role: uuid for role, _path, uuid in filesystems}
+    # Power-check opt-outs are the two Seagate-bridged 2 TB disks, and only SMART roles.
+    assert collector.power_check_disabled_roles() == {"data2tb", "archive2tb-b"} <= smart_roles
     # The replaced primary disk is config-only: never mounted, measured or queried.
     assert "primary" not in smart_roles | {role for role, *_ in collector.target_list()}
