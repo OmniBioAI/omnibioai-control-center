@@ -309,5 +309,54 @@ describe('StorageDashboardPage', () => {
     expect(screen.queryByText('Create policy')).toBeNull()
     expect(screen.getByText('2.33.5')).toBeTruthy()
   })
+
+  const basicDisk = (overrides: Partial<StorageOverview['physical_devices'][number]> = {}) => ({
+    ...member('data2tb', 'OmniBioAI data 2 TB', true, 1.746 * TiB, 1.8 * TiB),
+    smart_mode: 'scsi_health_only' as const, power_state: 'UNKNOWN' as const, smart_passed: true, smart_attributes: {},
+    smart_status: 'AVAILABLE' as const, smart_checked_at: '2026-10-22T06:00:00Z', ...overrides,
+  })
+  const BASIC = 'Health OK (basic, enclosure limits SMART)'
+
+  it('shows enclosure-limited disks as neutral basic health, never missing or standby', async () => {
+    fetchStorageOverview.mockResolvedValueOnce({ ...withPool, physical_devices: [withPool.physical_devices[0], basicDisk()] })
+    render(<StorageDashboardPage />)
+    await screen.findByText('Storage & Backup')
+    fireEvent.click(screen.getByRole('tab', { name: 'Devices & Volumes' }))
+    const badge = screen.getByText(BASIC)
+    expect(badge.style.color).toBe('var(--muted)')
+    expect(badge.style.textTransform).toBe('none')
+    expect(screen.getAllByText(BASIC)).toHaveLength(1)                      // the badge, not repeated below it
+    const row = within(screen.getByText('↳ OmniBioAI data 2 TB').closest('tr') as HTMLElement)
+    expect(row.getByText(/^Checked .+ · every 6 hours$/)).toBeTruthy()
+    for (const wrong of [/Standby/, /Not mounted/, /MISSING/i, /SMART passed/, /SMART unavailable/]) expect(row.queryByText(wrong)).toBeNull()
+  })
+
+  it('shows basic health in the Archive Pool SMART column and on a writable disk card', async () => {
+    fetchStorageOverview.mockResolvedValueOnce({
+      ...withPool,
+      physical_devices: [basicDisk({ role: 'archive', label: 'Archive', read_only: false, pool_role: null })],
+      archive_pool: { ...withPool.archive_pool, branches: [{
+        mount_point: '/mnt/data2tb', role: 'archive', label: 'Archive', read_only: false, expected_mode: 'READ_WRITE', observed_mode: 'READ_WRITE',
+        mount_status: 'MOUNTED', filesystem: 'ext4', filesystem_uuid: null, total_bytes: 100, used_bytes: 10, available_bytes: 90, utilization_percent: 10, health: 'HEALTHY',
+      }] },
+    })
+    render(<StorageDashboardPage />)
+    expect(await screen.findByText(BASIC)).toBeTruthy()                     // overview card badge
+    expect(screen.queryByText('Healthy')).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: 'Archive Pool' }))
+    expect(screen.getByText(BASIC)).toBeTruthy()
+  })
+
+  it('shows a failed basic health check as a warning', async () => {
+    fetchStorageOverview.mockResolvedValueOnce({
+      ...withPool, physical_devices: [basicDisk({ smart_passed: false, health: 'WARNING', health_detail: 'Basic SMART health check failed' })],
+    })
+    render(<StorageDashboardPage />)
+    await screen.findByText('Storage & Backup')
+    fireEvent.click(screen.getByRole('tab', { name: 'Devices & Volumes' }))
+    expect(screen.getByText('Warning')).toBeTruthy()
+    expect(screen.getByText('Basic health check failed')).toBeTruthy()
+    expect(screen.queryByText(BASIC)).toBeNull()
+  })
 })
 

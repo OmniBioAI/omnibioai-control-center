@@ -58,7 +58,10 @@ class DeviceVolume(BaseModel):
     transport: str | None = None
     transport_topology: str | None = None
     smart_status: Literal["AVAILABLE", "UNAVAILABLE", "UNKNOWN"] = "UNKNOWN"
-    power_state: Literal["ACTIVE", "STANDBY"] | None = None
+    power_state: Literal["ACTIVE", "STANDBY", "UNKNOWN"] | None = None
+    # "scsi_health_only": the enclosure rejects SAT, so only the SCSI health status is available.
+    smart_mode: Literal["full", "scsi_health_only"] | None = None
+    smart_checked_at: str | None = None
     smart_passed: bool | None = None
     smart_attributes: dict[str, int] = {}
     temperature_celsius: int | None = None
@@ -498,7 +501,11 @@ def _collect() -> StorageOverview:
         fstype = mount_record.get("fstype") if mounted and isinstance(mount_record.get("fstype"), str) else None
         smart = smart_by_role.get(target.role)
         smart_ok = bool(smart and not smart.get("error"))
-        standby = smart_ok and smart.get("state") == "standby"
+        power_unknown = smart_ok and smart.get("power_state") == "unknown"
+        # A disk whose power state can't be read is never reported as standby.
+        standby = smart_ok and not power_unknown and smart.get("state") == "standby"
+        basic = smart_ok and smart.get("smart_mode") == "scsi_health_only"
+        checked_at = smart.get("checked_at") if smart_ok and isinstance(smart.get("checked_at"), str) else None
         attributes = smart.get("attributes", {}) if smart_ok and isinstance(smart.get("attributes"), dict) else {}
         attributes = {key: value for key, value in attributes.items()
                       if key in {"5", "197", "198", "199"} and isinstance(value, int) and not isinstance(value, bool)}
@@ -540,7 +547,7 @@ def _collect() -> StorageOverview:
         elif nvme_used is not None and nvme_used >= 80:
             health, detail = "WARNING", f"NVMe endurance used: {nvme_used}%"
         elif smart_ok and smart.get("passed") is False:
-            health, detail = "WARNING", "SMART overall-health assessment failed"
+            health, detail = "WARNING", "Basic SMART health check failed" if basic else "SMART overall-health assessment failed"
         note = "This target is being replaced." if target.state == "being_replaced" else None
         if crc_rise:
             cable_note = "SMART attribute 199 increased; check the cable or enclosure."
@@ -553,7 +560,10 @@ def _collect() -> StorageOverview:
             mount_mode="READ_ONLY" if host_read_only is True else "READ_WRITE" if host_read_only is False else "UNKNOWN",
             total_bytes=total, used_bytes=used, available_bytes=available, utilization_percent=percent,
             smart_status="UNKNOWN" if standby else "AVAILABLE" if smart_ok else "UNAVAILABLE",
-            power_state="STANDBY" if standby else "ACTIVE" if smart_ok and smart.get("state") == "active" else None,
+            power_state="STANDBY" if standby else "UNKNOWN" if power_unknown
+            else "ACTIVE" if smart_ok and smart.get("state") == "active" else None,
+            smart_mode=smart.get("smart_mode") if smart_ok and smart.get("smart_mode") in {"full", "scsi_health_only"} else None,
+            smart_checked_at=checked_at,
             smart_passed=smart.get("passed") if smart_ok and isinstance(smart.get("passed"), bool) else None,
             smart_attributes=attributes, temperature_celsius=temperature,
             nvme_percentage_used=nvme_used, nvme_media_errors=nvme_errors,

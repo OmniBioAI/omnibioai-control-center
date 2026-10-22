@@ -770,7 +770,9 @@ export interface StorageDevice {
   aggregate: boolean
   operational_state: string | null
   note: string | null
-  power_state?: 'ACTIVE' | 'STANDBY' | null
+  power_state?: 'ACTIVE' | 'STANDBY' | 'UNKNOWN' | null
+  smart_mode?: 'full' | 'scsi_health_only' | null
+  smart_checked_at?: string | null
   smart_passed?: boolean | null
   smart_attributes?: Record<string, number>
   temperature_celsius?: number | null

@@ -459,3 +459,44 @@ def test_pool_whose_bind_cannot_be_measured_is_not_mounted(monkeypatch):
     monkeypatch.setattr(dashboard, "_capacity", lambda path: (None, None, None, None) if path.endswith("archive-pool") else CAPACITY[path])
     pool = dashboard._collect().archive_pool
     assert (pool.pool_status, pool.pool_detail, pool.total_bytes) == ("MISSING", "Not mounted", None)
+
+
+BASIC = {"device": "/dev/sdg", "state": None, "smart_mode": "scsi_health_only", "power_state": "unknown",
+         "type": "scsi", "passed": True, "attributes": {}, "checked_at": "2026-10-22T06:00:00+00:00", "error": None}
+
+
+def basic_pool_snapshot(**overrides) -> HostSnapshot:
+    host = pool_snapshot()
+    host.smart = [item for item in host.smart if item["role"] not in {"data2tb", "archive2tb-b"}] + [
+        {**BASIC, "role": "data2tb", **overrides}, {**BASIC, "role": "archive2tb-b", "device": "/dev/sdh", **overrides}]
+    return host
+
+
+def test_scsi_health_only_disks_are_healthy_and_never_standby_or_missing(monkeypatch):
+    arrange_pool(monkeypatch, basic_pool_snapshot())
+    result = dashboard._collect()
+    by_role = {device.role: device for device in result.physical_devices}
+    for role in ("data2tb", "archive2tb-b"):
+        device = by_role[role]
+        assert (device.health, device.mount_status, device.power_state, device.smart_mode) == (
+            "HEALTHY", "MOUNTED", "UNKNOWN", "scsi_health_only")
+        assert (device.smart_passed, device.smart_attributes, device.smart_status) == (True, {}, "AVAILABLE")
+        assert device.smart_checked_at == "2026-10-22T06:00:00+00:00"
+        assert device.health_detail == "Read-only; capacity is shown without warnings"
+    assert not result.alerts
+
+
+def test_failed_scsi_health_check_warns(monkeypatch):
+    arrange_pool(monkeypatch, basic_pool_snapshot(passed=False))
+    result = dashboard._collect()
+    device = {device.role: device for device in result.physical_devices}["data2tb"]
+    assert (device.health, device.health_detail) == ("WARNING", "Basic SMART health check failed")
+    assert {alert.affected_device for alert in result.alerts} == {"OmniBioAI data 2 TB", "Archive 2 TB B"}
+
+
+def test_unknown_power_state_is_never_shown_as_standby(monkeypatch):
+    arrange_pool(monkeypatch, basic_pool_snapshot(smart_mode="full", state="standby",
+                                                  attributes={"5": 0, "197": 0, "198": 0, "199": 0}))
+    device = {device.role: device for device in dashboard._collect().physical_devices}["data2tb"]
+    assert (device.power_state, device.smart_mode, device.health) == ("UNKNOWN", "full", "HEALTHY")
+    assert "Standby" not in device.health_detail

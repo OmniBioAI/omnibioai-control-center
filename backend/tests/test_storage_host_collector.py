@@ -3,12 +3,15 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 
 SCRIPT = Path(__file__).parents[2] / "ops/storage-telemetry/collect-storage-telemetry.py"
+FIXTURES = Path(__file__).parent / "fixtures/smartctl"
+NOW = datetime(2026, 10, 22, 6, 0, tzinfo=timezone.utc)
 SPEC = importlib.util.spec_from_file_location("storage_host_collector", SCRIPT)
 assert SPEC and SPEC.loader
 collector = importlib.util.module_from_spec(SPEC)
@@ -299,9 +302,10 @@ def fake_host(monkeypatch, smartctl_output, lsblk_output="sdd\n"):
 
 def test_smart_record_queries_the_resolved_disk_without_waking_it(monkeypatch):
     calls = fake_host(monkeypatch, smartctl_json(crc=4))
-    record = collector.smart_record("backup", BACKUP_UUID, {})
+    record = collector.smart_record("backup", BACKUP_UUID, {}, now=NOW)
     assert calls[1] == ["smartctl", "-n", "standby", "-H", "-A", "-d", "sat", "--json=c", "/dev/sdd"]
-    assert record == {"role": "backup", "device": "/dev/sdd", "state": "active", "type": "sat", "passed": True,
+    assert record == {"role": "backup", "device": "/dev/sdd", "state": "active", "smart_mode": "full", "type": "sat",
+                      "passed": True, "checked_at": NOW.isoformat(),
                       "attributes": {"5": 0, "199": 4}, "udma_crc_error_count_rise": False, "temperature": 34,
                       "error": None}
 
@@ -317,9 +321,9 @@ def test_unresolved_disk_records_an_error_and_never_runs_smartctl(monkeypatch):
 
 def test_standby_disk_is_recorded_without_error_and_keeps_the_crc_baseline(monkeypatch):
     fake_host(monkeypatch, smartctl_json(standby=True))
-    record = collector.smart_record("backup", BACKUP_UUID, {"backup": 4})
+    record = collector.smart_record("backup", BACKUP_UUID, {"backup": 4}, now=NOW)
     assert record == {"role": "backup", "device": "/dev/sdd", "state": "standby", "passed": None,
-                      "attributes": {}, "error": None, "crc_baseline": 4}
+                      "attributes": {}, "error": None, "crc_baseline": 4, "checked_at": NOW.isoformat()}
 
 
 def test_crc_baseline_survives_standby_runs(monkeypatch, tmp_path):
@@ -368,12 +372,13 @@ def nvme_json(*, used=3, media_errors=0, temperature=41, passed=True):
 
 def test_root_nvme_is_resolved_by_uuid_and_queried_as_nvme(monkeypatch):
     calls = fake_host(monkeypatch, nvme_json(), lsblk_output="nvme0n1\n")
-    record = collector.smart_record("root", ROOT_UUID, {})
+    record = collector.smart_record("root", ROOT_UUID, {}, now=NOW)
     assert calls == [
         ["lsblk", "-no", "PKNAME", f"/dev/disk/by-uuid/{ROOT_UUID}"],
         ["smartctl", "-n", "standby", "-H", "-A", "-d", "nvme", "--json=c", "/dev/nvme0n1"],
     ]
-    assert record == {"role": "root", "device": "/dev/nvme0n1", "state": "active", "type": "nvme", "passed": True,
+    assert record == {"role": "root", "device": "/dev/nvme0n1", "state": "active", "smart_mode": "full", "type": "nvme",
+                      "passed": True, "checked_at": NOW.isoformat(),
                       "attributes": {}, "nvme": {"percentage_used": 3, "media_errors": 0, "temperature": 41},
                       "temperature": 41, "error": None}
 
@@ -386,3 +391,129 @@ def test_nvme_without_a_health_log_is_an_error(monkeypatch):
 def test_non_object_smartctl_json_is_an_error(monkeypatch):
     fake_host(monkeypatch, "[]")
     assert collector.smart_record("backup", BACKUP_UUID, {})["error"] == "smartctl returned invalid JSON"
+
+
+DATA_UUID, B_UUID = "39b9324a-640e-4d64-9980-b1f1c9d5578b", "6A7F-D1A6"
+
+
+def fixture(name: str) -> str:
+    return (FIXTURES / name).read_text(encoding="utf-8")
+
+
+def bridge(monkeypatch, sat_output, scsi_output=None, disk="sdg"):
+    calls = []
+
+    def fake_run(argv, **_kwargs):
+        calls.append(argv)
+        if argv[0] == "lsblk":
+            return f"{disk}\n", None
+        if "-d" in argv and argv[argv.index("-d") + 1] == "scsi":
+            return scsi_output, None if scsi_output is not None else "command could not be completed"
+        return sat_output, None
+
+    monkeypatch.setattr(collector, "run", fake_run)
+    return calls
+
+
+@pytest.mark.parametrize(("role", "uuid", "disk", "sat_fixture"), (
+    ("data2tb", DATA_UUID, "sdg", "sdg-sat-read-device-identity-failed.json"),
+    ("archive2tb-b", B_UUID, "sdh", "sdh-sat-mandatory-command-failed.json"),
+))
+def test_bridge_without_sat_falls_back_to_scsi_health_only(monkeypatch, role, uuid, disk, sat_fixture):
+    calls = bridge(monkeypatch, fixture(sat_fixture), fixture("sdg-scsi-health-ok.json"), disk=disk)
+    record = collector.smart_record(role, uuid, {}, now=NOW)
+    assert calls[1:] == [
+        ["smartctl", "-n", "standby", "-H", "-A", "-d", "sat", "--json=c", f"/dev/{disk}"],
+        ["smartctl", "-H", "-d", "scsi", "--json=c", f"/dev/{disk}"],
+    ]
+    assert not [argv for argv in calls if "-T" in argv or "permissive" in argv]
+    assert record == {"role": role, "device": f"/dev/{disk}", "state": None, "smart_mode": "scsi_health_only",
+                      "power_state": "unknown", "type": "scsi", "passed": True, "attributes": {},
+                      "checked_at": NOW.isoformat(), "error": None}
+
+
+def test_scsi_health_failure_is_recorded_as_failed(monkeypatch):
+    bridge(monkeypatch, fixture("sdh-sat-mandatory-command-failed.json"), fixture("sdh-scsi-health-failed.json"), disk="sdh")
+    record = collector.smart_record("archive2tb-b", B_UUID, {}, now=NOW)
+    assert (record["smart_mode"], record["passed"], record["error"]) == ("scsi_health_only", False, None)
+
+
+@pytest.mark.parametrize("scsi_output", (None, "not json", '{"smartctl": {"exit_status": 2}}'))
+def test_scsi_fallback_without_a_health_status_is_an_error(monkeypatch, scsi_output):
+    bridge(monkeypatch, fixture("sdg-sat-read-device-identity-failed.json"), scsi_output)
+    record = collector.smart_record("data2tb", DATA_UUID, {}, now=NOW)
+    assert record["smart_mode"] == "scsi_health_only" and record["passed"] is None and record["error"]
+
+
+def test_rejected_power_check_records_unknown_not_standby(monkeypatch):
+    bridge(monkeypatch, fixture("sat-check-power-mode-rejected.json"))
+    record = collector.smart_record("data2tb", DATA_UUID, {}, now=NOW)
+    assert (record["power_state"], record["state"], record["smart_mode"]) == ("unknown", None, "full")
+    assert record["attributes"] == {"5": 0, "197": 0, "198": 0, "199": 2} and record["passed"] is True
+
+
+@pytest.mark.parametrize("message", (
+    "CHECK POWER MODE: incomplete response, ATA output registers missing",
+    "CHECK POWER MODE returned unknown value 0x80, ignoring -n option",
+    "scsi error: Illegal Request",
+    "Sense key 05/24: unsupported field in scsi command",
+))
+def test_every_power_check_rejection_is_unknown(monkeypatch, message):
+    raw = json.loads(fixture("sat-check-power-mode-rejected.json"))
+    raw["smartctl"]["messages"] = [{"string": message, "severity": "information"},
+                                   {"string": "Device is in STANDBY mode, exit(2)", "severity": "information"}]
+    bridge(monkeypatch, json.dumps(raw))
+    record = collector.smart_record("data2tb", DATA_UUID, {}, now=NOW)
+    assert record["power_state"] == "unknown" and record["state"] != "standby"
+
+
+def checked(hours_ago: float, **extra):
+    return {"role": "data2tb", "device": "/dev/sdg", "state": None, "smart_mode": "scsi_health_only",
+            "power_state": "unknown", "type": "scsi", "passed": True, "attributes": {},
+            "checked_at": (NOW - timedelta(hours=hours_ago)).isoformat(), "error": None, **extra}
+
+
+@pytest.mark.parametrize("hours_ago", (0, 1, 5.99))
+def test_unknown_power_disk_is_not_queried_again_within_six_hours(monkeypatch, hours_ago):
+    calls = bridge(monkeypatch, fixture("sdg-sat-read-device-identity-failed.json"), fixture("sdg-scsi-health-ok.json"), disk="sdi")
+    last = checked(hours_ago)
+    record = collector.smart_record("data2tb", DATA_UUID, {}, last, now=NOW)
+    assert [argv[0] for argv in calls] == ["lsblk"]          # resolving the UUID does not wake the disk
+    assert record == {**last, "device": "/dev/sdi", "reused": True}
+
+
+@pytest.mark.parametrize("last", (
+    checked(6),                                   # due
+    checked(30),
+    checked(-1),                                  # checked_at in the future: don't trust it
+    checked(1, checked_at="not a time"),
+    checked(1, checked_at="2026-10-22T05:00:00"),  # no timezone
+    checked(1, power_state=None),                 # power state is readable: no throttle
+    None,
+))
+def test_unknown_power_disk_is_queried_when_due(monkeypatch, last):
+    calls = bridge(monkeypatch, fixture("sdg-sat-read-device-identity-failed.json"), fixture("sdg-scsi-health-ok.json"))
+    record = collector.smart_record("data2tb", DATA_UUID, {}, last, now=NOW)
+    assert [argv[0] for argv in calls] == ["lsblk", "smartctl", "smartctl"]
+    assert record["checked_at"] == NOW.isoformat() and "reused" not in record
+
+
+def test_hourly_runs_query_an_unknown_power_disk_once_per_six_hours(monkeypatch, tmp_path):
+    monkeypatch.setattr(collector, "OUTPUT", tmp_path / "storage-telemetry.json")
+    calls = bridge(monkeypatch, fixture("sdg-sat-read-device-identity-failed.json"), fixture("sdg-scsi-health-ok.json"))
+    for hour in range(13):
+        last = collector.previous_smart_records().get("data2tb")
+        record = collector.smart_record("data2tb", DATA_UUID, {}, last, now=NOW + timedelta(hours=hour))
+        collector.OUTPUT.write_text(json.dumps({"smart": [record]}), encoding="utf-8")
+        assert record["passed"] is True and record["power_state"] == "unknown"
+    queries = [argv for argv in calls if argv[0] == "smartctl" and "scsi" in argv]
+    assert len(queries) == 3                     # hours 0, 6 and 12
+
+
+def test_previous_smart_records_reads_the_last_snapshot(monkeypatch, tmp_path):
+    monkeypatch.setattr(collector, "OUTPUT", tmp_path / "storage-telemetry.json")
+    assert collector.previous_smart_records() == {}
+    collector.OUTPUT.write_text(json.dumps({"smart": [checked(1), "junk", {"no": "role"}]}), encoding="utf-8")
+    assert list(collector.previous_smart_records()) == ["data2tb"]
+    collector.OUTPUT.write_text(json.dumps({"smart": "junk"}), encoding="utf-8")
+    assert collector.previous_smart_records() == {}
