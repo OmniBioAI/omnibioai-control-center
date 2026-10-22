@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ManualLicensesPage from './ManualLicensesPage'
@@ -77,6 +77,44 @@ describe('ManualLicensesPage', () => {
 
     expect(await screen.findByRole('option', { name: 'Policy not configured' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Issue License' })).toBeDisabled()
+    expect(licenses.issueLicense).not.toHaveBeenCalled()
+  })
+
+  it('names a policy failure and disables the entire issuance form', async () => {
+    vi.mocked(licenses.fetchLicensePolicy).mockRejectedValue(Object.assign(
+      new Error('Not Found'),
+      { status: 404, path: '/platform/licenses/policy' },
+    ))
+    render(<ManualLicensesPage />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Couldn’t load the license policy (404 from /platform/licenses/policy).',
+    )
+    expect(screen.getByRole('group', { name: 'Issue New License fields' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: /full name/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Check identity' })).toBeDisabled()
+    const issueButton = screen.getByRole('button', { name: 'Issue License' })
+    expect(issueButton).toBeDisabled()
+
+    fireEvent.submit(issueButton.closest('form')!)
+    expect(licenses.issueLicense).not.toHaveBeenCalled()
+  })
+
+  it('names a registry failure and prevents issuance even with a valid policy', async () => {
+    vi.mocked(licenses.fetchLicenses).mockRejectedValue(Object.assign(
+      new Error('Not Found'),
+      { status: 404, path: '/platform/licenses' },
+    ))
+    render(<ManualLicensesPage />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Couldn’t load the license registry (404 from /platform/licenses).',
+    )
+    expect(screen.getByRole('group', { name: 'Issue New License fields' })).toBeDisabled()
+    const issueButton = screen.getByRole('button', { name: 'Issue License' })
+    expect(issueButton).toBeDisabled()
+
+    fireEvent.submit(issueButton.closest('form')!)
     expect(licenses.issueLicense).not.toHaveBeenCalled()
   })
 

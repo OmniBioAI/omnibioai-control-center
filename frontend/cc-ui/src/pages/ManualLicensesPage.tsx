@@ -9,9 +9,28 @@ import {
 const field: React.CSSProperties = { width: '100%', boxSizing: 'border-box', padding: '9px 11px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }
 const label: React.CSSProperties = { display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text2)', marginBottom: 5 }
 
+type LoadFailures = {
+  policy: string | null
+  registry: string | null
+}
+
+function describeLoadFailure(
+  resource: 'license policy' | 'license registry',
+  expectedPath: string,
+  failure: unknown,
+): string {
+  const error = failure as Error & { path?: string; status?: number }
+  const path = error.path ?? expectedPath
+  return error.status
+    ? `Couldn’t load the ${resource} (${error.status} from ${path}).`
+    : `Couldn’t load the ${resource} (request to ${path} failed).`
+}
+
 export default function ManualLicensesPage() {
   const [policy, setPolicy] = useState<LicensePolicy | null>(null)
   const [licenses, setLicenses] = useState<LicenseMetadata[] | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadFailures, setLoadFailures] = useState<LoadFailures>({ policy: null, registry: null })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [identityBusy, setIdentityBusy] = useState(false)
@@ -69,16 +88,60 @@ export default function ManualLicensesPage() {
   }
 
   const load = useCallback(async () => {
-    try {
-      const [p, listing] = await Promise.all([fetchLicensePolicy(), fetchLicenses()])
-      setPolicy(p); setLicenses(listing.items); setError(null)
-      setForm(current => ({ ...current, validity_days: current.validity_days || p.validity_days[0] || 0 }))
-    } catch (e) { setError(String(e instanceof Error ? e.message : e)) }
+    setLoading(true)
+    setLoadFailures({ policy: null, registry: null })
+    setError(null)
+
+    const [policyResult, registryResult] = await Promise.allSettled([
+      fetchLicensePolicy(),
+      fetchLicenses(),
+    ])
+    const failures: LoadFailures = { policy: null, registry: null }
+
+    if (policyResult.status === 'fulfilled') {
+      const nextPolicy = policyResult.value
+      setPolicy(nextPolicy)
+      setForm(current => ({
+        ...current,
+        validity_days: current.validity_days || nextPolicy.validity_days[0] || 0,
+      }))
+    } else {
+      setPolicy(null)
+      failures.policy = describeLoadFailure(
+        'license policy', '/platform/licenses/policy', policyResult.reason,
+      )
+    }
+
+    if (registryResult.status === 'fulfilled') {
+      setLicenses(registryResult.value.items)
+    } else {
+      setLicenses(null)
+      failures.registry = describeLoadFailure(
+        'license registry', '/platform/licenses', registryResult.reason,
+      )
+    }
+
+    setLoadFailures(failures)
+    setLoading(false)
   }, [])
   useEffect(() => { load() }, [load])
 
+  const loadError = [loadFailures.policy, loadFailures.registry].filter(Boolean).join(' ')
+  const formBlockedReason = loading
+    ? 'License policy and registry data are still loading.'
+    : loadError
+      ? `${loadError} Issuance is disabled until both requests succeed.`
+      : !policy?.issuance_enabled
+        ? 'The current license policy does not permit issuance.'
+        : null
+
   const submit = async (event: React.FormEvent) => {
-    event.preventDefault(); setBusy(true); setError(null); setOneTimeKey(null)
+    event.preventDefault()
+    if (formBlockedReason) {
+      setError(`License issuance is disabled. ${formBlockedReason}`)
+      return
+    }
+    setBusy(true); setError(null); setOneTimeKey(null)
     try {
       const result = await issueLicense(form, idempotencyKey)
       setOneTimeKey(result.key)
@@ -96,10 +159,10 @@ export default function ManualLicensesPage() {
     } finally { setBusy(false) }
   }
 
-  if (!policy && !error) return <LoadingState label="Loading license policy…" />
+  if (loading && !policy && !licenses) return <LoadingState label="Loading license policy and registry…" />
   return <div>
     <SectionHeader title="License Management" description="Issue identity-bound licenses. Full keys are shown once and are never available from history." />
-    {error && <div role="alert" style={{ marginBottom: 14 }}><ErrorState message={error} onRetry={load} /></div>}
+    {(loadError || error) && <div role="alert" style={{ marginBottom: 14 }}><ErrorState message={loadError || error || ''} onRetry={loadError ? load : undefined} /></div>}
     {oneTimeKey && <Card><h2>New license key — copy now</h2>
       <div role="status" style={{ padding: 16 }}>
         <code style={{ fontSize: 18 }}>{oneTimeKey}</code>
@@ -108,7 +171,11 @@ export default function ManualLicensesPage() {
       </div>
     </Card>}
     <Card><h2>Issue New License</h2>
-      <form onSubmit={submit} style={{ padding: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 14 }}>
+      {formBlockedReason && <p id="license-form-disabled-reason" role="status" style={{ padding: '0 16px', color: 'var(--yellow)' }}>
+        License issuance is unavailable: {formBlockedReason}
+      </p>}
+      <form onSubmit={submit} aria-describedby={formBlockedReason ? 'license-form-disabled-reason' : undefined}>
+        <fieldset aria-label="Issue New License fields" disabled={Boolean(formBlockedReason)} style={{ padding: 16, margin: 0, border: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 14 }}>
         <div><label htmlFor="license-full-name" style={label}>Full name</label><input id="license-full-name" required style={field} value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} /></div>
         <div>
           <label htmlFor="license-email" style={label}>Existing identity email</label>
@@ -138,14 +205,15 @@ export default function ManualLicensesPage() {
           {policy?.validity_days.map(days => <option key={days} value={days}>{days} days</option>)}
         </select></div>
         <div><label htmlFor="license-organization" style={label}>Organization ID</label><input id="license-organization" required min={1} type="number" style={field} value={form.organization_id || ''} onChange={e => { setForm({ ...form, organization_id: Number(e.target.value) }); setIdentity(null); setIdentityLookupDenied(false); setIdentityMessage(null) }} /></div>
-        <div style={{ alignSelf: 'end' }}><Button type="submit" aria-label="Issue License" aria-busy={busy} disabled={busy || identityBusy || (!identity && !identityLookupDenied) || !policy?.issuance_enabled}>{busy ? 'Issuing…' : <><Plus size={15} aria-hidden="true" />Issue License</>}</Button></div>
+        <div style={{ alignSelf: 'end' }}><Button type="submit" aria-label="Issue License" aria-busy={busy} disabled={Boolean(formBlockedReason) || busy || identityBusy || (!identity && !identityLookupDenied) || !policy?.issuance_enabled}>{busy ? 'Issuing…' : <><Plus size={15} aria-hidden="true" />Issue License</>}</Button></div>
         {(form.confirm_role_change || form.confirm_replace_existing) && <div style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--yellow)' }}>
           Review and submit again to confirm: {form.confirm_role_change && 'IAM role assignment'}{form.confirm_role_change && form.confirm_replace_existing && ' and '}{form.confirm_replace_existing && 'replacement of an active license'}.
         </div>}
+        </fieldset>
       </form>
     </Card>
     <div style={{ marginTop: 18 }}><Card><h2>License Registry</h2>
-      {!licenses ? <LoadingState label="Loading licenses…" /> : !licenses.length ? <EmptyState title="No licenses found" /> :
+      {loadFailures.registry ? <EmptyState title="License registry unavailable" /> : !licenses ? <LoadingState label="Loading licenses…" /> : !licenses.length ? <EmptyState title="No licenses found" /> :
         <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}><thead><tr>
           {['Key','Name / email','Role','Organization','Status','Expires','Actions'].map(h => <th key={h} style={{ textAlign: 'left', padding: 10, borderBottom: '1px solid var(--border)' }}>{h}</th>)}
         </tr></thead><tbody>{licenses.map(item => <tr key={item.id}>
