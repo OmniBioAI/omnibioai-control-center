@@ -72,6 +72,15 @@ What the collector runs, once an hour (`OnCalendar=hourly`):
       few seconds early waits for the next one.
     - The dashboard shows a passed check as a neutral
       "Health OK (basic, enclosure limits SMART)".
+  - **Bridges that misreport power mode:** the Seagate bridges on `sdg`
+    (`data2tb`) and `sdh` (`archive2tb-b`) answer `-n standby` with
+    `Device is in SLEEP mode, exit(2)`, even right after a read woke the disk.
+    - That would record them as asleep forever and the SCSI fallback would
+      never run.
+    - Roles listed in `STORAGE_TELEMETRY_NO_POWER_CHECK` skip `-n standby`:
+      the collector runs `-d sat`, falls back to `-H -d scsi` on the identity
+      failure, records `"power_state": "unknown"`, and keeps the 6-hour limit.
+    - For every other disk, "SLEEP mode" counts the same as "STANDBY".
 - `dmesg --since "24 hours ago"`, reduced to fixed-label counts (I/O errors,
   resets, ext4 errors) and the kernel device names (`sdd`, `sda1`,
   `nvme0n1p2`, …) on matching lines. Raw dmesg lines are never stored.

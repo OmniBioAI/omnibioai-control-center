@@ -73,7 +73,9 @@ sudo systemd-analyze verify /etc/systemd/system/omnibioai-storage-telemetry.serv
 ### 2b. Upgrade an existing install
 
 The units are unchanged. Replace the script and the conf, after checking that
-the conf differs only by the new targets, the pool and the extra SMART disks:
+the conf differs only by the new targets, the pool, the extra SMART disks and
+one `STORAGE_TELEMETRY_NO_POWER_CHECK="data2tb archive2tb-b"` line. If the conf
+already has the targets, pool and SMART disks, the diff is just that one line:
 
 ```bash
 sudo diff /etc/omnibioai/storage-telemetry.conf ops/storage-telemetry/storage-telemetry.conf.example
@@ -118,9 +120,12 @@ Check the snapshot:
   - `root` is `/dev/nvme0n1`, with `"type": "nvme"` and `nvme.percentage_used`,
     `media_errors` and `temperature`.
   - backup and archive are `/dev/sdd` and `/dev/sda`, with `"type": "sat"`.
-  - data2tb and archive2tb-b are `/dev/sdg` and `/dev/sdh`. Their enclosures
-    reject SAT, so expect `"smart_mode": "scsi_health_only"`,
-    `"power_state": "unknown"`, `passed` and a `checked_at` time.
+  - data2tb and archive2tb-b are `/dev/sdg` and `/dev/sdh`. Their Seagate
+    bridges misreport power mode, so they are listed in
+    `STORAGE_TELEMETRY_NO_POWER_CHECK` and queried without `-n standby`.
+    - They reject SAT, so expect `"smart_mode": "scsi_health_only"`,
+      `"power_state": "unknown"`, `passed` and a `checked_at` time.
+    - Never expect `"state": "standby"` for them.
   - On later runs within 6 hours, those two entries carry `"reused": true`
     and the same `checked_at`, so the disks aren't queried or woken.
   - Every entry has `"error": null`. `state` is `active` or `standby`
