@@ -77,9 +77,18 @@ What the collector runs, once an hour (`OnCalendar=hourly`):
     `Device is in SLEEP mode, exit(2)`, even right after a read woke the disk.
     - That would record them as asleep forever and the SCSI fallback would
       never run.
-    - Roles listed in `STORAGE_TELEMETRY_NO_POWER_CHECK` skip `-n standby`:
-      the collector runs `-d sat`, falls back to `-H -d scsi` on the identity
-      failure, records `"power_state": "unknown"`, and keeps the 6-hour limit.
+    - Roles listed in `STORAGE_TELEMETRY_NO_POWER_CHECK` skip `-n standby`.
+      The collector runs `-d sat`, records `"power_state": "unknown"`, and
+      keeps the 6-hour limit.
+    - These bridges can fail SAT silently: the captured `sdg` answer is exit 2,
+      with no message and no SMART table. So for these roles the collector
+      falls back to `-H -d scsi` when either is true, whatever the message text:
+      - exit-status bit 1 is set (the device couldn't be opened or identified)
+      - there is no `ata_smart_attributes` table
+    - `passed` comes from `smart_status.passed`.
+    - Within the 6 hours, an earlier result is reused only if it has a
+      `smart_mode` and a boolean `passed`. Anything incomplete is queried again
+      on the next run.
     - For every other disk, "SLEEP mode" counts the same as "STANDBY".
 - `dmesg --since "24 hours ago"`, reduced to fixed-label counts (I/O errors,
   resets, ext4 errors) and the kernel device names (`sdd`, `sda1`,

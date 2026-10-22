@@ -602,3 +602,121 @@ def test_opted_out_roles_ignore_malformed_entries(monkeypatch):
     assert collector.power_check_disabled_roles() == {"data2tb", "archive2tb-b"}
     monkeypatch.delenv("STORAGE_TELEMETRY_NO_POWER_CHECK")
     assert collector.power_check_disabled_roles() == set()
+
+
+# Real output from sdg (Seagate bridge), captured without serials.
+SAT_CAPTURED, SCSI_CAPTURED = "sdg-sat-captured.json", "sdg-scsi-captured.json"
+
+
+def test_captured_fixtures_are_the_real_silent_sat_failure_and_scsi_pass():
+    sat, scsi = json.loads(fixture(SAT_CAPTURED)), json.loads(fixture(SCSI_CAPTURED))
+    assert sat["smartctl"]["argv"] == ["smartctl", "-H", "-A", "-d", "sat", "--json=c", "/dev/sdg"]
+    assert sat["smartctl"]["exit_status"] == 2 and "messages" not in sat["smartctl"]
+    assert "ata_smart_attributes" not in sat and "smart_status" not in sat
+    assert scsi["smartctl"]["exit_status"] == 0 and scsi["smart_status"] == {"passed": True}
+    for raw in (sat, scsi):
+        assert "serial_number" not in json.dumps(raw) and "wwn" not in raw
+
+
+def test_silent_sat_failure_falls_back_to_scsi_for_an_opted_out_role(monkeypatch):
+    monkeypatch.setenv("STORAGE_TELEMETRY_NO_POWER_CHECK", "data2tb archive2tb-b")
+    calls = bridge(monkeypatch, fixture(SAT_CAPTURED), fixture(SCSI_CAPTURED))
+    record = collector.smart_record("data2tb", DATA_UUID, {}, now=NOW)
+    assert [argv for argv in calls if argv[0] == "smartctl"] == [
+        ["smartctl", "-H", "-A", "-d", "sat", "--json=c", "/dev/sdg"],
+        ["smartctl", "-H", "-d", "scsi", "--json=c", "/dev/sdg"],
+    ]
+    assert record == {"role": "data2tb", "device": "/dev/sdg", "state": None, "smart_mode": "scsi_health_only",
+                      "power_state": "unknown", "type": "scsi", "passed": True, "attributes": {},
+                      "checked_at": NOW.isoformat(), "error": None}
+
+
+def sat_answer(exit_status: int, table: bool, messages: list[str] | None = None) -> str:
+    raw = json.loads(fixture(SAT_CAPTURED))
+    raw["smartctl"]["exit_status"] = exit_status
+    if messages:
+        raw["smartctl"]["messages"] = [{"string": text, "severity": "error"} for text in messages]
+    if table:
+        raw.update({"smart_status": {"passed": True},
+                    "ata_smart_attributes": {"table": [{"id": 5, "raw": {"value": 0}}, {"id": 199, "raw": {"value": 3}}]}})
+    return json.dumps(raw)
+
+
+@pytest.mark.parametrize(("exit_status", "table", "falls_back"), (
+    (2, False, True),     # the captured case
+    (2, True, True),      # bit 1 set: the run failed, even with a table
+    (6, True, True),      # bit 1 among others
+    (0, False, True),     # no attribute table
+    (4, False, True),
+    (0, True, False),     # a usable SAT answer
+    (4, True, False),     # bit 2 only (a SMART command failed) with a table: still SAT
+    (64, True, False),    # error log entries: still SAT
+))
+def test_opted_out_role_falls_back_on_exit_bit_one_or_a_missing_table(monkeypatch, exit_status, table, falls_back):
+    monkeypatch.setenv("STORAGE_TELEMETRY_NO_POWER_CHECK", "data2tb")
+    calls = bridge(monkeypatch, sat_answer(exit_status, table), fixture(SCSI_CAPTURED))
+    record = collector.smart_record("data2tb", DATA_UUID, {}, now=NOW)
+    assert bool([argv for argv in calls if "scsi" in argv]) is falls_back
+    assert record["smart_mode"] == ("scsi_health_only" if falls_back else "full")
+    assert record["passed"] is True and record["power_state"] == "unknown" and record["error"] is None
+
+
+def test_fallback_does_not_depend_on_message_text(monkeypatch):
+    monkeypatch.setenv("STORAGE_TELEMETRY_NO_POWER_CHECK", "data2tb")
+    calls = bridge(monkeypatch, sat_answer(2, False, ["something smartctl has never said before"]), fixture(SCSI_CAPTURED))
+    assert collector.smart_record("data2tb", DATA_UUID, {}, now=NOW)["smart_mode"] == "scsi_health_only"
+    assert [argv for argv in calls if "scsi" in argv]
+
+
+def test_failed_captured_scsi_health_is_recorded(monkeypatch):
+    monkeypatch.setenv("STORAGE_TELEMETRY_NO_POWER_CHECK", "data2tb")
+    scsi = json.loads(fixture(SCSI_CAPTURED))
+    scsi["smart_status"]["passed"] = False
+    bridge(monkeypatch, fixture(SAT_CAPTURED), json.dumps(scsi))
+    record = collector.smart_record("data2tb", DATA_UUID, {}, now=NOW)
+    assert (record["smart_mode"], record["passed"], record["error"]) == ("scsi_health_only", False, None)
+
+
+def test_silent_failure_rule_applies_only_to_opted_out_roles(monkeypatch):
+    # Other disks keep the message-based fallback; a silent failure there is an error, not a guess.
+    monkeypatch.setenv("STORAGE_TELEMETRY_NO_POWER_CHECK", "data2tb")
+    calls = bridge(monkeypatch, fixture(SAT_CAPTURED), fixture(SCSI_CAPTURED), disk="sdd")
+    record = collector.smart_record("backup", BACKUP_UUID, {}, now=NOW)
+    assert record["error"] == "smartctl returned invalid JSON"
+    assert not [argv for argv in calls if "scsi" in argv]
+
+
+@pytest.mark.parametrize("last", (
+    checked(1, passed=None, error="smartctl -d scsi returned no health status"),
+    checked(1, passed=None),
+    checked(1, passed="yes"),
+    checked(1, smart_mode=None),
+    {k: v for k, v in checked(1).items() if k != "smart_mode"},
+))
+def test_incomplete_previous_results_are_never_reused(monkeypatch, last):
+    monkeypatch.setenv("STORAGE_TELEMETRY_NO_POWER_CHECK", "data2tb")
+    calls = bridge(monkeypatch, fixture(SAT_CAPTURED), fixture(SCSI_CAPTURED))
+    record = collector.smart_record("data2tb", DATA_UUID, {}, last, now=NOW)
+    assert [argv[0] for argv in calls] == ["lsblk", "smartctl", "smartctl"]
+    assert "reused" not in record and record["passed"] is True
+
+
+@pytest.mark.parametrize("last", (checked(1), checked(1, smart_mode="full", passed=False)))
+def test_complete_previous_results_are_reused_within_six_hours(monkeypatch, last):
+    monkeypatch.setenv("STORAGE_TELEMETRY_NO_POWER_CHECK", "data2tb")
+    calls = bridge(monkeypatch, fixture(SAT_CAPTURED), fixture(SCSI_CAPTURED))
+    record = collector.smart_record("data2tb", DATA_UUID, {}, last, now=NOW)
+    assert [argv[0] for argv in calls] == ["lsblk"]
+    assert record["reused"] is True and record["passed"] is last["passed"]
+
+
+def test_captured_disk_over_thirteen_hourly_runs(monkeypatch, tmp_path):
+    monkeypatch.setenv("STORAGE_TELEMETRY_NO_POWER_CHECK", "data2tb archive2tb-b")
+    monkeypatch.setattr(collector, "OUTPUT", tmp_path / "storage-telemetry.json")
+    calls = bridge(monkeypatch, fixture(SAT_CAPTURED), fixture(SCSI_CAPTURED))
+    for hour in range(13):
+        last = collector.previous_smart_records().get("data2tb")
+        record = collector.smart_record("data2tb", DATA_UUID, {}, last, now=NOW + timedelta(hours=hour))
+        collector.OUTPUT.write_text(json.dumps({"smart": [record]}), encoding="utf-8")
+        assert (record["smart_mode"], record["passed"], record["power_state"]) == ("scsi_health_only", True, "unknown")
+    assert len([argv for argv in calls if "scsi" in argv]) == 3

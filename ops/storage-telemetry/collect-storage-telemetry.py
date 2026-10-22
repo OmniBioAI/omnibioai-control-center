@@ -77,7 +77,10 @@ def previous_crc_counts(records: dict[str, dict[str, object]] | None = None) -> 
 
 
 def recently_checked_unknown_power(last: dict[str, object] | None, now: datetime) -> bool:
+    """Reuse only a complete earlier health result; anything else is queried again."""
     if not last or last.get("power_state") != "unknown" or not isinstance(last.get("checked_at"), str):
+        return False
+    if last.get("smart_mode") not in {"full", "scsi_health_only"} or not isinstance(last.get("passed"), bool):
         return False
     try:
         checked = datetime.fromisoformat(str(last["checked_at"]))
@@ -86,6 +89,24 @@ def recently_checked_unknown_power(last: dict[str, object] | None, now: datetime
     if checked.tzinfo is None:
         return False
     return timedelta(0) <= now - checked < UNKNOWN_POWER_INTERVAL
+
+
+# smartctl exit-status bit 1: device open failed, or it returned no IDENTIFY data.
+SMARTCTL_DEVICE_FAILED = 0x02
+
+
+def sat_unusable(raw: object) -> bool:
+    """A SAT run that can't be used: exit bit 1 set, or no ATA SMART attribute table.
+
+    The captured sdg answer is exactly this: exit 2, no messages, no table.
+    """
+    if not isinstance(raw, dict):
+        return True
+    smartctl = raw.get("smartctl") if isinstance(raw.get("smartctl"), dict) else {}
+    status = smartctl.get("exit_status")
+    attributes = raw.get("ata_smart_attributes")
+    failed = isinstance(status, int) and not isinstance(status, bool) and bool(status & SMARTCTL_DEVICE_FAILED)
+    return failed or not (isinstance(attributes, dict) and isinstance(attributes.get("table"), list))
 
 
 def smartctl_messages(raw: object) -> list[str]:
@@ -164,6 +185,9 @@ def smart_record(role: str, uuid: str, previous: dict[str, int], last: dict[str,
         raw = json.loads(text)
         messages = smartctl_messages(raw)
         if not nvme and any(SAT_UNSUPPORTED.search(message) for message in messages):
+            return scsi_health(record, device)
+        # These bridges can fail SAT silently, so the exit status and the table decide, not message text.
+        if not nvme and no_power_check and sat_unusable(raw):
             return scsi_health(record, device)
         power_rejected = no_power_check or any(POWER_CHECK_REJECTED.search(message) for message in messages)
         if not power_rejected and any(STANDBY_MESSAGE.search(message) for message in messages):

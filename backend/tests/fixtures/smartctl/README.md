@@ -1,6 +1,14 @@
 # smartctl fixtures
 
-These files are **built, not captured**. Each uses the JSON envelope smartctl 7.4
+**Captured** (real output from `sdg`, the Seagate-bridged `data2tb` disk, on
+2026-10-22, with no serial numbers):
+
+- `sdg-sat-captured.json`: `smartctl -H -A -d sat --json=c /dev/sdg`. Exit 2,
+  no `smartctl.messages`, no SMART table. The bridge fails SAT silently.
+- `sdg-scsi-captured.json`: `smartctl -H -d scsi --json=c /dev/sdg`. Exit 0,
+  `smart_status.passed: true`.
+
+The other files are **built, not captured**. Each uses the JSON envelope smartctl 7.4
 (svn 5530) printed on this host for an unprivileged run. The message strings are
 copied verbatim from the installed binary (`strings $(command -v smartctl)`):
 
