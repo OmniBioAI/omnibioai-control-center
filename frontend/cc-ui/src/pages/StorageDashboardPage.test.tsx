@@ -236,6 +236,7 @@ describe('StorageDashboardPage', () => {
     await screen.findByText('Storage & Backup')
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull()
     expect(screen.getByText(/^Last updated /)).toBeTruthy()
+    expect(screen.queryByText(/Storage 1.0 readiness/)).toBeNull()
     const tablist = screen.getByRole('tablist', { name: 'Storage dashboard views' })
     const tabs = screen.getAllByRole('tab')
     expect(tabs.map(tab => tab.textContent)).toEqual(['Overview', 'Devices & Volumes', 'Archive Pool', 'Backups & Snapshots', 'Health & Alerts', 'Recovery & Readiness'])

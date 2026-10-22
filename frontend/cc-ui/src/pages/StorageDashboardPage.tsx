@@ -307,7 +307,6 @@ export default function StorageDashboardPage() {
     {loading ? <LoadingState label="Loading storage observations…" /> : error ? <ErrorState message={error} onRetry={() => void load()} /> : !data ? <EmptyState title="Storage telemetry unavailable" /> : <>
       <Card style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 16, padding: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ fontSize: 12, color: 'var(--text2)' }}>Last updated {date(data.observed_at)}{data.freshness === 'STALE' ? ' (stale)' : ''}</span><Badge status={data.freshness} /></div>
-        <div style={{ fontSize: 12, color: 'var(--text2)' }}>Storage 1.0 readiness: {words(data.readiness_state)}</div>
       </Card>
       {view === 'overview' && <>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 230px), 1fr))', gap: 12, marginBottom: 18 }}>
