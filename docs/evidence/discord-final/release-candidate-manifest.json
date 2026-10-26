@@ -1,0 +1,98 @@
+{
+  "workstream": "OMNIBIOAI_DISCORD_FINAL_END_TO_END_PRODUCTION_CLOSURE",
+  "created": "2026-10-24",
+  "candidate_status": "UNSTABLE_DIRTY_WORKTREES",
+  "fingerprint_algorithm": "tracked_diff_sha256 is SHA256(git diff HEAD --binary). untracked_content_set_sha256 is SHA256 of sorted concatenated relative-path + NUL + hex SHA256(file bytes) for every untracked file (recursively expanding untracked directories). candidate_worktree_sha256 is SHA256(hex tracked diff + hex untracked content set). For Control Center, docs/evidence/** and docs/discord-multichannel-integration-v1.md are excluded from the source fingerprint and covered by SHA256SUMS to avoid self-reference. Status paths remain fully listed.",
+  "workspace_parent": {
+    "path": "/home/manish/Desktop/omnibioai-ecosystem",
+    "branch": "recovery/auth-checkpoint-v58",
+    "head": "24f92ed8547e063b91aecefc84ad962b95c28a16",
+    "status_entry_count": 135,
+    "status_blob_sha256": "fcf2575c6f14426a476a6daed59d7c99786f1b60305c2514cbbd858fff9f9ec4",
+    "note": "Parent workspace has extensive unrelated dirty/untracked release-candidate, admin, and storage work. Preserved; no parent files changed by this workstream."
+  },
+  "environment": {
+    "hostname": "spark-c275",
+    "os": "Linux 7.0.0-1019-nvidia-aarch64, glibc 2.39",
+    "architecture": "aarch64",
+    "dgx_hardware_identity": "NOT_VERIFIED",
+    "container_marker_present": false,
+    "docker_context": "default",
+    "docker_daemon": "permission denied in this session; no images or containers inspected",
+    "system_python": "3.14.7",
+    "qualified_control_center_python": "/tmp/omnibioai-control-center-system-312/bin/python (3.12.3)",
+    "qualified_control_center_test_tools": "pytest 9.1.1; pytest-asyncio 1.4.0; pytest-cov 7.1.0; coverage 7.16.2",
+    "control_center_runtime_versions": "FastAPI 0.115.12; Starlette 0.46.2; HTTPX 0.28.1; cryptography 46.0.3; prometheus-fastapi-instrumentator 7.1.0",
+    "repository_lockfiles": [],
+    "discord_admin_access": "NOT_AVAILABLE",
+    "approved_secret_manager_access": "NOT_AVAILABLE"
+  },
+  "repositories": [
+    {
+      "name": "omnibioai-control-center",
+      "path": "/home/manish/Desktop/omnibioai-ecosystem/omnibioai-control-center",
+      "branch": "main", "head": "f37ce8c952f917f607e9923cbb47dda8b0406a7a", "upstream": "origin/main", "upstream_head": "f37ce8c952f917f607e9923cbb47dda8b0406a7a", "ahead": 0, "behind": 0,
+      "staged_paths": [],
+      "unstaged_paths": ["README.md", "backend/src/control_center/api/routes_integrations.py", "backend/src/control_center/checks/disk.py", "backend/src/control_center/checks/gpu.py", "backend/src/control_center/checks/known_issues.py", "backend/src/control_center/core/runner.py", "backend/src/control_center/main.py", "backend/src/control_center/notifications/discord.py", "backend/tests/conftest.py", "backend/tests/test_discord.py", "backend/tests/test_routes_integrations.py", "backend/tests/test_storage_host_snapshot.py"],
+      "deleted_paths": [],
+      "untracked_paths": [".github/workflows/discord-github-community-events.yml", ".github/workflows/discord-release-event.yml", "backend/src/control_center/api/routes_discord_events.py", "backend/src/control_center/notifications/discord_events.py", "backend/tests/test_discord_event_client.py", "backend/tests/test_discord_events.py", "backend/tests/test_discord_iam_api.py", "backend/tests/test_discord_process_crash.py", "backend/tests/test_discord_routing.py", "backend/tests/test_github_discord_event_adapter.py", "backend/tests/test_support_discord_publisher.py", "docs/discord-multichannel-integration-v1.md", "docs/evidence/", "scripts/discord_disposable_e2e.py", "scripts/publish_discord_event.py", "scripts/publish_github_community_event.py", "scripts/publish_support_discord_event.py", "scripts/qualify_discord_v8.py"],
+      "tracked_diff_sha256": "81ac7ef6fd02e82e6f454808df0c881f52362c460198080126e4f2f4c5a89e31",
+      "untracked_content_set_sha256": "5cb0f5e4b19a199f84d433df8b499da4e4157fb4a7ba885ea81e4bd87b9ddc75",
+      "candidate_worktree_sha256": "ba932a1b04f77a7e248998480bc486d67212dfac25c349fe8cfaf7b95e85eb4f",
+      "dependency_files_sha256": {"backend/pyproject.toml": "5f80e84043888438258ee45230492ea3a4021bbf0cebcb0f3cd351c36bef6ba2", "pyproject.toml": "b32d17ec606e732d6da4c2cf9f25d4661c03c44d52cfd418875094ad99897a5c", "requirements.txt": "a19469d4d9c46f9168c7a4b3b680a06e1d6799ee654875bc9e14c8144239aae6"}
+    },
+    {
+      "name": "omnibioai-auth", "path": "/home/manish/Desktop/omnibioai-ecosystem/omnibioai-auth",
+      "branch": "recovery/auth-disabled-verifier-v58", "head": "8b8d5c7fe0b4b7355e8c15e948644e670eefbe2c", "upstream": "origin/recovery/auth-disabled-verifier-v58", "upstream_head": "8b8d5c7fe0b4b7355e8c15e948644e670eefbe2c", "ahead": 0, "behind": 0,
+      "staged_paths": [], "unstaged_paths": [".dockerignore"], "deleted_paths": [], "untracked_paths": [],
+      "tracked_diff_sha256": "9a72b8b00225335720fda7dd56258d0bc0f6137befc9623289a1a34d10b95523", "untracked_content_set_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "candidate_worktree_sha256": "a629c045780b573e79153a61ae9a2a6b5b6e021a1b7ad85837845c7b38cc6f5f",
+      "dependency_files_sha256": {"pyproject.toml": "ad0cfb0e9a2a46f44cd0537221735cfbe7e4ca8f02091f98928a51b9f3529b71", "requirements.txt": "4967e29ae0736a79888051589281800cf942a051d73c869416a6b77bd929bba1", "requirements-test.txt": "473a6e7cbfe97623236434c7d599fc380828319cf4145a7958a10eb0111c6d2a"}
+    },
+    {
+      "name": "omnibioai-rag", "path": "/home/manish/Desktop/omnibioai-ecosystem/omnibioai-rag",
+      "branch": "feature/pubmed-canonical-embedding-v6", "head": "9e7f6b6889bf106bb4e7834729d373fc17aa338f", "upstream": "origin/feature/pubmed-canonical-embedding-v6", "upstream_head": "9e7f6b6889bf106bb4e7834729d373fc17aa338f", "ahead": 0, "behind": 0,
+      "staged_paths": [], "unstaged_paths": ["pyproject.toml", "ragbio/api/server.py", "ragbio/notifications/discord.py", "tests/test_api_server.py", "tests/test_discord.py"], "deleted_paths": ["ragbio/notifications/discord.py"], "untracked_paths": [".github/workflows/", "ragbio/notifications/discord_events.py"],
+      "tracked_diff_sha256": "5d9a2f979208ff678ed75105efa774b18c7fab4da503b49873366aa29b09e047", "untracked_content_set_sha256": "0abc0e8b693a39c59f8680ff65dda0e0a9e3d4f34fc56bb94a29b75e80dbfdcd", "candidate_worktree_sha256": "bcbe6bfa4c24752971d2070ec5ddc48d32bc8d55b7a88fd8107b276850256db4",
+      "dependency_files_sha256": {"pyproject.toml": "b62a5eacddcf95ea5d9ce73be63d18972d87d5c3321c83e55c356ac6a49d7af7", "requirements.txt": "a23133f6adb518f503bf64ab905f5320200a5dbc872247116bd2734df6e53038"}
+    },
+    {
+      "name": "omnibioai-workbench", "path": "/home/manish/Desktop/omnibioai-ecosystem/omnibioai-workbench",
+      "branch": "main", "head": "79feb3da5c568fd0722bcf1708517c49c573f3d8", "upstream": "origin/main", "upstream_head": "79feb3da5c568fd0722bcf1708517c49c573f3d8", "ahead": 0, "behind": 0,
+      "staged_paths": [], "unstaged_paths": ["Dockerfile.app", "notifications/discord.py", "omnibioai/tasks.py", "plugins/file_transfer_manager/README.md", "plugins/file_transfer_manager/services/transfer_manager.py", "plugins/file_transfer_manager/tests/test_dispatch_extra.py", "plugins/file_transfer_manager/tests/test_transfer_manager.py", "plugins/file_transfer_manager/tests/test_views_extra.py", "pyproject.toml", "requirements.txt", "users/signals.py"], "deleted_paths": ["notifications/discord.py"], "untracked_paths": [".github/workflows/discord-events.yml", "discord_tests/", "notifications/discord_events.py", "plugins/file_transfer_manager/tests/test_resume_fencing.py", "scripts/publish_workbench_discord_event.py"],
+      "tracked_diff_sha256": "3f769dc2384bf6f26f8392b62bae4ab3054a7b8f0a9161a0707b5a98158aee64", "untracked_content_set_sha256": "2f6ea88a64bc8927a65bce04b3ed32a7a320ee2b5b0d73430201a456e2e8c67a", "candidate_worktree_sha256": "564154b00f84db9f79fd4b17e6c2a545b5518d975bc6271dbc530f33a9282908",
+      "dependency_files_sha256": {"pyproject.toml": "25126e78f53ffb6a89f5ca124685c9d559b18b5898b08423faa72aeee902c5b3", "requirements.txt": "e6d1f12b25e5aafc468f340c1e9099584755616574908f54d1f6a9b9af9a913a", "requirements.app.txt": "7bf1930afc6851d6a5340c3367a0792d758219bdd7a0da38340d1dc5440a0611", "Dockerfile.app": "0e54f392582f0b2e17c59fa9766919845553ae7757fb7704641358e1874fc65e"}
+    },
+    {
+      "name": "omnibioai-videos", "path": "/home/manish/Desktop/omnibioai-ecosystem/omnibioai-videos",
+      "branch": "main", "head": "712063100b180f7cf17facb2f7f720c3345f815e", "upstream": "origin/main", "upstream_head": "712063100b180f7cf17facb2f7f720c3345f815e", "ahead": 0, "behind": 0,
+      "staged_paths": [], "unstaged_paths": [".github/workflows/ci.yml"], "deleted_paths": [], "untracked_paths": ["scripts/publish_discord_video_event.py", "tests/test_discord_publication.py"],
+      "tracked_diff_sha256": "f9f78780dc3af53682c697e6cda130f88b16f704e640a4c39c929d414997c29a", "untracked_content_set_sha256": "0e21a39527e8842a92fcc1ea6b5746212ead533ca5f3a21eb9deeb6044c5fe12", "candidate_worktree_sha256": "251b55f4c8d551c172cafbcda5e70482d606ba71011fabf80ac8952e83d7c577",
+      "dependency_files_sha256": {"pyproject.toml": "3905b126e699ec2305c8d59e03470398f41167a7479026d600f2080d546daa4d"}
+    },
+    {
+      "name": "omnibioai-docs", "path": "/home/manish/Desktop/omnibioai-ecosystem/omnibioai-docs",
+      "branch": "main", "head": "c965fd30c7214185fe33704e49505b1fe6d71715", "upstream": "origin/main", "upstream_head": "c965fd30c7214185fe33704e49505b1fe6d71715", "ahead": 0, "behind": 0,
+      "staged_paths": [], "unstaged_paths": [".env.deploy.example", "scripts/deploy-docs.sh"], "deleted_paths": [], "untracked_paths": [],
+      "tracked_diff_sha256": "c478b8cac7d9ab6e7741c17624ff56facb6105a45165d85b79f520d4623ff506", "untracked_content_set_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "candidate_worktree_sha256": "75fa1e48aea0f91d220f0ce913b28b2ac785668cfe96b12f041a8c35ae2fd15b",
+      "upstream_incorporation": "Fast-forwarded the three previously missing commits after verifying their 23 changed files did not overlap the two local modified paths.",
+      "dependency_files_sha256": {".env.deploy.example": "aef117de0e6064c45c93f2618def53aeb22ecab3c49d8767c2b62ee2c71d3767"}
+    },
+    {
+      "name": "omnibioai-studio", "path": "/home/manish/Desktop/omnibioai-ecosystem/omnibioai-studio",
+      "branch": "feat/account-structure", "head": "ec0772e75188af3632a1bcf0f7072c2fe3ae843a", "upstream": "origin/feat/account-structure", "upstream_head": "ec0772e75188af3632a1bcf0f7072c2fe3ae843a", "ahead": 0, "behind": 0,
+      "staged_paths": [], "unstaged_paths": [".dockerignore", ".env.example", "docker-compose.yml", "scripts/managed_storage_preflight.py", "src/index.css", "src/ui/components/AccountMenuButton.jsx", "src/ui/pages/AccountNotifications.jsx", "src/ui/pages/AccountStorage.css", "src/ui/pages/AccountStorage.jsx", "tests/ui/account-help.test.jsx", "tests/ui/account-layout.test.jsx", "tests/ui/account-menu.test.jsx", "tests/ui/account-personalization.test.jsx", "tests/ui/account-preferences.test.jsx", "tests/ui/account-privacy.test.jsx", "tests/ui/account-security.test.jsx", "tests/ui/account-storage.test.jsx", "tests/ui/app-shell.test.jsx", "tests/ui/app.test.jsx", "tests/ui/auth.test.jsx", "tests/ui/billing.test.jsx", "tests/ui/developer.test.jsx", "tests/ui/membership-plans.test.jsx", "tests/ui/nav-components.test.jsx", "tests/ui/profile.test.jsx", "tests/ui/role-management.test.jsx"],
+      "deleted_paths": [], "untracked_paths": ["scripts/storage_v1_mount_contract.py", "src/ui/components/ManagedStorageFiles.jsx", "src/ui/lib/managedStorageApi.js", "tests/test_storage_v1_mount_contract.py", "tests/test_storage_v1_startup_preflight.py", "tests/ui/managed-storage-files.test.jsx"],
+      "tracked_diff_sha256": "8d44bfdb9eb8de302ddeea83f4a2f90fa736a2ffa81e04e6479d765e30561c7c", "untracked_content_set_sha256": "3b8b60acd5adf3fcebd23c4eaeaffab7b1684d530d0d195a14c8d8dcf84604a0", "candidate_worktree_sha256": "0d2bc5aee820e4a0b467ccbc6cbf791d76edee01e62cd6f7400310ab9af58171",
+      "dependency_files_sha256": {"docker-compose.yml": "11a4b56d9de0787afe0fda8c3a8fbea64f06288ff337155834ec500aabbffddc", ".env.example": "5ba08b692313fe3a61faee99df9b88d672e98d804f58da81addb4e29147f55e0"}
+    },
+    {
+      "name": "omnibioai-utils", "path": "/home/manish/Desktop/omnibioai-ecosystem/omnibioai-utils",
+      "branch": "main", "head": "637201c77aeea89a674d4388e1f4edc0764b7579", "upstream": "origin/main", "upstream_head": "637201c77aeea89a674d4388e1f4edc0764b7579", "ahead": 0, "behind": 0,
+      "staged_paths": [], "unstaged_paths": ["build_omnibioai_ecosystem.sh"], "deleted_paths": [], "untracked_paths": [],
+      "tracked_diff_sha256": "cd9d0078d3eeb7677e23c79ede3651aaf86dad458ab9d936a3c570ba04f5a465", "untracked_content_set_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "candidate_worktree_sha256": "b0c781a446f9633c7d7a4c23b30271a134da60956e6b9113cb7128c7beb9a590",
+      "dependency_files_sha256": {"requirements-dev.txt": "4fc15191796ad35b3a7c42b0c8879f4eb6b60113685521262d1bfd76bae3e65b"}
+    }
+  ],
+  "production_state": {"credentials_changed": false, "messages_sent": false, "services_changed": false, "databases_changed": false, "persistent_storage_changed": false, "deployment_attempted": false},
+  "candidate_note": "Worktree hashes fingerprint the dirty candidate exactly as observed. This is not a clean commit or immutable image. V10 evidence is preserved; V8/V9 historical test numbers are not current qualification."
+}

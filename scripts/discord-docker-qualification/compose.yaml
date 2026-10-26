@@ -1,0 +1,190 @@
+services:
+  redis:
+    image: redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    pull_policy: never
+    # The pinned Alpine image defines redis as UID 999 / GID 1000. Running as
+    # this user bypasses its root-only entrypoint chown of WORKDIR (/data).
+    user: "999:1000"
+    working_dir: /data
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "96mb", "--maxmemory-policy", "noeviction"]
+    networks: [isolated]
+    labels: &owned
+      io.omnibioai.workstream: OMNIBIOAI_DISCORD_DOCKER_QUALIFICATION_INFRASTRUCTURE_V1
+      io.omnibioai.run-id: ${QUAL_RUN_ID:?run id required}
+      io.omnibioai.disposable: "true"
+    mem_limit: 128m
+    cpus: 0.50
+    pids_limit: 64
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 3s
+    read_only: true
+    tmpfs: ["/data:size=16m,noexec,nosuid,uid=999,gid=1000,mode=0700"]
+    logging: &bounded_logs
+      driver: json-file
+      options: {max-size: 1m, max-file: "2"}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 1s
+      retries: 20
+      start_period: 2s
+
+  mock-discord:
+    image: ${QUAL_IMAGE:?qualification image required}
+    command: ["python", "/opt/discord-qualification/mock_receiver.py"]
+    depends_on:
+      state-init: {condition: service_completed_successfully}
+    networks:
+      isolated:
+        aliases: [discord.com]
+    volumes:
+      - type: bind
+        source: ${RUN_DIR:?run directory required}/tls
+        target: /run/qualification-tls
+        read_only: true
+      - type: bind
+        source: ${RUN_DIR}/evidence
+        target: /run/qualification-evidence
+    environment:
+      MOCK_TLS_CERT: /run/qualification-tls/server.pem
+      MOCK_TLS_KEY: /run/qualification-tls/server-key.pem
+      MOCK_CONTROL_TOKEN: ${MOCK_CONTROL_TOKEN:?synthetic token required}
+      MOCK_EVIDENCE_PATH: /run/qualification-evidence/mock-captures.jsonl
+    labels: *owned
+    mem_limit: 256m
+    cpus: 0.50
+    pids_limit: 64
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 3s
+    logging: *bounded_logs
+    read_only: true
+    tmpfs: ["/tmp:size=16m,noexec,nosuid"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import ssl,urllib.request; c=ssl.create_default_context(cafile='/run/qualification-tls/ca.pem'); r=urllib.request.urlopen('https://127.0.0.1/__test__/health', context=c, timeout=2); raise SystemExit(0 if r.status == 200 and r.read() == b'{\"status\":\"ok\",\"synthetic\":true}' else 1)"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  router:
+    image: ${QUAL_IMAGE:?qualification image required}
+    command: ["uvicorn", "control_center.main:app", "--host", "0.0.0.0", "--port", "7070", "--no-access-log"]
+    depends_on:
+      state-init: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+      mock-discord: {condition: service_healthy}
+    networks: [isolated]
+    volumes:
+      - router-state:/run/discord-state
+      - type: bind
+        source: ${RUN_DIR}/tls/ca.pem
+        target: /run/qualification-tls/ca.pem
+        read_only: true
+    environment:
+      JWT_SECRET: ${SYNTHETIC_JWT_SECRET:?synthetic JWT secret required}
+      REDIS_URL: redis://redis:6379/0
+      DISCORD_DELIVERY_STATE_DIR: /run/discord-state
+      DISCORD_EVENT_SOURCE_SECRETS: ${SOURCE_SECRETS_JSON:?synthetic source keys required}
+      DISCORD_CHANNEL_WEBHOOKS: ${MOCK_WEBHOOKS_JSON:?mock webhook map required}
+      SSL_CERT_FILE: /run/qualification-tls/ca.pem
+      UPTIME_SAMPLING: "0"
+      KNOWLEDGE_BASE_SCAN_ON_STARTUP: "0"
+      REPORT_SCHEDULE_HOURS: "24"
+      CORS_ALLOWED_ORIGINS: http://localhost
+      SENTRY_DSN: ""
+    labels: *owned
+    mem_limit: 768m
+    cpus: 1.00
+    pids_limit: 128
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 5s
+    logging: *bounded_logs
+    read_only: true
+    tmpfs: ["/tmp:size=64m,noexec,nosuid"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7070/health', timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 40
+      start_period: 20s
+
+  test-runner:
+    image: ${QUAL_IMAGE:?qualification image required}
+    command: ["python", "/opt/discord-qualification/e2e_runner.py"]
+    depends_on:
+      router: {condition: service_healthy}
+      mock-discord: {condition: service_healthy}
+    networks: [isolated]
+    volumes:
+      - type: bind
+        source: ${RUN_DIR}/evidence
+        target: /run/qualification-evidence
+      - router-state:/run/discord-state:ro
+      - type: bind
+        source: ${RUN_DIR}/tls/ca.pem
+        target: /run/qualification-tls/ca.pem
+        read_only: true
+    environment:
+      ROUTER_URL: http://router:7070
+      MOCK_URL: https://discord.com
+      MOCK_CONTROL_TOKEN: ${MOCK_CONTROL_TOKEN:?synthetic token required}
+      SYNTHETIC_JWT_SECRET: ${SYNTHETIC_JWT_SECRET:?synthetic JWT secret required}
+      SOURCE_SECRETS_JSON: ${SOURCE_SECRETS_JSON:?synthetic source keys required}
+      REQUESTS_CA_BUNDLE: /run/qualification-tls/ca.pem
+      EVIDENCE_PATH: /run/qualification-evidence/docker-e2e-results.json
+    labels: *owned
+    mem_limit: 256m
+    cpus: 0.50
+    pids_limit: 64
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 3s
+    logging: *bounded_logs
+    read_only: true
+    tmpfs: ["/tmp:size=32m,noexec,nosuid"]
+
+  state-init:
+    image: ${QUAL_IMAGE:?qualification image required}
+    user: "0:0"
+    command: ["sh", "-c", "set -eu; mkdir -p /run/discord-state; chmod 0700 /run/discord-state; chown 10001:10001 /run/discord-state /run/server-key.pem"]
+    volumes:
+      - router-state:/run/discord-state
+      - type: bind
+        source: ${RUN_DIR:?run directory required}/tls/server-key.pem
+        target: /run/server-key.pem
+    networks: [isolated]
+    labels: *owned
+    mem_limit: 64m
+    cpus: 0.25
+    pids_limit: 16
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 2s
+    logging: *bounded_logs
+    read_only: true
+    tmpfs: ["/tmp:size=8m,noexec,nosuid"]
+
+networks:
+  isolated:
+    name: ${QUAL_PROJECT:?unique project required}_isolated
+    internal: true
+    ipam:
+      config:
+        - subnet: ${QUAL_SUBNET:?preflight subnet required}
+          gateway: ${QUAL_GATEWAY:?preflight gateway required}
+    labels:
+      io.omnibioai.workstream: OMNIBIOAI_DISCORD_DOCKER_QUALIFICATION_INFRASTRUCTURE_V1
+      io.omnibioai.run-id: ${QUAL_RUN_ID:?run id required}
+      io.omnibioai.disposable: "true"
+
+volumes:
+  router-state:
+    name: ${QUAL_PROJECT:?unique project required}_router-state
+    labels:
+      io.omnibioai.workstream: OMNIBIOAI_DISCORD_DOCKER_QUALIFICATION_INFRASTRUCTURE_V1
+      io.omnibioai.run-id: ${QUAL_RUN_ID:?run id required}
+      io.omnibioai.disposable: "true"

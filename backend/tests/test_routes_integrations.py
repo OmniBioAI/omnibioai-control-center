@@ -29,8 +29,12 @@ client = TestClient(app)
 
 _ALL_INTEGRATION_ENV_VARS = [
     "SENTRY_DSN", "SENTRY_API_TOKEN", "SENTRY_ORG", "SENTRY_PROJECT_SLUGS",
-    "DISCORD_WEBHOOK_URL", "DISCORD_ALERT_WEBHOOK_URL",
+    "DISCORD_WEBHOOK_URL", "DISCORD_ALERT_WEBHOOK_URL", "DISCORD_CHANNEL_WEBHOOKS",
+    "DISCORD_EVENT_ROUTER_URL", "DISCORD_EVENT_INFRASTRUCTURE_SECRET",
+    "DISCORD_LEGACY_WEBHOOK_FALLBACK",
 ]
+
+_VALID_WEBHOOK = "https://discord.com/api/webhooks/123456/test-token"
 
 
 def _clean_env(**overrides: str) -> dict:
@@ -57,8 +61,18 @@ class TestGetIntegrations(unittest.TestCase):
             resp = client.get("/integrations")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
-        for key in ("sentry", "discord_notifications", "discord_alerts"):
+        for key in ("sentry", "discord_notifications", "discord_alerts", "discord_event_routing"):
             self.assertIn(key, data)
+
+    def test_event_routing_reports_channel_names_but_not_webhooks(self) -> None:
+        secret = "https://discord.com/api/webhooks/999/supersecrettoken"
+        channel_map = '{"announcements":"' + secret + '"}'
+        with patch.dict(os.environ, _clean_env(DISCORD_CHANNEL_WEBHOOKS=channel_map), clear=True):
+            data = client.get("/integrations").json()["discord_event_routing"]
+        self.assertTrue(data["configuration_valid"])
+        self.assertEqual(data["channels"]["announcements"], "configured")
+        self.assertEqual(data["channels"]["general"], "community-driven")
+        self.assertNotIn(secret, str(data))
 
     def test_no_authentication_required(self) -> None:
         """GET /integrations is reachable without a token -- deliberate,
@@ -101,20 +115,83 @@ class TestGetIntegrations(unittest.TestCase):
         self.assertTrue(data["sentry"]["report_aggregation_configured"])
 
     def test_discord_notifications_independent_of_alerts(self) -> None:
-        """Setting only DISCORD_WEBHOOK_URL configures notifications but
-        leaves discord_alerts unconfigured."""
-        with patch.dict(os.environ, _clean_env(DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/x"), clear=True):
+        """A valid legacy URL is not ready unless explicit fallback is enabled."""
+        with patch.dict(os.environ, _clean_env(DISCORD_WEBHOOK_URL=_VALID_WEBHOOK), clear=True):
+            data = client.get("/integrations").json()
+        self.assertFalse(data["discord_notifications"]["configured"])
+        self.assertFalse(data["discord_alerts"]["configured"])
+
+        with patch.dict(os.environ, _clean_env(
+            DISCORD_WEBHOOK_URL=_VALID_WEBHOOK,
+            DISCORD_LEGACY_WEBHOOK_FALLBACK="enabled",
+        ), clear=True):
             data = client.get("/integrations").json()
         self.assertTrue(data["discord_notifications"]["configured"])
         self.assertFalse(data["discord_alerts"]["configured"])
 
     def test_discord_alerts_independent_of_notifications(self) -> None:
-        """Setting only DISCORD_ALERT_WEBHOOK_URL configures alerts but
-        leaves discord_notifications unconfigured."""
-        with patch.dict(os.environ, _clean_env(DISCORD_ALERT_WEBHOOK_URL="https://discord.com/api/webhooks/y"), clear=True):
+        """Alerts use a valid explicit fallback, independently of notifications."""
+        with patch.dict(os.environ, _clean_env(
+            DISCORD_ALERT_WEBHOOK_URL=_VALID_WEBHOOK,
+            DISCORD_LEGACY_WEBHOOK_FALLBACK="enabled",
+        ), clear=True):
             data = client.get("/integrations").json()
         self.assertFalse(data["discord_notifications"]["configured"])
         self.assertTrue(data["discord_alerts"]["configured"])
+
+    def test_central_alert_routing_requires_complete_router_secret_and_alert_channel(self) -> None:
+        alert_map = "{" + ",".join(
+            f'"{channel}":"https://discord.com/api/webhooks/{index}/token-{index}"'
+            for index, channel in enumerate((
+                "announcements", "bug-reports", "feature-requests", "support",
+                "tutorials", "omnibioai-alerts",
+            ), start=1)
+        ) + "}"
+        complete = _clean_env(
+            DISCORD_EVENT_ROUTER_URL="https://control-center.example",
+            DISCORD_EVENT_INFRASTRUCTURE_SECRET="s" * 43,
+            DISCORD_CHANNEL_WEBHOOKS=alert_map,
+        )
+        with patch.dict(os.environ, complete, clear=True):
+            data = client.get("/integrations").json()
+        self.assertTrue(data["discord_notifications"]["configured"])
+        self.assertTrue(data["discord_alerts"]["configured"])
+
+        partial = _clean_env(
+            DISCORD_EVENT_ROUTER_URL="https://control-center.example",
+            DISCORD_EVENT_INFRASTRUCTURE_SECRET="s" * 43,
+            DISCORD_CHANNEL_WEBHOOKS='{"omnibioai-alerts":"' + _VALID_WEBHOOK + '"}',
+        )
+        with patch.dict(os.environ, partial, clear=True):
+            data = client.get("/integrations").json()
+        self.assertFalse(data["discord_notifications"]["configured"])
+        self.assertFalse(data["discord_alerts"]["configured"])
+
+        incomplete = _clean_env(
+            DISCORD_EVENT_ROUTER_URL="https://control-center.example",
+            DISCORD_LEGACY_WEBHOOK_FALLBACK="enabled",
+            DISCORD_ALERT_WEBHOOK_URL=_VALID_WEBHOOK,
+        )
+        with patch.dict(os.environ, incomplete, clear=True):
+            data = client.get("/integrations").json()
+        self.assertFalse(data["discord_alerts"]["configured"])
+
+    def test_fallback_readiness_rejects_invalid_webhook(self) -> None:
+        with patch.dict(os.environ, _clean_env(
+            DISCORD_LEGACY_WEBHOOK_FALLBACK="enabled",
+            DISCORD_ALERT_WEBHOOK_URL="https://attacker.invalid/webhook/token",
+        ), clear=True):
+            data = client.get("/integrations").json()
+        self.assertFalse(data["discord_alerts"]["configured"])
+
+    def test_malformed_router_url_is_reported_as_unconfigured(self) -> None:
+        with patch.dict(os.environ, _clean_env(
+            DISCORD_EVENT_ROUTER_URL="https://[invalid",
+            DISCORD_EVENT_INFRASTRUCTURE_SECRET="s" * 43,
+        ), clear=True):
+            data = client.get("/integrations").json()
+        self.assertFalse(data["discord_notifications"]["configured"])
+        self.assertFalse(data["discord_alerts"]["configured"])
 
     def test_response_never_contains_a_secret_value(self) -> None:
         """Defense-in-depth: with every secret env var set to a

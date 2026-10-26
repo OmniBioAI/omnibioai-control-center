@@ -1,0 +1,28 @@
+{
+  "status": "NOT_VERIFIED",
+  "scenario_source": "docs/evidence/discord-final/qualification.md, Required process/crash case table (18 rows)",
+  "scenario_ids_are_harness_local": true,
+  "scenarios": [
+    {"id":"DCR-01","name":"Crash before persistence","applicability":"Applicable: synchronous ingestion must not acknowledge a record absent from SQLite.","status":"NOT_RUN"},
+    {"id":"DCR-02","name":"Crash after persistence","applicability":"Applicable: SQLite record must remain durable across API process termination.","status":"NOT_RUN"},
+    {"id":"DCR-03","name":"Crash before HTTP submission","applicability":"Applicable: publisher state is persisted before outbound webhook submission.","status":"NOT_RUN"},
+    {"id":"DCR-04","name":"Crash during submission","applicability":"Applicable: synchronous HTTP call may be interrupted while request is in flight.","status":"NOT_RUN"},
+    {"id":"DCR-05","name":"Remote acceptance before local receipt","applicability":"Applicable: remote acceptance can precede local receipt persistence; delivery is at-least-once/ambiguous, not exactly-once.","status":"NOT_RUN"},
+    {"id":"DCR-06","name":"Restart with pending records","applicability":"Applicable: pending approval and durable delivery rows survive API restart.","status":"NOT_RUN"},
+    {"id":"DCR-07","name":"Restart with ambiguous records","applicability":"Applicable: ambiguous delivery state must not be blindly retried if contract forbids it.","status":"NOT_RUN"},
+    {"id":"DCR-08","name":"Concurrent worker claims","applicability":"Not applicable as worded: no worker/claim queue exists; API concurrency/SQLite claim exclusion requires separately approved remapping, not substituted here.","status":"NOT_RUN"},
+    {"id":"DCR-09","name":"Duplicate event submission","applicability":"Applicable: stable event IDs and durable ledger implement duplicate suppression.","status":"NOT_RUN"},
+    {"id":"DCR-10","name":"Discord 429","applicability":"Applicable: synchronous publisher handles rate-limit response/retry metadata.","status":"NOT_RUN"},
+    {"id":"DCR-11","name":"Discord 5xx","applicability":"Applicable: synchronous publisher handles remote server failure and ambiguous state.","status":"NOT_RUN"},
+    {"id":"DCR-12","name":"Network interruption","applicability":"Applicable: outgoing HTTP transport failure during synchronous delivery.","status":"NOT_RUN"},
+    {"id":"DCR-13","name":"Database interruption","applicability":"Applicable: SQLite is the durable persistence backend.","status":"NOT_RUN"},
+    {"id":"DCR-14","name":"Dead-letter transition","applicability":"Applicable: publisher transitions eligible terminal failures to its local JSONL dead-letter record.","status":"NOT_RUN"},
+    {"id":"DCR-15","name":"Authorized replay","applicability":"Applicable: IAM-protected replay API is part of the integration contract.","status":"NOT_RUN"},
+    {"id":"DCR-16","name":"Worker restart during retry","applicability":"Not applicable as worded: there is no worker process; analogous API process interruption during synchronous retry is not silently substituted.","status":"NOT_RUN"},
+    {"id":"DCR-17","name":"Configuration reload","applicability":"Applicable only to the integration's supported reload path; implementation contract needs confirmation before fault assertion.","status":"NOT_RUN"},
+    {"id":"DCR-18","name":"Queue reconciliation after process termination","applicability":"Not applicable as worded: no queue exists; SQLite stale-delivery reconciliation is a distinct behavior and is not silently substituted.","status":"NOT_RUN"}
+  ],
+  "architecture_gap": "Current implementation is synchronous and has no queue or worker. Queue-specific historic scenarios remain listed as authoritative requirements but cannot be substituted with unrelated cases.",
+  "passed": 0,
+  "target": 18
+}

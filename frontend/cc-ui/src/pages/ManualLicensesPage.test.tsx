@@ -77,6 +77,9 @@ describe('ManualLicensesPage', () => {
 
     expect(await screen.findByRole('option', { name: 'Policy not configured' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Issue License' })).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'The authoritative license policy has no supported validity options configured.',
+    )
     expect(licenses.issueLicense).not.toHaveBeenCalled()
   })
 
@@ -88,7 +91,7 @@ describe('ManualLicensesPage', () => {
     render(<ManualLicensesPage />)
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Couldn’t load the license policy (404 from /platform/licenses/policy).',
+      'Couldn’t load the license policy: the API route is unavailable (404 from /platform/licenses/policy).',
     )
     expect(screen.getByRole('group', { name: 'Issue New License fields' })).toBeDisabled()
     expect(screen.getByRole('textbox', { name: /full name/i })).toBeDisabled()
@@ -108,13 +111,49 @@ describe('ManualLicensesPage', () => {
     render(<ManualLicensesPage />)
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Couldn’t load the license registry (404 from /platform/licenses).',
+      'Couldn’t load the license registry: the API route is unavailable (404 from /platform/licenses).',
     )
     expect(screen.getByRole('group', { name: 'Issue New License fields' })).toBeDisabled()
     const issueButton = screen.getByRole('button', { name: 'Issue License' })
     expect(issueButton).toBeDisabled()
 
     fireEvent.submit(issueButton.closest('form')!)
+    expect(licenses.issueLicense).not.toHaveBeenCalled()
+  })
+
+  it('recovers through Retry after a missing policy route becomes available', async () => {
+    const user = userEvent.setup()
+    vi.mocked(licenses.fetchLicensePolicy).mockRejectedValueOnce(Object.assign(
+      new Error('Not Found'),
+      { status: 404, path: '/platform/licenses/policy' },
+    ))
+    render(<ManualLicensesPage />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('the API route is unavailable')
+    expect(screen.getByRole('group', { name: 'Issue New License fields' })).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+    expect(screen.getByRole('option', { name: '30 days' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Issue New License fields' })).toBeEnabled()
+    expect(licenses.fetchLicensePolicy).toHaveBeenCalledTimes(2)
+    expect(licenses.fetchLicenses).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    [401, 'authentication is required'],
+    [403, 'this account is not authorized'],
+    [503, 'the service or one of its dependencies is unavailable'],
+  ])('distinguishes a %i registry failure for the operator', async (status, message) => {
+    vi.mocked(licenses.fetchLicenses).mockRejectedValue(Object.assign(
+      new Error('load failed'),
+      { status, path: '/platform/licenses' },
+    ))
+    render(<ManualLicensesPage />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(message)
+    expect(screen.getByRole('group', { name: 'Issue New License fields' })).toBeDisabled()
     expect(licenses.issueLicense).not.toHaveBeenCalled()
   })
 

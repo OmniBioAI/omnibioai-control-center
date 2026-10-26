@@ -1,0 +1,3 @@
+# Regression results
+
+Existing reported regression evidence: focused Discord/IAM/process suite **134 passed, 0 failed**. Full backend restricted run: **2,221 passed, 13 environment loopback/socket failures, 97.95% coverage**. Historical unrestricted result: 2,234 passed and 98.00% coverage; neither was rerun in V2. V2 qualification-harness failure-path suite: **16 passed, 0 failed** (fake Docker interface; not Docker E2E). No tests were weakened or suppressed. The real Docker test runner did not start: Redis exited during disposable stack readiness, then Docker API access reconfirmation was denied.

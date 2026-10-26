@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import stat
+from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -54,6 +56,70 @@ def test_snapshot_reader_reports_a_missing_file(tmp_path):
     payload, reason = read_host_snapshot(tmp_path / "not-created.json")
     assert payload is None
     assert reason == "snapshot file is missing"
+
+
+def test_snapshot_reader_validates_root_owned_file_and_json(tmp_path, monkeypatch):
+    path = tmp_path / "snapshot.json"
+    info = SimpleNamespace(
+        st_mode=stat.S_IFREG | 0o644, st_size=100, st_uid=0, st_dev=7, st_ino=9,
+    )
+    monkeypatch.setattr(Path, "lstat", lambda _path: info)
+    monkeypatch.setattr(os, "open", lambda *_args: 42)
+    monkeypatch.setattr(os, "fstat", lambda _fd: info)
+    payload = b'{"schema_version":1,"observed_at":"2026-10-24T12:00:00+00:00"}'
+    chunks = iter([payload, b""])
+    monkeypatch.setattr(os, "read", lambda *_args: next(chunks))
+    monkeypatch.setattr(os, "close", lambda _fd: None)
+
+    result, error = read_host_snapshot(path)
+
+    assert error is None
+    assert result is not None and result.schema_version == 1
+
+
+def test_snapshot_reader_rejects_file_changed_after_lstat(tmp_path, monkeypatch):
+    path = tmp_path / "snapshot.json"
+    original = SimpleNamespace(
+        st_mode=stat.S_IFREG | 0o644, st_size=10, st_uid=0, st_dev=7, st_ino=9,
+    )
+    changed = SimpleNamespace(**{**original.__dict__, "st_ino": 10})
+    monkeypatch.setattr(Path, "lstat", lambda _path: original)
+    monkeypatch.setattr(os, "open", lambda *_args: 42)
+    monkeypatch.setattr(os, "fstat", lambda _fd: changed)
+    monkeypatch.setattr(os, "close", lambda _fd: None)
+    assert read_host_snapshot(path) == (None, "snapshot file changed while opening")
+
+
+@pytest.mark.parametrize("failure, expected", [
+    (PermissionError, "snapshot file is not readable"),
+    (OSError, "snapshot file is invalid"),
+])
+def test_snapshot_reader_maps_open_errors(tmp_path, monkeypatch, failure, expected):
+    info = SimpleNamespace(
+        st_mode=stat.S_IFREG | 0o644, st_size=10, st_uid=0, st_dev=7, st_ino=9,
+    )
+    monkeypatch.setattr(Path, "lstat", lambda _path: info)
+    monkeypatch.setattr(os, "open", lambda *_args: (_ for _ in ()).throw(failure("blocked")))
+    assert read_host_snapshot(tmp_path / "snapshot.json") == (None, expected)
+
+
+def test_snapshot_reader_rejects_naive_timestamp_and_unsupported_schema(tmp_path, monkeypatch):
+    info = SimpleNamespace(
+        st_mode=stat.S_IFREG | 0o644, st_size=100, st_uid=0, st_dev=7, st_ino=9,
+    )
+    monkeypatch.setattr(Path, "lstat", lambda _path: info)
+    monkeypatch.setattr(os, "open", lambda *_args: 42)
+    monkeypatch.setattr(os, "fstat", lambda _fd: info)
+    monkeypatch.setattr(os, "close", lambda _fd: None)
+    for payload, expected in (
+        (b'{"schema_version":1,"observed_at":"2026-10-24T12:00:00"}',
+         "snapshot timestamp has no timezone"),
+        (b'{"schema_version":2,"observed_at":"2026-10-24T12:00:00+00:00"}',
+         "snapshot file is invalid"),
+    ):
+        chunks = iter([payload, b""])
+        monkeypatch.setattr(os, "read", lambda *_args: next(chunks))
+        assert read_host_snapshot(tmp_path / "snapshot.json")[1] == expected
 
 
 def test_snapshot_older_than_two_hours_is_stale(monkeypatch):

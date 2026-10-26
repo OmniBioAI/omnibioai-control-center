@@ -11,6 +11,8 @@ Author:
 from __future__ import annotations
 
 import os
+import hashlib
+import time
 from typing import Any
 
 from control_center.checks.gpu import check_gpu_temperature
@@ -60,6 +62,7 @@ def run_all_checks(settings: Any) -> list[dict]:
                     "Target": result.get("target", "-"),
                     "Error": result.get("message", ""),
                 },
+                event_id=f"service-down:{hashlib.sha256(name.encode()).hexdigest()[:16]}:{int(time.time() // 300)}",
             )
 
         results.append(result)

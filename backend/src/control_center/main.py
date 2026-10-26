@@ -77,6 +77,7 @@ from control_center.api.routes_hipaa_compliance import router as hipaa_complianc
 from control_center.api.routes_hipaa_readiness import router as hipaa_readiness_router
 from control_center.api.routes_cloud import router as cloud_router
 from control_center.api.routes_integrations import router as integrations_router
+from control_center.api.routes_discord_events import router as discord_events_router
 from control_center.api.routes_integration_health import router as integration_health_router
 from control_center.core.auth import infra_viewer, require_permission
 from control_center.api.routes_config import router as config_router
@@ -193,6 +194,7 @@ app.include_router(regression_health_router, dependencies=[Depends(require_permi
 app.include_router(security_posture_router)
 app.include_router(deployment_health_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
 app.include_router(integration_health_router, dependencies=[Depends(require_permission("platform.manage_infra"))])
+app.include_router(discord_events_router)
 # report_router is just GET /report -> redirect to / -- gated for
 # consistency with / itself (see root() below) rather than because the
 # redirect leaks anything on its own.

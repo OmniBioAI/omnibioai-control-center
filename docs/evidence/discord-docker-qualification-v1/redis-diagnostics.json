@@ -1,0 +1,18 @@
+{
+  "container_id": "5c525700bd267eefb2c1bc4a556ed60a6b4ee45e6fc89e95449c00b31f1dfebe",
+  "logs_truncated": false,
+  "run_id": "20261025T065800Z-1e46fe03",
+  "state": {
+    "created_at": "2026-10-25T06:58:02.454826817Z",
+    "error": "",
+    "exit_code": 0,
+    "finished_at": "0001-01-01T00:00:00Z",
+    "health": "starting",
+    "oom_killed": false,
+    "started_at": "2026-10-25T06:58:02.670132459Z",
+    "status": "running"
+  },
+  "status": "PASS",
+  "stderr": "",
+  "stdout": "2026-10-25T06:58:02.833736314Z 1:C 25 Oct 2026 06:58:02.833 # WARNING Memory overcommit must be enabled! Without it, a background save or replication may fail under low memory condition. Being disabled, it can also cause failures without low memory condition, see https://github.com/jemalloc/jemalloc/issues/1328. To fix this issue add 'vm.overcommit_memory = 1' to /etc/sysctl.conf and then reboot or run the command 'sysctl vm.overcommit_memory=1' for this to take effect.\n2026-10-25T06:58:02.836403946Z 1:C 25 Oct 2026 06:58:02.836 * oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo\n2026-10-25T06:58:02.836427322Z 1:C 25 Oct 2026 06:58:02.836 * Redis version=7.4.11, bits=64, commit=00000000, modified=0, pid=1, just started\n2026-10-25T06:58:02.836430106Z 1:C 25 Oct 2026 06:58:02.836 * Configuration loaded\n2026-10-25T06:58:02.836885706Z 1:M 25 Oct 2026 06:58:02.836 * Increased maximum number of open files to 10032 (it was originally set to 1024).\n2026-10-25T06:58:02.836905434Z 1:M 25 Oct 2026 06:58:02.836 * monotonic clock: POSIX clock_gettime\n2026-10-25T06:58:02.838726793Z 1:M 25 Oct 2026 06:58:02.838 * Running mode=standalone, port=6379.\n2026-10-25T06:58:02.839816825Z 1:M 25 Oct 2026 06:58:02.839 * Server initialized\n2026-10-25T06:58:02.839862633Z 1:M 25 Oct 2026 06:58:02.839 * Ready to accept connections tcp\n"
+}

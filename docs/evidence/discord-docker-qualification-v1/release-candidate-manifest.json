@@ -1,0 +1,12 @@
+{
+  "workstream": "OMNIBIOAI_DISCORD_DOCKER_QUALIFICATION_INFRASTRUCTURE_V1",
+  "candidate_git_head": "f37ce8c952f917f607e9923cbb47dda8b0406a7a",
+  "candidate_source_tree_sha256": "fcaa2ade75b4cd155dba7d77eca1f3b3a6f094fd622c09848b645f4deec12d56",
+  "candidate_changes_present": true,
+  "docker_base_image": "obai-control-center:f37ce8c952f9",
+  "docker_base_image_id": "sha256:71db0e0401219e5efedb73f1aad2712af5907e49b03678db527d2c03fff9abd3",
+  "redis_image": "redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499",
+  "run_id": "20261025T065800Z-1e46fe03",
+  "qualification_image_tag": "local/omnibioai-discord-qualification:20261025t065800z-1e46fe03",
+  "registry_digest": null
+}

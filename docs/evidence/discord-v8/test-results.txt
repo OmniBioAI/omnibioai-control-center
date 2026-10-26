@@ -1,0 +1,15 @@
+V8 fresh test execution (2026-10-24)
+
+Control Center backend: 2,224 passed, 0 failed, 601 warnings; 72 subtests.
+The first sandbox-restricted attempt was not counted (socket restrictions); a
+fresh complete run with authorized loopback test access passed.
+Coverage: 8,947 / 9,129 statements = 98.01%; existing fail_under=98 passed.
+RAG Discord suite: 10 passed, 0 failed.
+Workbench Discord suite: 14 passed, 0 failed (3 harmless Django plugin config warnings).
+Videos publication suite: 6 passed, 0 failed.
+Disposable in-process mock flow: PASS; six automated routes, three community exclusions.
+Host inspection: FAIL as qualification; Docker daemon access permission denied; no mutation.
+
+Aggregate unique targeted tests listed above: 2,254 passed, 0 failed.
+The mock flow and focused subsets are not included in the aggregate count.
+No live Discord messages were sent. No production changes were made.

@@ -1,0 +1,18 @@
+{
+  "container_id": "13bc707e686567b92980d89dc38a7b8ba2f99f6b2e81e780fc9384ef59baf6e3",
+  "logs_truncated": false,
+  "run_id": "20261025T065800Z-1e46fe03",
+  "state": {
+    "created_at": "2026-10-25T06:58:02.456246641Z",
+    "error": "",
+    "exit_code": 1,
+    "finished_at": "2026-10-25T06:58:03.005967384Z",
+    "health": "unhealthy",
+    "oom_killed": false,
+    "started_at": "2026-10-25T06:58:02.681176106Z",
+    "status": "exited"
+  },
+  "status": "PASS",
+  "stderr": "2026-10-25T06:58:02.963865020Z Traceback (most recent call last):\n2026-10-25T06:58:02.963905244Z   File \"/opt/discord-qualification/mock_receiver.py\", line 105, in <module>\n2026-10-25T06:58:02.963973708Z     context.load_cert_chain(os.environ[\"MOCK_TLS_CERT\"], os.environ[\"MOCK_TLS_KEY\"])\n2026-10-25T06:58:02.964018780Z PermissionError: [Errno 13] Permission denied\n",
+  "stdout": ""
+}

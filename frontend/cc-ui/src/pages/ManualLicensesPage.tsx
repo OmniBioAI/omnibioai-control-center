@@ -21,6 +21,10 @@ function describeLoadFailure(
 ): string {
   const error = failure as Error & { path?: string; status?: number }
   const path = error.path ?? expectedPath
+  if (error.status === 401) return `Couldn’t load the ${resource}: authentication is required (401 from ${path}).`
+  if (error.status === 403) return `Couldn’t load the ${resource}: this account is not authorized (403 from ${path}).`
+  if (error.status === 404) return `Couldn’t load the ${resource}: the API route is unavailable (404 from ${path}).`
+  if (error.status && error.status >= 500) return `Couldn’t load the ${resource}: the service or one of its dependencies is unavailable (${error.status} from ${path}).`
   return error.status
     ? `Couldn’t load the ${resource} (${error.status} from ${path}).`
     : `Couldn’t load the ${resource} (request to ${path} failed).`
@@ -131,9 +135,11 @@ export default function ManualLicensesPage() {
     ? 'License policy and registry data are still loading.'
     : loadError
       ? `${loadError} Issuance is disabled until both requests succeed.`
-      : !policy?.issuance_enabled
-        ? 'The current license policy does not permit issuance.'
-        : null
+      : !policy?.validity_days.length
+        ? 'The authoritative license policy has no supported validity options configured.'
+        : !policy.issuance_enabled
+          ? 'The current license policy does not permit issuance.'
+          : null
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()

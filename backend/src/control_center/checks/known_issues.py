@@ -10,6 +10,7 @@ Author:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import uuid
@@ -105,12 +106,20 @@ def _alert_high_severity(issue: dict[str, Any]) -> None:
     description = issue["description"] or ""
     if len(description) > _DESCRIPTION_ALERT_LIMIT:
         description = description[:_DESCRIPTION_ALERT_LIMIT].rstrip() + "…"
+    # Older callers/tests may supply records created before IDs were added.
+    # Derive a stable, non-sensitive key from the alert's public identity fields
+    # so retries remain deduplicable without requiring a schema migration.
+    issue_id = issue.get("id")
+    if not issue_id:
+        identity = "\0".join(str(issue.get(key) or "") for key in ("title", "opened_at"))
+        issue_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
     _discord_notify(
         _ALERT_WEBHOOK_URL,
         f"🔴 High-severity issue: {issue['title']}",
         description or "(no description)",
         color="error",
         fields={"Area": issue["area"] or "—", "Opened": issue["opened_at"]},
+        event_id=f"known-issue:{issue_id}",
     )
 
 

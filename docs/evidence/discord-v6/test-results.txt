@@ -1,0 +1,29 @@
+Fresh V6 test/result ledger (2026-10-24; no secrets or payload data)
+
+Control Center full backend (Python 3.12 isolated /tmp environment):
+  Assertions: 2158 passed, 0 failed, 0 errors; 72 subtests passed.
+  Assertion-only run (--no-cov): exit 0.
+  Configured coverage run: all assertions passed, pytest exit 1 because 96.59%
+  coverage is below the backend pyproject threshold of 98%.
+
+Focused suites:
+  Control Center Discord router/client/event: 59 passed.
+  Control Center API IAM and process-crash subset: 6 passed.
+  Workbench Discord source/CLI: 14 passed.
+  RAG Discord: 10 passed.
+  Videos publication: 6 passed.
+
+Disposable in-process synthetic event flow:
+  6/6 automated channel routes passed; 3/3 community routes excluded.
+  Signature validation, central approval, mocked Discord delivery, and
+  duplicate suppression passed. This is not a disposable service stack.
+
+Static checks:
+  Python compile: passed.
+  YAML parse: Control Center release/community and video CI passed.
+  bash -n: docs deploy and ecosystem build scripts passed.
+
+Not executed/verified:
+  Live Discord canaries: 0/6 (no authorization or verified destinations).
+  Disposable full service stack and isolated rollback: blocked by Docker access.
+  ARM64 immutable image/source provenance: not verified.

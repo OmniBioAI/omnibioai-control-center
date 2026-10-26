@@ -1,0 +1,22 @@
+{
+  "run_id": "20261025T065800Z-1e46fe03",
+  "diagnostic_errors": [],
+  "cleanup_errors": [],
+  "inventory_error": null,
+  "after_inventory_evidence_error": null,
+  "comparison": {
+    "status": "PASS",
+    "changed_protected_containers": [],
+    "missing_protected_containers": [],
+    "new_harness_containers_remaining": [],
+    "unrelated_concurrent_container_ids": [],
+    "harness_networks_remaining": [],
+    "harness_volumes_remaining": [],
+    "lost_protected_network_rows": [],
+    "lost_protected_volume_rows": [],
+    "baseline_container_fingerprints": 178,
+    "after_container_fingerprints": 178
+  },
+  "cleanup_completed": true,
+  "docker_isolation": "PASS"
+}

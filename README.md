@@ -223,7 +223,8 @@ omnibioai-control-center/
 │   │   │   ├── auth.py             # JWT and permission gates for protected endpoints
 │   │   │   └── jwt_verify.py       # Local JWT verification (HS256 + RS256/JWKS)
 │   │   ├── notifications/
-│   │   │   └── discord.py          # Discord webhook alerts (known issues, GPU temp)
+│   │   │   ├── discord.py          # Central routes, delivery, dedupe, retries, DLQ
+│   │   │   └── discord_events.py   # Signed source ingress, durable event/approval state
 │   │   └── utils/
 │   │       └── summary_client.py   # Fetches /summary for report generation
 │   └── tests/                      # 1,718 collected tests at last review — see "Running Tests" below
@@ -488,6 +489,10 @@ The redirect URI must exactly match Auth's `LIMS_SSO_REDIRECT_URI` value.
 | Runtime credentials | deployment-only | JWT verification and service access; keep in the deployment secret manager |
 | `CRONTAB_SPOOL_PATH`    | `/var/spool/cron/crontabs/manish` | Host crontab spool file, bind-mounted in so `/cron/jobs/{id}/pause\|resume\|schedule` can read/write it directly |
 | `DISCORD_ALERT_WEBHOOK_URL` | *(empty)*                 | Discord webhook for new high-severity known-issue alerts — empty disables alerting gracefully, same pattern as `SENTRY_DSN` |
+| `DISCORD_CHANNEL_WEBHOOKS` | *(empty JSON object)* | Secret JSON map for the six automated Discord channels; see `docs/discord-multichannel-integration-v1.md`. Never expose this value through an API or log. |
+| `DISCORD_EVENT_<SOURCE>_SECRET` | *(deployment-only)* | Distinct HMAC source verifier keys; producers receive only their own source key. |
+| `DISCORD_EVENT_APPROVAL_SOURCES` | *(empty JSON object)* | Optional source/event allowlist for separately approved publication; empty means every event requires Control Center operator approval. |
+| `DISCORD_DELIVERY_STATE_DIR` | `work/discord` | Persistent SQLite event/delivery ledger; state directory is mode 0700, database and dead-letter file mode 0600. |
 | `REGRESSION_HEALTH_ARTIFACT_PATH` | `$WORKSPACE_ROOT/omnibioai-ecosystem-regression/status/regression-health.json` | Read-only promoted certification artifact — see [Regression Health](#regression-health) |
 | `REGRESSION_HEALTH_STALE_AFTER_HOURS` | `168` | Freshness threshold; a stale artifact keeps its certification fields, only `freshness` changes |
 | `DEPLOYMENT_HEALTH_COMPOSE_PATH` | *(unset — required)* | Path to the authoritative Compose baseline — see [Deployment Health](#deployment-health) |
@@ -560,7 +565,7 @@ itself failed) clears the stored token and re-prompts for login.
 
 ### Known-issue Discord alerts
 
-Every genuinely new **high**-severity known issue (create only — never on updates, and never for medium/low, to keep this high-signal) posts a Discord embed via `DISCORD_ALERT_WEBHOOK_URL` (a separate webhook from `DISCORD_WEBHOOK_URL`, which is used for GPU temperature alerts). This fires on the same code path regardless of whether the entry was created by a human via the Admin tab or automatically by one of the host cron self-check scripts (`check_cron_health.py`, `check_disk_space.py`, `check_domain_health.py`) — closing the loop between "the system detected a problem" and "a human finds out." Unset/unreachable webhook, or any error in sending the alert, never blocks the actual known-issue from being recorded — the alert is fire-and-forget.
+Every genuinely new **high**-severity known issue (create only — never on updates, and never for medium/low, to keep this high-signal) preserves the existing alert behavior via `DISCORD_ALERT_WEBHOOK_URL`. New community event traffic uses the signed, durable router and fixed channel mappings documented in [the multichannel integration runbook](docs/discord-multichannel-integration-v1.md). Event submission is not equivalent to publication approval: events remain pending until IAM approval unless a source is explicitly authorized to assert a separate editorial approval. V3 production readiness remains NO-GO until channel hooks, source keys, deployment provenance, regression, rollback, and six authorized canaries are verified.
 
 ### Generate
 

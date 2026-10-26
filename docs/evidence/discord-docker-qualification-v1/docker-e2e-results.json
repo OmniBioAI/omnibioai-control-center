@@ -1,0 +1,11 @@
+{
+  "status": "BLOCKED",
+  "reason": "Disposable stack startup failed: state-init succeeded but Redis exited with status 1; after this, Docker API access reconfirmation was denied in the ordinary execution context and no further Docker-dependent diagnosis/retry was performed.",
+  "run_id": "20261024T185057Z-8350b765",
+  "routes_passed": 0,
+  "route_target": 6,
+  "community_exclusions_passed": 0,
+  "community_exclusions_target": 3,
+  "test_runner_started": false,
+  "mocked_or_in_process_results_counted": false
+}

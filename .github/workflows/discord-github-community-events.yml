@@ -1,0 +1,32 @@
+name: Queue reviewed GitHub community events for Discord
+
+on:
+  issues:
+    types: [labeled, closed]
+  milestone:
+    types: [closed]
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: discord-community-${{ github.event.issue.id || github.event.milestone.id }}-${{ github.event.action }}
+  cancel-in-progress: false
+
+jobs:
+  submit-event:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Submit sanitized event for central approval
+        env:
+          DISCORD_EVENT_ROUTER_URL: ${{ vars.DISCORD_EVENT_ROUTER_URL }}
+          DISCORD_EVENT_SOURCE_SECRET: ${{ secrets.DISCORD_EVENT_GITHUB_SECRET }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: python scripts/publish_github_community_event.py

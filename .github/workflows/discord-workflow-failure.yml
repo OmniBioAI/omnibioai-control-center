@@ -1,0 +1,25 @@
+name: Queue failed workflow for Discord alerts
+
+on:
+  workflow_run:
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  submit-failure-event:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'timed_out' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Queue signed workflow failure event for human approval
+        env:
+          DISCORD_EVENT_ROUTER_URL: ${{ vars.DISCORD_EVENT_ROUTER_URL }}
+          DISCORD_EVENT_SOURCE_SECRET: ${{ secrets.DISCORD_EVENT_GITHUB_SECRET }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: python scripts/publish_github_workflow_failure.py

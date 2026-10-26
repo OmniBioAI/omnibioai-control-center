@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import time
 from typing import Any, Optional
 
 import httpx
@@ -62,6 +63,7 @@ def check_gpu_temperature() -> list[dict]:
                         "GPU": f"[{idx}] {name}",
                         "Action": "Reduce workload immediately",
                     },
+                    event_id=f"gpu-high-temp:{idx}:{int(time.time() // 300)}",
                 )
 
             results.append({

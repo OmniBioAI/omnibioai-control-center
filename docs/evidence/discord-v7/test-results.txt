@@ -1,0 +1,47 @@
+V7 test execution evidence (2026-10-24)
+
+Control Center full backend, from backend/:
+  timeout 600 /tmp/omnibioai-control-center-system-312/bin/pytest -q --tb=short
+  RESULT: 2224 passed, 0 failed, 599 warnings, 72 subtests passed
+  COVERAGE: 8947/9129 statements = 98.01%; configured fail_under=98 passed
+
+Focused Control Center Discord/API/publisher/source set:
+  pytest --no-cov tests/test_discord_events.py tests/test_discord_iam_api.py
+    tests/test_discord.py tests/test_discord_routing.py
+    tests/test_support_discord_publisher.py
+  RESULT: 91 passed (independent focused run; overlaps full backend count)
+
+Process-level ambiguous delivery crash:
+  pytest --no-cov backend/tests/test_discord_process_crash.py
+  RESULT: 3 passed; real subprocess termination with persistent SQLite
+    before persistence, after claim/before HTTP, and after mock acceptance
+
+RAG:
+  pytest --no-cov tests/test_discord.py
+  RESULT: 10 passed
+
+Workbench:
+  pytest --no-cov discord_tests/test_discord_events.py
+    discord_tests/test_workbench_publisher_cli.py
+  RESULT: 14 passed
+
+Videos:
+  pytest --no-cov tests/test_discord_publication.py
+  RESULT: 6 passed
+
+Disposable isolated route flow:
+  python scripts/discord_disposable_e2e.py
+  RESULT: PASS; 6/6 automated routes, 3/3 community exclusions, signed source,
+    durable approval, mocked delivery, receipt, duplicate suppression
+
+GitHub Actions workflow syntax:
+  Python YAML parser loaded the two discord-*.yml workflows
+  RESULT: PASS; actionlint was not installed
+
+Test-environment notes:
+  Isolated Python 3.12.3 environment under /tmp; no global or production
+  packages changed. Full Control Center suite used authorized loopback access
+  for existing health-check tests. RAG's --no-cov flag avoids measuring its
+  entire unrelated repository for this Discord-only test run. No live Discord
+  call or production operation was made. Full Docker stack, full crash matrix,
+  production secrets, live canaries, and rollback remain externally blocked.

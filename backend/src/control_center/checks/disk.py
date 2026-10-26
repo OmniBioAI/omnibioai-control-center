@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import os
 import shutil
+import hashlib
+import time
 from typing import Any
 
 from control_center.notifications.discord import notify as _discord_notify
@@ -55,6 +57,7 @@ def run_disk_checks(settings: Any) -> list[dict]:
                         "Used": f"{used_pct}%",
                         "Path": path,
                     },
+                    event_id=f"disk-low:{hashlib.sha256(str(path).encode()).hexdigest()[:16]}:{int(time.time() // 300)}",
                 )
 
             results.append(
