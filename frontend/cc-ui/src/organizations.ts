@@ -106,6 +106,20 @@ export async function fetchPlatformOrgs(params: PlatformOrgListParams = {}): Pro
   return r.json()
 }
 
+export async function createPlatformOrganization(name: string, slug: string): Promise<MyOrg> {
+  const r = await apiFetch('/platform/orgs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, slug }),
+  })
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}))
+    const detail = body?.detail
+    throw new Error(typeof detail === 'string' ? detail : `/platform/orgs ${r.status}`)
+  }
+  return r.json()
+}
+
 export interface PlatformOrgDetail {
   id: number
   slug: string

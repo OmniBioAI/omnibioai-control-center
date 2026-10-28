@@ -129,6 +129,11 @@ async def list_platform_orgs_proxy(request: Request) -> JSONResponse:
     return await _proxy("GET", "/platform/orgs", request)
 
 
+@router.post("/platform/orgs")
+async def create_platform_org_proxy(request: Request) -> JSONResponse:
+    return await _proxy("POST", "/platform/orgs", request)
+
+
 @router.get("/platform/orgs/{org_id}")
 async def get_platform_org_proxy(org_id: int, request: Request) -> JSONResponse:
     return await _proxy("GET", f"/platform/orgs/{org_id}", request)
