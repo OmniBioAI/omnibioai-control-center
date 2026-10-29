@@ -3,7 +3,7 @@ import {
   Container, CreditCard, FileCheck2, FileKey, Fingerprint, FlaskConical, Gauge, HeartPulse,
   KeyRound, KeySquare, LayoutDashboard, MessagesSquare, Network, Plug, ScrollText, Search,
   HardDrive, Server, Settings, Settings2, Shield, ShieldCheck, ShieldPlus, Sparkles, Users,
-  UsersRound, Workflow, Wrench,
+  UserCog, UsersRound, Workflow, Wrench,
 } from 'lucide-react'
 import { NAVIGATION, isNavItemVisible } from '../../navigation'
 import type { NavItem, PageKey } from '../../navigation'
@@ -13,6 +13,7 @@ const ICONS: Partial<Record<PageKey, IconComponent>> = {
   overview: LayoutDashboard,
   organizations: Building2,
   users: Users,
+  tenants: UserCog,
   teams: UsersRound,
   roles: ShieldCheck,
   'manual-licenses': KeyRound,
