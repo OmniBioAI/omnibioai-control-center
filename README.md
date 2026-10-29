@@ -4,11 +4,13 @@
 
 `admin.omnibioai.org/tenants` is a platform-admin (`manage_all_orgs`) surface. The browser calls only the Control Center backend; Control Center aggregates identity from Auth, membership and overrides from Billing, and usage from Workbench. Set the reviewed public build flag `VITE_TENANTS_MOCKS=true` to use typed in-browser fixtures while developing the UI. Omit it (or set it to `false`) for real APIs.
 
-All byte values are decimal bytes (`1 GB = 1,000,000,000 bytes`). A missing membership is Free. Plus/Pro are effective only for `active` or `trialing`; canceled or expired membership falls back to Free. An unexpired admin override takes precedence over the plan allocation. `pct = used_bytes / allocated_bytes * 100`; `near` begins at 80%, and `over_allocation` means used bytes exceed allocated bytes.
+All byte values are decimal bytes (`1 GB = 1,000,000,000 bytes`). Billing resolves the highest of a paid Stripe membership, an active promotional grant, and Free. Rows expose `plan_source` (`stripe`, `promo`, or `free`) and `promo_expires_at`; expiry is evaluated by Billing at read time. An unexpired storage override remains separate and takes precedence over the effective plan allocation. `pct = used_bytes / allocated_bytes * 100`; `near` begins at 80%, and `over_allocation` means used bytes exceed allocated bytes.
 
-- `GET /admin/tenants/summary` → `{tenants_total, per_plan:{free,plus,pro}, allocated_sum_bytes, used_sum_bytes, pool_capacity_bytes, expiring_7d, past_due, over_allocation}`.
-- `GET /admin/tenants?plan=&status=&validity=&storage_status=&q=&sort=&page=&page_size=` → `{items, total}`. Rows contain identity, purchased/effective plan, validity, allocation source, used/reserved bytes, percentage/status, latest plan change, and activity time. Prefix `sort` with `-` for descending order.
-- `GET /admin/tenants/{tenant_id}` → the list row plus `plan_history`, active `override`, `top_allocations`, `workflow_output_bytes` (displayed but not counted), and `usage_trend_30d`.
+- `GET /admin/tenants/summary` → `{tenants_total, per_plan:{free,plus,pro}, allocated_sum_bytes, used_sum_bytes, pool_capacity_bytes, expiring_7d, past_due, over_allocation, promos_active, promos_expiring_7d}`.
+- `GET /admin/tenants?plan=&plan_source=&status=&validity=&storage_status=&q=&sort=&page=&page_size=` → `{items, total}`. Rows contain identity, purchased/effective plan, plan source/promo expiry, validity, allocation source, used/reserved bytes, percentage/status, latest plan change, and activity time. Prefix `sort` with `-` for descending order.
+- `GET /admin/tenants/{tenant_id}` → the list row plus `plan_history`, `active_grant`, `grant_history`, active `override`, `top_allocations`, `workflow_output_bytes` (displayed but not counted), and `usage_trend_30d`.
+- `POST /admin/tenants/{tenant_id}/plan-grant` with `{plan_id:"plus"|"pro", days:1..365 OR expires_at, reason}` replaces any active promo grant atomically.
+- `DELETE /admin/tenants/{tenant_id}/plan-grant` with `{reason}` revokes the active promo grant.
 - `PUT /admin/tenants/{tenant_id}/storage-override` with `{allocated_bytes, reason, expires_at?}` sets an audited override.
 - `DELETE /admin/tenants/{tenant_id}/storage-override` with `{reason}` clears it.
 - `POST /admin/tenants/{tenant_id}/recompute-usage` with `{reason}` recomputes ledger counters and records a ledger event.

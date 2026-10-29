@@ -12,7 +12,7 @@ ADMIN = {"sub": "1", "permissions": ["manage_all_orgs"]}
 
 
 def _row(user_id="1", username="maya"):
-    return {"tenant_id": user_id, "username": username, "email": f"{username}@example.org", "plan_id": "plus", "membership_status": "active", "effective_plan_id": "plus", "valid_from": None, "valid_until": None, "auto_renew": True, "days_remaining": None, "allocated_bytes": 20_000_000_000, "allocation_source": "plan", "used_bytes": 2_000_000_000, "reserved_bytes": 0, "pct": 10, "storage_status": "ok", "last_plan_change": None, "last_activity_at": None}
+    return {"tenant_id": user_id, "username": username, "email": f"{username}@example.org", "plan_id": "plus", "membership_status": "active", "effective_plan_id": "plus", "plan_source": "stripe", "promo_expires_at": None, "valid_from": None, "valid_until": None, "auto_renew": True, "days_remaining": None, "allocated_bytes": 20_000_000_000, "allocation_source": "plan", "used_bytes": 2_000_000_000, "reserved_bytes": 0, "pct": 10, "storage_status": "ok", "last_plan_change": None, "last_activity_at": None}
 
 
 def test_rbac_rejects_missing_and_non_platform_admin_tokens():
@@ -45,3 +45,14 @@ def test_override_and_recompute_mutations_return_refreshed_detail():
         recompute = client.post("/admin/tenants/1/recompute-usage", headers={"Authorization": "Bearer x"}, json={"reason": "reconcile"})
     assert put.status_code == delete.status_code == recompute.status_code == 200
     assert [call.args[0] for call in mutate.await_args_list] == ["PUT", "DELETE", "POST"]
+
+
+def test_promo_mutations_validate_and_return_refreshed_detail():
+    detail = {**_row(), "plan_source": "promo", "promo_expires_at": "2026-12-01T00:00:00Z", "plan_history": [], "active_grant": {}, "grant_history": [], "override": None, "top_allocations": [], "workflow_output_bytes": 0, "usage_trend_30d": []}
+    with patch("control_center.core.auth.verify_token", return_value=ADMIN), patch("control_center.api.routes_tenants.service.mutate", AsyncMock(return_value={})) as mutate, patch("control_center.api.routes_tenants.service.tenant_detail", AsyncMock(return_value=detail)):
+        invalid = client.post("/admin/tenants/1/plan-grant", headers={"Authorization": "Bearer x"}, json={"plan_id": "pro", "days": 30, "expires_at": "2026-12-01", "reason": "bad"})
+        grant = client.post("/admin/tenants/1/plan-grant", headers={"Authorization": "Bearer x"}, json={"plan_id": "pro", "days": 30, "reason": "launch"})
+        revoke = client.request("DELETE", "/admin/tenants/1/plan-grant", headers={"Authorization": "Bearer x"}, json={"reason": "finished"})
+    assert invalid.status_code == 422
+    assert grant.status_code == revoke.status_code == 200
+    assert [call.args[0] for call in mutate.await_args_list] == ["POST", "DELETE"]
