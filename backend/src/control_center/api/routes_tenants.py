@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
+from typing import Literal
 
 from control_center.core.auth import require_permission
 from control_center.tenants import service
@@ -14,6 +15,12 @@ class OverrideBody(BaseModel):
 class ReasonBody(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
 
+class PlanGrantBody(BaseModel):
+    plan_id: Literal["plus", "pro"]
+    days: int | None = Field(default=None, ge=1, le=365)
+    expires_at: str | None = None
+    reason: str = Field(min_length=1, max_length=500)
+
 def _raise(exc: service.UpstreamError):
     raise HTTPException(status_code=exc.status_code, detail=exc.detail)
 
@@ -25,14 +32,14 @@ async def tenant_summary(authorization: str | None = Header(None)):
 
 @router.get("")
 async def list_tenants(
-    plan: str | None = None, status: str | None = None, validity: str | None = None,
+    plan: str | None = None, plan_source: str | None = None, status: str | None = None, validity: str | None = None,
     storage_status: str | None = None, q: str | None = None, sort: str = "username",
     page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=1000),
     authorization: str | None = Header(None),
 ):
     try: rows, _, _ = await service.all_tenants(authorization)
     except service.UpstreamError as exc: _raise(exc)
-    rows = service.filter_sort(rows, plan=plan, status=status, validity=validity, storage_status=storage_status, q=q, sort=sort)
+    rows = service.filter_sort(rows, plan=plan, plan_source=plan_source, status=status, validity=validity, storage_status=storage_status, q=q, sort=sort)
     return {"items": rows[(page - 1) * page_size:page * page_size], "total": len(rows)}
 
 @router.get("/{tenant_id}")
@@ -67,6 +74,27 @@ async def recompute_usage(tenant_id: str, body: ReasonBody, authorization: str |
     if not body.reason.strip(): raise HTTPException(422, "Reason is required")
     try:
         await service.mutate("POST", tenant_id, "recompute", body.model_dump(), authorization, "workbench")
+        detail = await service.tenant_detail(tenant_id, authorization)
+    except service.UpstreamError as exc: _raise(exc)
+    if detail is None: raise HTTPException(404, "Tenant not found")
+    return detail
+
+@router.post("/{tenant_id}/plan-grant")
+async def grant_promo_plan(tenant_id: str, body: PlanGrantBody, authorization: str | None = Header(None)):
+    if not body.reason.strip(): raise HTTPException(422, "Reason is required")
+    if (body.days is None) == (body.expires_at is None): raise HTTPException(422, "Provide exactly one of days or expires_at")
+    try:
+        await service.mutate("POST", tenant_id, "plan-grant", body.model_dump(), authorization, "billing")
+        detail = await service.tenant_detail(tenant_id, authorization)
+    except service.UpstreamError as exc: _raise(exc)
+    if detail is None: raise HTTPException(404, "Tenant not found")
+    return detail
+
+@router.delete("/{tenant_id}/plan-grant")
+async def revoke_promo_plan(tenant_id: str, body: ReasonBody, authorization: str | None = Header(None)):
+    if not body.reason.strip(): raise HTTPException(422, "Reason is required")
+    try:
+        await service.mutate("DELETE", tenant_id, "plan-grant", body.model_dump(), authorization, "billing")
         detail = await service.tenant_detail(tenant_id, authorization)
     except service.UpstreamError as exc: _raise(exc)
     if detail is None: raise HTTPException(404, "Tenant not found")

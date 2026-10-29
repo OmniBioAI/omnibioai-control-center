@@ -88,8 +88,7 @@ def tenant_row(identity: dict, billing: dict, ledger: dict, now: datetime | None
     status = raw_status if raw_status in MEMBERSHIP_STATUSES else ("canceled" if raw_status in {"incomplete_expired", "unpaid"} else "past_due")
     plan_id = billing.get("plan_id") if billing.get("plan_id") in PLAN_BYTES else "free"
     effective_plan = billing.get("effective_plan_id") if billing.get("effective_plan_id") in PLAN_BYTES else "free"
-    if status in {"canceled", "none"} or (days_remaining is not None and days_remaining < 0):
-        effective_plan = "free"
+    plan_source = billing.get("plan_source") if billing.get("plan_source") in {"stripe", "promo", "free"} else ("stripe" if effective_plan != "free" else "free")
     override = billing.get("override")
     allocated = int(override["allocated_bytes"]) if override else PLAN_BYTES[effective_plan]
     used = int(ledger.get("used_bytes") or 0)
@@ -101,16 +100,18 @@ def tenant_row(identity: dict, billing: dict, ledger: dict, now: datetime | None
     return {
         "tenant_id": str(identity["user_id"]), "username": identity.get("username") or identity.get("email", "").split("@", 1)[0], "email": identity.get("email", ""),
         "plan_id": plan_id, "membership_status": status, "effective_plan_id": effective_plan,
+        "plan_source": plan_source, "promo_expires_at": billing.get("promo_expires_at"),
         "valid_from": billing.get("valid_from"), "valid_until": billing.get("valid_until"), "auto_renew": bool(billing.get("auto_renew")), "days_remaining": days_remaining,
         "allocated_bytes": allocated, "allocation_source": "override" if override else "plan", "used_bytes": used, "reserved_bytes": reserved, "pct": pct, "storage_status": storage_status,
         "last_plan_change": ({"from_plan": last["from_plan"], "to_plan": last["to_plan"], "at": last["at"]} if last else None), "last_activity_at": identity.get("last_activity_at"),
     }
 
 
-def filter_sort(rows: list[dict], *, plan: str | None = None, status: str | None = None, validity: str | None = None, storage_status: str | None = None, q: str | None = None, sort: str = "username") -> list[dict]:
+def filter_sort(rows: list[dict], *, plan: str | None = None, plan_source: str | None = None, status: str | None = None, validity: str | None = None, storage_status: str | None = None, q: str | None = None, sort: str = "username") -> list[dict]:
     needle = (q or "").strip().lower()
     result = [row for row in rows if
         (not plan or row["effective_plan_id"] == plan) and
+        (not plan_source or row["plan_source"] == plan_source) and
         (not status or row["membership_status"] == status) and
         (not storage_status or row["storage_status"] == storage_status) and
         (not needle or any(needle in str(row[field]).lower() for field in ("tenant_id", "username", "email"))) and
@@ -144,19 +145,25 @@ async def all_tenants(authorization: str | None) -> tuple[list[dict], dict, dict
 async def tenant_detail(tenant_id: str, authorization: str | None) -> dict | None:
     headers = _headers(authorization)
     async with httpx.AsyncClient() as client:
-        identities, billings, ledgers = await _sources(client, headers, [tenant_id])
-    if tenant_id not in identities:
-        return None
-    row = tenant_row(identities[tenant_id], billings.get(tenant_id, {}), ledgers.get(tenant_id, {}))
-    return {**row, "plan_history": billings.get(tenant_id, {}).get("plan_history", []), "override": billings.get(tenant_id, {}).get("override"), "top_allocations": ledgers.get(tenant_id, {}).get("top_allocations", []), "workflow_output_bytes": ledgers.get(tenant_id, {}).get("workflow_output_bytes", 0), "usage_trend_30d": ledgers.get(tenant_id, {}).get("usage_trend_30d", [])}
+        identity = await _json(client, "POST", f"{IAM_URL}/platform/users/batch", "auth-service", headers, json={"user_ids": [int(tenant_id)]})
+        identities = {str(item["user_id"]): item for item in identity.get("items", [])}
+        if tenant_id not in identities:
+            return None
+        billing = await _json(client, "GET", f"{BILLING_URL}/admin/tenants/{tenant_id}", "billing-service", headers)
+        ledger = await _json(client, "GET", f"{WORKBENCH_URL}/api/storage/admin/tenants/{tenant_id}", "workbench", headers)
+    row = tenant_row(identities[tenant_id], billing, ledger)
+    return {**row, "plan_history": billing.get("plan_history", []), "override": billing.get("override"), "active_grant": billing.get("active_grant"), "grant_history": billing.get("grant_history", []), "top_allocations": ledger.get("top_allocations", []), "workflow_output_bytes": ledger.get("workflow_output_bytes", 0), "usage_trend_30d": ledger.get("usage_trend_30d", [])}
 
 
-def summary(rows: list[dict]) -> dict:
+def summary(rows: list[dict], now: datetime | None = None) -> dict:
+    moment = now or datetime.now(timezone.utc)
     return {
         "tenants_total": len(rows),
         "per_plan": {plan: sum(row["effective_plan_id"] == plan for row in rows) for plan in PLAN_BYTES},
         "allocated_sum_bytes": sum(row["allocated_bytes"] for row in rows), "used_sum_bytes": sum(row["used_bytes"] for row in rows), "pool_capacity_bytes": POOL_CAPACITY_BYTES,
         "expiring_7d": sum(row["days_remaining"] is not None and 0 <= row["days_remaining"] <= 7 for row in rows), "past_due": sum(row["membership_status"] == "past_due" for row in rows), "over_allocation": sum(row["storage_status"] == "over_allocation" for row in rows),
+        "promos_active": sum(bool(row["promo_expires_at"]) for row in rows),
+        "promos_expiring_7d": sum(bool(row["promo_expires_at"]) and 0 <= math.ceil((_parse(row["promo_expires_at"]) - moment).total_seconds() / 86400) <= 7 for row in rows),
     }
 
 
