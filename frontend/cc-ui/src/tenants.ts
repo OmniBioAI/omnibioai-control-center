@@ -91,7 +91,12 @@ async function jsonFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, { ...init, headers: { 'Content-Type': 'application/json', ...authHeaders(), ...(init.headers ?? {}) } })
   if (response.status === 401) reportUnauthorized()
   if (!response.ok) { const error = new Error(`${path} ${response.status}`); Object.assign(error, { status: response.status }); throw error }
-  return response.status === 204 ? undefined as T : response.json()
+  if (response.status === 204) return undefined as T
+  const contentType = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase()
+  if (contentType !== 'application/json' && !contentType?.match(/^application\/[^\s;]+\+json$/)) {
+    throw new Error(`Tenant API returned a non-JSON response (${contentType || 'missing Content-Type'}). Check the tenant API proxy configuration.`)
+  }
+  return response.json()
 }
 
 export async function fetchTenantSummary(): Promise<TenantSummary> {
