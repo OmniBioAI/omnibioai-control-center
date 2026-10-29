@@ -4,6 +4,7 @@ interface Props {
   children: ReactNode
   style?: CSSProperties
   padding?: number | string
+  className?: string
 }
 
 /** Admin Console Phase 2 design system: the one card chrome (border,
@@ -11,9 +12,9 @@ interface Props {
  * copy of inline. New code should use this instead of repeating the
  * pattern; existing pages are not retrofitted in this PR (see this PR's
  * report for why -- avoiding touching already-tested pages). */
-export default function Card({ children, style, padding = 20 }: Props) {
+export default function Card({ children, style, padding = 20, className }: Props) {
   return (
-    <div
+    <div className={className}
       style={{
         background: 'var(--surface)',
         border: '1px solid var(--border)',

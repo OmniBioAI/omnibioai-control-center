@@ -1,7 +1,7 @@
 /** Admin Console Phase 2 design system: generic in-page loading
  * indicator -- new pages should use this instead of a bespoke "Loading…"
  * string, for visual consistency. */
-export default function LoadingState({ label = 'Loading…' }: { label?: string }) {
+export default function LoadingState({ label, message }: { label?: string; message?: string }) {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
@@ -12,7 +12,7 @@ export default function LoadingState({ label = 'Loading…' }: { label?: string 
         border: '2px solid var(--border)', borderTopColor: 'var(--accent)',
         animation: 'spin 0.8s linear infinite', flexShrink: 0,
       }} />
-      {label}
+      {label ?? message ?? 'Loading…'}
     </div>
   )
 }

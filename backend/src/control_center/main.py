@@ -101,6 +101,7 @@ from control_center.api.routes_services import router as services_router
 from control_center.api.routes_storage import router_storage
 from control_center.api.storage_dashboard import router_storage_dashboard
 from control_center.api.routes_summary import router as summary_router
+from control_center.api.routes_tenants import router as tenants_router
 
 
 # ── Structured JSON logger ────────────────────────────────────────────────────
@@ -303,6 +304,7 @@ app.include_router(compliance_router)
 # routers above.
 app.include_router(hipaa_compliance_router)
 app.include_router(hipaa_readiness_router)
+app.include_router(tenants_router)
 
 
 # ==============================================================================
