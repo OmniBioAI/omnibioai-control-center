@@ -1,5 +1,20 @@
 # OmniBioAI Control Center
 
+## Tenant management API
+
+`admin.omnibioai.org/tenants` is a platform-admin (`manage_all_orgs`) surface. The browser calls only the Control Center backend; Control Center aggregates identity from Auth, membership and overrides from Billing, and usage from Workbench. Set the reviewed public build flag `VITE_TENANTS_MOCKS=true` to use typed in-browser fixtures while developing the UI. Omit it (or set it to `false`) for real APIs.
+
+All byte values are decimal bytes (`1 GB = 1,000,000,000 bytes`). A missing membership is Free. Plus/Pro are effective only for `active` or `trialing`; canceled or expired membership falls back to Free. An unexpired admin override takes precedence over the plan allocation. `pct = used_bytes / allocated_bytes * 100`; `near` begins at 80%, and `over_allocation` means used bytes exceed allocated bytes.
+
+- `GET /admin/tenants/summary` → `{tenants_total, per_plan:{free,plus,pro}, allocated_sum_bytes, used_sum_bytes, pool_capacity_bytes, expiring_7d, past_due, over_allocation}`.
+- `GET /admin/tenants?plan=&status=&validity=&storage_status=&q=&sort=&page=&page_size=` → `{items, total}`. Rows contain identity, purchased/effective plan, validity, allocation source, used/reserved bytes, percentage/status, latest plan change, and activity time. Prefix `sort` with `-` for descending order.
+- `GET /admin/tenants/{tenant_id}` → the list row plus `plan_history`, active `override`, `top_allocations`, `workflow_output_bytes` (displayed but not counted), and `usage_trend_30d`.
+- `PUT /admin/tenants/{tenant_id}/storage-override` with `{allocated_bytes, reason, expires_at?}` sets an audited override.
+- `DELETE /admin/tenants/{tenant_id}/storage-override` with `{reason}` clears it.
+- `POST /admin/tenants/{tenant_id}/recompute-usage` with `{reason}` recomputes ledger counters and records a ledger event.
+
+Mutation reasons must be non-empty. Authorization is independently enforced by Control Center and each owning upstream service.
+
 > README last reviewed: **2026-09-12**
 
 **Operational health dashboard, ecosystem report server, and observability hub for the OmniBioAI stack.**

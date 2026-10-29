@@ -1,0 +1,73 @@
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from pydantic import BaseModel, Field
+
+from control_center.core.auth import require_permission
+from control_center.tenants import service
+
+router = APIRouter(prefix="/admin/tenants", tags=["tenant-admin"], dependencies=[Depends(require_permission("manage_all_orgs"))])
+
+class OverrideBody(BaseModel):
+    allocated_bytes: int = Field(gt=0)
+    reason: str = Field(min_length=1, max_length=500)
+    expires_at: str | None = None
+
+class ReasonBody(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
+
+def _raise(exc: service.UpstreamError):
+    raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+
+@router.get("/summary")
+async def tenant_summary(authorization: str | None = Header(None)):
+    try: rows, _, _ = await service.all_tenants(authorization)
+    except service.UpstreamError as exc: _raise(exc)
+    return service.summary(rows)
+
+@router.get("")
+async def list_tenants(
+    plan: str | None = None, status: str | None = None, validity: str | None = None,
+    storage_status: str | None = None, q: str | None = None, sort: str = "username",
+    page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=1000),
+    authorization: str | None = Header(None),
+):
+    try: rows, _, _ = await service.all_tenants(authorization)
+    except service.UpstreamError as exc: _raise(exc)
+    rows = service.filter_sort(rows, plan=plan, status=status, validity=validity, storage_status=storage_status, q=q, sort=sort)
+    return {"items": rows[(page - 1) * page_size:page * page_size], "total": len(rows)}
+
+@router.get("/{tenant_id}")
+async def get_tenant(tenant_id: str, authorization: str | None = Header(None)):
+    try: detail = await service.tenant_detail(tenant_id, authorization)
+    except service.UpstreamError as exc: _raise(exc)
+    if detail is None: raise HTTPException(404, "Tenant not found")
+    return detail
+
+@router.put("/{tenant_id}/storage-override")
+async def set_override(tenant_id: str, body: OverrideBody, authorization: str | None = Header(None)):
+    if not body.reason.strip(): raise HTTPException(422, "Reason is required")
+    try:
+        await service.mutate("PUT", tenant_id, "storage-override", body.model_dump(), authorization, "billing")
+        detail = await service.tenant_detail(tenant_id, authorization)
+    except service.UpstreamError as exc: _raise(exc)
+    if detail is None: raise HTTPException(404, "Tenant not found")
+    return detail
+
+@router.delete("/{tenant_id}/storage-override")
+async def clear_override(tenant_id: str, body: ReasonBody, authorization: str | None = Header(None)):
+    if not body.reason.strip(): raise HTTPException(422, "Reason is required")
+    try:
+        await service.mutate("DELETE", tenant_id, "storage-override", body.model_dump(), authorization, "billing")
+        detail = await service.tenant_detail(tenant_id, authorization)
+    except service.UpstreamError as exc: _raise(exc)
+    if detail is None: raise HTTPException(404, "Tenant not found")
+    return detail
+
+@router.post("/{tenant_id}/recompute-usage")
+async def recompute_usage(tenant_id: str, body: ReasonBody, authorization: str | None = Header(None)):
+    if not body.reason.strip(): raise HTTPException(422, "Reason is required")
+    try:
+        await service.mutate("POST", tenant_id, "recompute", body.model_dump(), authorization, "workbench")
+        detail = await service.tenant_detail(tenant_id, authorization)
+    except service.UpstreamError as exc: _raise(exc)
+    if detail is None: raise HTTPException(404, "Tenant not found")
+    return detail
