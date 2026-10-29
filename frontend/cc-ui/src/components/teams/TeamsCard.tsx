@@ -123,7 +123,7 @@ export default function TeamsCard({ orgId }: Props) {
           disabled={creating || !newName.trim()}
           style={{
             fontSize: 12, fontWeight: 700, padding: '7px 14px', borderRadius: 8, border: 'none',
-            background: 'var(--accent)', color: '#000',
+            background: 'var(--accent)', color: 'var(--color-on-accent)',
             cursor: creating || !newName.trim() ? 'not-allowed' : 'pointer',
             opacity: creating || !newName.trim() ? 0.6 : 1,
           }}

@@ -29,7 +29,7 @@ interface Lane { id: string; label: string; sublabel?: string; color: string; bg
 const LANES: Lane[] = [
   {
     id: 'clients', label: 'dev / clients', color: C.blue,
-    bg: 'rgba(0,148,255,0.07)', border: 'rgba(0,148,255,0.3)',
+    bg: 'var(--color-info-dim)', border: 'var(--color-info-border)',
     nodes: [
       { key: 'studio',       name: 'studio',       desc: 'Electron · v0.2.0',   port: null,    ui: null },
       { key: 'dev-hub',      name: 'dev-hub',       desc: 'knowledge graph',      port: '5173',  ui: null },
@@ -40,7 +40,7 @@ const LANES: Lane[] = [
   },
   {
     id: 'security', label: '🔐 security plane', sublabel: 'zero-trust boundary', color: C.red,
-    bg: 'rgba(239,68,68,0.07)', border: 'rgba(239,68,68,0.4)',
+    bg: 'color-mix(in srgb, var(--color-danger) 8%, transparent)', border: 'var(--color-danger-border)',
     nodes: [
       { key: 'api-gateway',       name: 'api-gateway',       desc: 'JWT · trace prop', port: '8080', ui: null },
       { key: 'auth-service',      name: 'auth-service',      desc: 'bcrypt · JWT',     port: '8001', ui: null },
@@ -51,7 +51,7 @@ const LANES: Lane[] = [
   },
   {
     id: 'workbench', label: 'workbench', color: C.teal,
-    bg: 'rgba(0,229,160,0.07)', border: 'rgba(0,229,160,0.3)',
+    bg: 'var(--color-accent-dim)', border: 'var(--color-accent-border)',
     nodes: [
       { key: 'workbench',         name: 'workbench',         desc: 'Django · 80+ plugins', port: '8000', ui: 'https://webstudio.omnibioai.org' },
       { key: 'lims',              name: 'lims',              desc: 'lab data',             port: '7000', ui: 'https://lims.omnibioai.org' },
@@ -62,7 +62,7 @@ const LANES: Lane[] = [
   },
   {
     id: 'services', label: 'services', color: C.amber,
-    bg: 'rgba(245,158,11,0.07)', border: 'rgba(245,158,11,0.3)',
+    bg: 'color-mix(in srgb, var(--color-warning) 10%, transparent)', border: 'var(--color-warning-border)',
     nodes: [
       { key: 'toolserver',      name: 'toolserver',      desc: 'FastAPI bio tools', port: '9090',  ui: 'https://tools.omnibioai.org' },
       { key: 'model-registry',  name: 'model-registry',  desc: 'ML versioning',    port: '8095',  ui: 'https://models.omnibioai.org' },
@@ -73,7 +73,7 @@ const LANES: Lane[] = [
   },
   {
     id: 'execution', label: 'execution', color: C.purple,
-    bg: 'rgba(168,85,247,0.07)', border: 'rgba(168,85,247,0.3)',
+    bg: 'var(--color-purple-dim)', border: 'color-mix(in srgb, var(--color-purple) 45%, transparent)',
     nodes: [
       { key: 'tes',          name: 'tes',          desc: 'Slurm/AWS/Azure/GCP', port: '8081', ui: 'https://api.omnibioai.org/_svc/tes' },
       { key: 'tool-runtime', name: 'tool-runtime', desc: 'Docker/Singularity',  port: null,   ui: null },
@@ -110,12 +110,12 @@ function GenerateCta({ onGenerate, generating }: { onGenerate: () => void; gener
         onClick={onGenerate}
         disabled={generating}
         style={{
-          background: C.teal, color: '#000', fontWeight: 700, fontSize: 13,
+          background: C.teal, color: 'var(--color-on-accent)', fontWeight: 700, fontSize: 13,
           border: 'none', borderRadius: 8, padding: '10px 22px', cursor: generating ? 'not-allowed' : 'pointer',
           opacity: generating ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: 8,
         }}
       >
-        {generating && <span style={{ width: 12, height: 12, border: '2px solid rgba(0,0,0,0.3)', borderTopColor: '#000', borderRadius: '50%', animation: 'spin 0.8s linear infinite', display: 'inline-block' }} />}
+        {generating && <span style={{ width: 12, height: 12, border: '2px solid var(--overlay-soft)', borderTopColor: 'var(--color-on-accent)', borderRadius: '50%', animation: 'spin 0.8s linear infinite', display: 'inline-block' }} />}
         {generating ? 'Generating…' : '⊕ Generate Report'}
       </button>
     </div>

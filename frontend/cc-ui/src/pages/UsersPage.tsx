@@ -16,14 +16,14 @@ const card: React.CSSProperties = {
 }
 const cardHead: React.CSSProperties = {
   padding: '11px 18px', borderBottom: '1px solid var(--border)',
-  background: 'rgba(255,255,255,0.03)', display: 'flex', alignItems: 'center',
+  background: 'color-mix(in srgb, var(--color-text) 3%, transparent)', display: 'flex', alignItems: 'center',
   justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
 }
 const th: React.CSSProperties = {
   fontSize: 10, fontWeight: 700, color: 'var(--muted)',
   textTransform: 'uppercase', letterSpacing: '0.07em',
   padding: '9px 14px', borderBottom: '1px solid var(--border)',
-  textAlign: 'left', background: 'rgba(255,255,255,0.03)', whiteSpace: 'nowrap',
+  textAlign: 'left', background: 'color-mix(in srgb, var(--color-text) 3%, transparent)', whiteSpace: 'nowrap',
 }
 const thSortable: React.CSSProperties = { ...th, cursor: 'pointer', userSelect: 'none' }
 const td: React.CSSProperties = {
@@ -147,7 +147,7 @@ export default function UsersPage({ onSelect }: Props) {
         />
         <button type="submit" style={{
           fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 8,
-          border: 'none', background: 'var(--accent)', color: '#000', cursor: 'pointer',
+          border: 'none', background: 'var(--accent)', color: 'var(--color-on-accent)', cursor: 'pointer',
         }}>
           Search
         </button>

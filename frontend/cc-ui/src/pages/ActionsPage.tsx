@@ -26,7 +26,7 @@ type JobStatus = 'idle' | 'running' | 'done' | 'error'
 
 function StatusMessage({ status, message }: { status: JobStatus; message: string }) {
   if (!message) return null
-  const color = status === 'error' ? 'var(--red)' : status === 'done' ? 'var(--green, #22c55e)' : 'var(--muted)'
+  const color = status === 'error' ? 'var(--red)' : status === 'done' ? 'var(--green, var(--color-success))' : 'var(--muted)'
   return <div style={{ fontSize: 12, color, marginTop: 10 }}>{message}</div>
 }
 
@@ -143,7 +143,7 @@ export default function ActionsPage() {
             disabled={reportBusy}
             style={{
               fontSize: 13, fontWeight: 600, padding: '9px 18px', border: 'none', borderRadius: 8,
-              background: reportBusy ? 'rgba(0,229,160,0.4)' : '#00e5a0', color: '#000',
+              background: reportBusy ? 'var(--color-accent-border)' : 'var(--color-accent)', color: 'var(--color-on-accent)',
               cursor: reportBusy ? 'not-allowed' : 'pointer',
             }}
           >
@@ -154,7 +154,7 @@ export default function ActionsPage() {
             disabled={coverageBusy}
             style={{
               fontSize: 13, fontWeight: 600, padding: '9px 18px', border: 'none', borderRadius: 8,
-              background: coverageBusy ? 'rgba(0,229,160,0.4)' : '#00e5a0', color: '#000',
+              background: coverageBusy ? 'var(--color-accent-border)' : 'var(--color-accent)', color: 'var(--color-on-accent)',
               cursor: coverageBusy ? 'not-allowed' : 'pointer',
             }}
           >

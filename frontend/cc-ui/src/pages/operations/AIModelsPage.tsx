@@ -57,7 +57,7 @@ function StageBadge({ stage }: { stage?: string }) {
   return (
     <span style={{
       fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 99,
-      background: 'rgba(255,255,255,0.08)', color, whiteSpace: 'nowrap',
+      background: 'color-mix(in srgb, var(--color-text) 8%, transparent)', color, whiteSpace: 'nowrap',
       textTransform: 'uppercase', letterSpacing: '0.04em',
     }}>
       {label}

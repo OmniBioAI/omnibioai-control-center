@@ -15,14 +15,14 @@ import { hasAdminAccess } from '../auth'
  * require_permission.
  */
 const SEV_COLORS: Record<string, { color: string; bg: string }> = {
-  high:   { color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
-  medium: { color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
-  low:    { color: '#0094ff', bg: 'rgba(0,148,255,0.12)' },
+  high:   { color: 'var(--color-danger)', bg: 'var(--color-danger-dim)' },
+  medium: { color: 'var(--color-warning)', bg: 'var(--color-warning-dim)' },
+  low:    { color: 'var(--color-info)', bg: 'var(--color-info-dim)' },
 }
 const STATUS_COLORS: Record<string, { color: string; bg: string }> = {
-  open:         { color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
-  acknowledged: { color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
-  resolved:     { color: '#22c55e', bg: 'rgba(34,197,94,0.12)' },
+  open:         { color: 'var(--color-danger)', bg: 'var(--color-danger-dim)' },
+  acknowledged: { color: 'var(--color-warning)', bg: 'var(--color-warning-dim)' },
+  resolved:     { color: 'var(--color-success)', bg: 'var(--color-success-dim)' },
 }
 
 function Badge({ label, cfg }: { label: string; cfg: { color: string; bg: string } }) {
@@ -96,8 +96,8 @@ export default function KnownIssuesPage() {
 
       {error && (
         <div style={{
-          background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
-          borderRadius: 'var(--radius)', padding: '10px 14px', color: '#ef4444', fontSize: 12, marginBottom: 16,
+          background: 'color-mix(in srgb, var(--color-danger) 8%, transparent)', border: '1px solid var(--color-danger-border)',
+          borderRadius: 'var(--radius)', padding: '10px 14px', color: 'var(--color-danger)', fontSize: 12, marginBottom: 16,
         }}>
           {error}
         </div>
@@ -128,7 +128,7 @@ export default function KnownIssuesPage() {
               onClick={handleCreate}
               style={{
                 alignSelf: 'flex-start', fontSize: 12, fontWeight: 600, padding: '8px 16px', border: 'none',
-                borderRadius: 8, background: '#00e5a0', color: '#000', cursor: 'pointer',
+                borderRadius: 8, background: 'var(--color-accent)', color: 'var(--color-on-accent)', cursor: 'pointer',
               }}
             >
               Add issue
@@ -175,7 +175,7 @@ export default function KnownIssuesPage() {
                 onClick={() => handleDelete(i.id)}
                 style={{
                   fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 6,
-                  border: '1px solid var(--border)', background: 'var(--surface)', color: '#ef4444', cursor: 'pointer',
+                  border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--color-danger)', cursor: 'pointer',
                 }}
               >
                 Delete

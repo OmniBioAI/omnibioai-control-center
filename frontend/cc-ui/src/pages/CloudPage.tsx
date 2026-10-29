@@ -45,9 +45,9 @@ export default function CloudPage({ refreshKey }: { refreshKey: number }) {
     <span style={{
       fontSize: 10, fontWeight: 700, padding: '2px 8px',
       borderRadius: 99, letterSpacing: '0.05em',
-      background: ok ? 'rgba(0,229,160,0.15)' : 'rgba(148,163,184,0.1)',
-      color: ok ? '#00e5a0' : 'var(--muted)',
-      border: `1px solid ${ok ? 'rgba(0,229,160,0.3)' : 'var(--border)'}`,
+      background: ok ? 'var(--color-accent-dim)' : 'var(--color-border-muted)',
+      color: ok ? 'var(--color-accent)' : 'var(--muted)',
+      border: `1px solid ${ok ? 'var(--color-accent-border)' : 'var(--border)'}`,
     }}>
       {ok ? '✓ CONFIGURED' : 'NOT CONFIGURED'}
     </span>
@@ -73,7 +73,7 @@ export default function CloudPage({ refreshKey }: { refreshKey: number }) {
           {Object.entries(data).map(([key, info]) => (
             <div key={key} style={{
               background: 'var(--surface)',
-              border: `1px solid ${info.configured ? 'rgba(0,229,160,0.2)' : 'var(--border)'}`,
+              border: `1px solid ${info.configured ? 'var(--color-accent-dim)' : 'var(--border)'}`,
               borderRadius: 'var(--radius)',
               padding: '16px 18px',
               display: 'flex',
@@ -103,7 +103,7 @@ export default function CloudPage({ refreshKey }: { refreshKey: number }) {
 
               {!info.configured && key !== 'local' && (
                 <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                  Set environment variables in <code style={{ fontFamily: 'var(--mono)', color: '#a855f7' }}>.env</code> to enable
+                  Set environment variables in <code style={{ fontFamily: 'var(--mono)', color: 'var(--color-purple)' }}>.env</code> to enable
                 </div>
               )}
             </div>

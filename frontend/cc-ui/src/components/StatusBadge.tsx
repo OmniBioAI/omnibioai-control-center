@@ -36,35 +36,35 @@ const KNOWN: Record<string, { bg: string; color: string }> = {
   // statuses already get, made explicit here so it self-documents
   // rather than relying on the KNOWN-miss fallback below.
   configured: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
-  not_configured: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
-  complete: { bg: 'rgba(0,148,255,0.12)', color: 'var(--blue)' },
+  not_configured: { bg: 'color-mix(in srgb, var(--color-text) 8%, transparent)', color: 'var(--muted)' },
+  complete: { bg: 'var(--color-info-dim)', color: 'var(--blue)' },
   pass: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
   verified: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
   certified: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
-  in_progress: { bg: 'rgba(0,148,255,0.12)', color: 'var(--blue)' },
+  in_progress: { bg: 'var(--color-info-dim)', color: 'var(--blue)' },
   partial: { bg: 'var(--amber-bg)', color: 'var(--amber)' },
   attention: { bg: 'var(--amber-bg)', color: 'var(--amber)' },
   technical_debt: { bg: 'var(--amber-bg)', color: 'var(--amber)' },
   paused: { bg: 'var(--amber-bg)', color: 'var(--amber)' },
   blocked: { bg: 'var(--red-bg)', color: 'var(--red)' },
-  not_implemented: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
-  not_certified: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
+  not_implemented: { bg: 'color-mix(in srgb, var(--color-text) 8%, transparent)', color: 'var(--muted)' },
+  not_certified: { bg: 'color-mix(in srgb, var(--color-text) 8%, transparent)', color: 'var(--muted)' },
   failed: { bg: 'var(--red-bg)', color: 'var(--red)' },
-  unknown: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
-  not_run: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
+  unknown: { bg: 'color-mix(in srgb, var(--color-text) 8%, transparent)', color: 'var(--muted)' },
+  not_run: { bg: 'color-mix(in srgb, var(--color-text) 8%, transparent)', color: 'var(--muted)' },
   ready: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
   not_ready: { bg: 'var(--red-bg)', color: 'var(--red)' },
-  not_checked: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
+  not_checked: { bg: 'color-mix(in srgb, var(--color-text) 8%, transparent)', color: 'var(--muted)' },
   rate_limit: { bg: 'var(--amber-bg)', color: 'var(--amber)' },
   available: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
   unavailable: { bg: 'var(--red-bg)', color: 'var(--red)' },
-  disabled: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
+  disabled: { bg: 'color-mix(in srgb, var(--color-text) 8%, transparent)', color: 'var(--muted)' },
   stale: { bg: 'var(--amber-bg)', color: 'var(--amber)' },
   current: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
   fixed: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
   live_validated: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
-  tested: { bg: 'rgba(0,148,255,0.12)', color: 'var(--blue)' },
-  not_live_validated: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
+  tested: { bg: 'var(--color-info-dim)', color: 'var(--blue)' },
+  not_live_validated: { bg: 'color-mix(in srgb, var(--color-text) 8%, transparent)', color: 'var(--muted)' },
   // DH-3: Deployment Health's four runtime/effective health states.
   // 'unknown' already exists above (shared, same gray/muted look this
   // badge already gives every other "no evidence yet" status) --
@@ -96,19 +96,19 @@ const KNOWN: Record<string, { bg: string; color: string }> = {
   // same non-alarming muted gray 'not_configured'/'not_implemented' use,
   // never red.
   match: { bg: 'var(--green-bg)', color: 'var(--color-success)' },
-  drifted: { bg: 'rgba(168,85,247,0.15)', color: 'var(--purple)' },
-  not_applicable: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
+  drifted: { bg: 'var(--color-purple-dim)', color: 'var(--purple)' },
+  not_applicable: { bg: 'color-mix(in srgb, var(--color-text) 8%, transparent)', color: 'var(--muted)' },
   // Storage: a disk skipped while asleep is a neutral state, never a fault.
-  standby: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
+  standby: { bg: 'color-mix(in srgb, var(--color-text) 8%, transparent)', color: 'var(--muted)' },
   // Storage: a planned disk replacement and a read-only disk are neutral facts, never faults.
-  replacing: { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
-  'read-only': { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
+  replacing: { bg: 'color-mix(in srgb, var(--color-text) 8%, transparent)', color: 'var(--muted)' },
+  'read-only': { bg: 'color-mix(in srgb, var(--color-text) 8%, transparent)', color: 'var(--muted)' },
   // A passed health check from an enclosure that limits SMART: neutral, never green.
-  'basic-health': { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' },
+  'basic-health': { bg: 'color-mix(in srgb, var(--color-text) 8%, transparent)', color: 'var(--muted)' },
 }
 
 export default function StatusBadge({ status, label }: Props) {
-  const cfg = KNOWN[status.toLowerCase()] ?? { bg: 'rgba(255,255,255,0.08)', color: 'var(--muted)' }
+  const cfg = KNOWN[status.toLowerCase()] ?? { bg: 'color-mix(in srgb, var(--color-text) 8%, transparent)', color: 'var(--muted)' }
   return (
     <span
       style={{

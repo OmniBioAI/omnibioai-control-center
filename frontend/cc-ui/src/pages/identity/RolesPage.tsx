@@ -48,7 +48,7 @@ const selectStyle: React.CSSProperties = {
 }
 const permissionPill: React.CSSProperties = {
   fontSize: 11, fontFamily: 'monospace', padding: '3px 8px', borderRadius: 6,
-  background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text2)',
+  background: 'color-mix(in srgb, var(--color-text) 4%, transparent)', border: '1px solid var(--border)', color: 'var(--text2)',
 }
 const fieldLabel: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: 'var(--text2)', marginBottom: 4, display: 'block' }
 const fieldStyle: React.CSSProperties = {
@@ -63,10 +63,10 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
     <div
       role="dialog"
       aria-label={title}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}
+      style={{ position: 'fixed', inset: 0, background: 'var(--overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: '20px 22px', width: 480, maxWidth: '90vw', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}>
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: '20px 22px', width: 480, maxWidth: '90vw', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 20px 60px var(--overlay)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
           <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>{title}</span>
           <button onClick={onClose} aria-label="Close" style={{ fontSize: 18, color: 'var(--muted)', lineHeight: 1, cursor: 'pointer', background: 'none', border: 'none' }}>×</button>

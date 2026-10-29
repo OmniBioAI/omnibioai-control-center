@@ -398,7 +398,7 @@ function ControlDetailModal({ control, data, onClose }: { control: HipaaControl;
   const exceptions = dataForControl(data.exceptions, control)
   const history = data.history.filter(h => h.entity_id === control.control_key || String(h.new_state?.control_key ?? '') === control.control_key)
   return (
-    <div role="dialog" aria-modal="true" aria-label={`Control detail ${control.control_key}`} onClick={e => { if (e.target === e.currentTarget) onClose() }} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.62)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+    <div role="dialog" aria-modal="true" aria-label={`Control detail ${control.control_key}`} onClick={e => { if (e.target === e.currentTarget) onClose() }} style={{ position: 'fixed', inset: 0, background: 'var(--overlay-strong)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 20, width: 920, maxWidth: '96vw', maxHeight: '88vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, marginBottom: 16 }}>
           <div>

@@ -20,10 +20,10 @@ const PROVIDERS: { id: Provider; label: string; Icon: () => JSX.Element }[] = [
 function GoogleIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-      <path fill="#4285F4" d="M15.68 8.18c0-.57-.05-1.11-.14-1.64H8v3.1h4.3a3.68 3.68 0 0 1-1.6 2.42v2h2.58c1.51-1.39 2.4-3.44 2.4-5.88z" />
-      <path fill="#34A853" d="M8 16c2.16 0 3.97-.72 5.29-1.94l-2.58-2c-.72.48-1.63.77-2.71.77-2.08 0-3.85-1.41-4.48-3.3H.86v2.07A8 8 0 0 0 8 16z" />
-      <path fill="#FBBC05" d="M3.52 9.53a4.8 4.8 0 0 1 0-3.06V4.4H.86a8 8 0 0 0 0 7.2l2.66-2.07z" />
-      <path fill="#EA4335" d="M8 3.18c1.17 0 2.23.4 3.06 1.19l2.29-2.29A7.95 7.95 0 0 0 8 0a8 8 0 0 0-7.14 4.4l2.66 2.07C4.15 4.59 5.92 3.18 8 3.18z" />
+      <path fill="var(--brand-google-blue)" d="M15.68 8.18c0-.57-.05-1.11-.14-1.64H8v3.1h4.3a3.68 3.68 0 0 1-1.6 2.42v2h2.58c1.51-1.39 2.4-3.44 2.4-5.88z" />
+      <path fill="var(--brand-google-green)" d="M8 16c2.16 0 3.97-.72 5.29-1.94l-2.58-2c-.72.48-1.63.77-2.71.77-2.08 0-3.85-1.41-4.48-3.3H.86v2.07A8 8 0 0 0 8 16z" />
+      <path fill="var(--brand-google-yellow)" d="M3.52 9.53a4.8 4.8 0 0 1 0-3.06V4.4H.86a8 8 0 0 0 0 7.2l2.66-2.07z" />
+      <path fill="var(--brand-google-red)" d="M8 3.18c1.17 0 2.23.4 3.06 1.19l2.29-2.29A7.95 7.95 0 0 0 8 0a8 8 0 0 0-7.14 4.4l2.66 2.07C4.15 4.59 5.92 3.18 8 3.18z" />
     </svg>
   )
 }
@@ -31,10 +31,10 @@ function GoogleIcon() {
 function MicrosoftIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-      <rect x="0" y="0" width="7.2" height="7.2" fill="#F25022" />
-      <rect x="8.8" y="0" width="7.2" height="7.2" fill="#7FBA00" />
-      <rect x="0" y="8.8" width="7.2" height="7.2" fill="#00A4EF" />
-      <rect x="8.8" y="8.8" width="7.2" height="7.2" fill="#FFB900" />
+      <rect x="0" y="0" width="7.2" height="7.2" fill="var(--brand-microsoft-red)" />
+      <rect x="8.8" y="0" width="7.2" height="7.2" fill="var(--brand-microsoft-green)" />
+      <rect x="0" y="8.8" width="7.2" height="7.2" fill="var(--brand-microsoft-blue)" />
+      <rect x="8.8" y="8.8" width="7.2" height="7.2" fill="var(--brand-microsoft-yellow)" />
     </svg>
   )
 }

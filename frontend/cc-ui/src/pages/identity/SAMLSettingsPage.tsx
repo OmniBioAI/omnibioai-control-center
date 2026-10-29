@@ -488,7 +488,7 @@ function DeleteConfigCard({ orgId, onDeleted }: { orgId: number; onDeleted: () =
             <button
               onClick={handleDelete}
               disabled={busy}
-              style={{ fontSize: 13, fontWeight: 700, color: '#fff', background: 'var(--red)', border: 'none', borderRadius: 8, padding: '7px 15px', cursor: busy ? 'not-allowed' : 'pointer' }}
+              style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-static-white)', background: 'var(--red)', border: 'none', borderRadius: 8, padding: '7px 15px', cursor: busy ? 'not-allowed' : 'pointer' }}
             >
               {busy ? 'Deleting…' : 'Confirm: delete configuration'}
             </button>

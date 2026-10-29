@@ -59,7 +59,7 @@ export default function OrganizationInvitationsCard({ orgId }: { orgId: number }
           {(roles.length ? roles : [{ name: 'org_member' } as RoleSummary]).map(item => <option key={item.name} value={item.name}>{item.name}</option>)}
         </select>
       </label>
-      <button disabled={busy || !email.trim()} style={{ alignSelf: 'end', padding: '9px 14px', border: 0, borderRadius: 6, background: 'var(--accent)', color: '#07120d', fontWeight: 700, cursor: busy ? 'wait' : 'pointer' }}>{busy ? 'Working…' : 'Invite User'}</button>
+      <button disabled={busy || !email.trim()} style={{ alignSelf: 'end', padding: '9px 14px', border: 0, borderRadius: 6, background: 'var(--accent)', color: 'var(--color-on-accent)', fontWeight: 700, cursor: busy ? 'wait' : 'pointer' }}>{busy ? 'Working…' : 'Invite User'}</button>
     </form>
     <p style={{ fontSize: 11, color: 'var(--muted)' }}>Invitations are email-verified through their single-use link. Membership and license eligibility begin only after acceptance and any required MFA enrollment.</p>
     {error && <div role="alert" style={{ color: 'var(--red)', fontSize: 12, marginBottom: 8 }}>{error}</div>}

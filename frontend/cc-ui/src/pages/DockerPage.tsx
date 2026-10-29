@@ -11,7 +11,7 @@ const th: React.CSSProperties = {
   fontSize: 10, fontWeight: 700, color: 'var(--muted)',
   textTransform: 'uppercase', letterSpacing: '0.07em',
   padding: '9px 14px', borderBottom: '1px solid var(--border)',
-  textAlign: 'left', background: 'rgba(255,255,255,0.03)', whiteSpace: 'nowrap',
+  textAlign: 'left', background: 'color-mix(in srgb, var(--color-text) 3%, transparent)', whiteSpace: 'nowrap',
 }
 const td: React.CSSProperties = {
   fontSize: 12, color: 'var(--text2)',
@@ -24,7 +24,7 @@ const card: React.CSSProperties = {
 }
 const cardHead: React.CSSProperties = {
   padding: '11px 18px', borderBottom: '1px solid var(--border)',
-  background: 'rgba(255,255,255,0.03)', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+  background: 'color-mix(in srgb, var(--color-text) 3%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
 }
 
 /* ── Pagination ─────────────────────────────────────────────── */
@@ -63,7 +63,7 @@ function StatPill({ label, value, color }: { label: string; value: number | stri
   return (
     <span style={{
       fontSize: 12, fontWeight: 600, padding: '4px 12px',
-      borderRadius: 99, background: 'rgba(255,255,255,0.08)',
+      borderRadius: 99, background: 'color-mix(in srgb, var(--color-text) 8%, transparent)',
       color: color ?? 'var(--text2)', border: '1px solid var(--border)',
     }}>
       {value} {label}
@@ -77,10 +77,10 @@ function ContainerBadge({ status, state }: { status: string; state?: string }) {
   const isRunning = s === 'running' || status.startsWith('Up')
   const isRestarting = s === 'restarting' || status.toLowerCase().includes('restart')
   const [bg, color] = isRunning
-    ? ['rgba(34,197,94,0.12)', '#22c55e']
+    ? ['var(--color-success-dim)', 'var(--color-success)']
     : isRestarting
-    ? ['rgba(245,158,11,0.12)', '#f59e0b']
-    : ['rgba(239,68,68,0.12)', '#ef4444']
+    ? ['var(--color-warning-dim)', 'var(--color-warning)']
+    : ['var(--color-danger-dim)', 'var(--color-danger)']
   const label = isRunning ? 'running' : isRestarting ? 'restarting' : 'stopped'
   return (
     <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 99, background: bg, color, whiteSpace: 'nowrap' }}>
@@ -91,23 +91,23 @@ function ContainerBadge({ status, state }: { status: string; state?: string }) {
 
 /* ── Category chip ──────────────────────────────────────────── */
 const CAT_COLORS: Record<string, [string, string]> = {
-  alignment:            ['rgba(0,148,255,0.12)',   '#0094ff'],
-  assembly:             ['rgba(34,197,94,0.12)',   '#22c55e'],
-  'variant-calling':    ['rgba(168,85,247,0.12)',  '#a855f7'],
-  'rna-seq':            ['rgba(245,158,11,0.12)',  '#f59e0b'],
-  'single-cell':        ['rgba(2,132,199,0.12)',   '#0094ff'],
-  epigenomics:          ['rgba(245,158,11,0.12)',  '#f59e0b'],
-  'protein-structure':  ['rgba(124,58,237,0.12)',  '#a855f7'],
-  proteomics:           ['rgba(239,68,68,0.12)',   '#ef4444'],
-  'population-genetics':['rgba(34,197,94,0.12)',   '#22c55e'],
-  annotation:           ['rgba(245,158,11,0.12)',  '#f59e0b'],
-  metagenomics:         ['rgba(14,116,144,0.12)',  '#0094ff'],
-  qc:                   ['rgba(107,114,128,0.12)', '#9ca3af'],
-  imaging:              ['rgba(239,68,68,0.12)',   '#ef4444'],
-  genomics:             ['rgba(0,148,255,0.12)',   '#0094ff'],
+  alignment:            ['var(--color-info-dim)',   'var(--color-info)'],
+  assembly:             ['var(--color-success-dim)',   'var(--color-success)'],
+  'variant-calling':    ['var(--color-purple-dim)',  'var(--color-purple)'],
+  'rna-seq':            ['var(--color-warning-dim)',  'var(--color-warning)'],
+  'single-cell':        ['var(--color-info-dim)',   'var(--color-info)'],
+  epigenomics:          ['var(--color-warning-dim)',  'var(--color-warning)'],
+  'protein-structure':  ['var(--color-purple-dim)',  'var(--color-purple)'],
+  proteomics:           ['var(--color-danger-dim)',   'var(--color-danger)'],
+  'population-genetics':['var(--color-success-dim)',   'var(--color-success)'],
+  annotation:           ['var(--color-warning-dim)',  'var(--color-warning)'],
+  metagenomics:         ['var(--color-info-dim)',  'var(--color-info)'],
+  qc:                   ['color-mix(in srgb, var(--color-text-muted) 12%, transparent)', 'var(--color-text-muted)'],
+  imaging:              ['var(--color-danger-dim)',   'var(--color-danger)'],
+  genomics:             ['var(--color-info-dim)',   'var(--color-info)'],
 }
 function getCatColors(cat: string): [string, string] {
-  return CAT_COLORS[cat] ?? ['rgba(107,114,128,0.12)', '#9ca3af']
+  return CAT_COLORS[cat] ?? ['color-mix(in srgb, var(--color-text-muted) 12%, transparent)', 'var(--color-text-muted)']
 }
 function CategoryChip({ category }: { category: string }) {
   const [bg, color] = getCatColors(category)
@@ -138,16 +138,16 @@ function CatButton({ cat, count, active, onClick }: { cat: string; count: number
       style={{
         width: '100%', textAlign: 'left',
         padding: '6px 10px', borderRadius: 6, fontSize: 12,
-        background: active ? 'rgba(0,229,160,0.1)' : 'transparent',
-        color: active ? '#00e5a0' : 'var(--muted)',
-        border: active ? '1px solid rgba(0,229,160,0.25)' : '1px solid transparent',
+        background: active ? 'var(--color-accent-dim)' : 'transparent',
+        color: active ? 'var(--color-accent)' : 'var(--muted)',
+        border: active ? '1px solid var(--color-accent-border)' : '1px solid transparent',
         fontWeight: active ? 600 : 400, marginBottom: 2,
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         cursor: 'pointer',
       }}
     >
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat}</span>
-      <span style={{ background: 'rgba(255,255,255,0.08)', color: 'var(--muted)', borderRadius: 99, fontSize: 10, fontWeight: 700, padding: '1px 6px', flexShrink: 0, marginLeft: 4 }}>
+      <span style={{ background: 'color-mix(in srgb, var(--color-text) 8%, transparent)', color: 'var(--muted)', borderRadius: 99, fontSize: 10, fontWeight: 700, padding: '1px 6px', flexShrink: 0, marginLeft: 4 }}>
         {count}
       </span>
     </button>
@@ -181,8 +181,8 @@ function ContainersSection({ refreshKey }: { refreshKey: number }) {
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
         {data && (
           <>
-            <StatPill label="running" value={data.running} color="#22c55e" />
-            <StatPill label="stopped" value={data.stopped} color="#ef4444" />
+            <StatPill label="running" value={data.running} color="var(--color-success)" />
+            <StatPill label="stopped" value={data.stopped} color="var(--color-danger)" />
           </>
         )}
       </div>
@@ -289,9 +289,9 @@ function SifImagesSection({ refreshKey }: { refreshKey: number }) {
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
         {data && (
           <>
-            <StatPill label="built"    value={data.built}     color="#22c55e" />
-            <StatPill label="missing"  value={data.missing}   color="#ef4444" />
-            <StatPill label="GB total" value={`${data.total_gb}`} color="#0094ff" />
+            <StatPill label="built"    value={data.built}     color="var(--color-success)" />
+            <StatPill label="missing"  value={data.missing}   color="var(--color-danger)" />
+            <StatPill label="GB total" value={`${data.total_gb}`} color="var(--color-info)" />
           </>
         )}
       </div>
@@ -355,8 +355,8 @@ function SifImagesSection({ refreshKey }: { refreshKey: number }) {
                           <td style={td}>
                             <span style={{
                               fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 99,
-                              background: img.exists ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
-                              color: img.exists ? '#22c55e' : '#ef4444',
+                              background: img.exists ? 'var(--color-success-dim)' : 'var(--color-danger-dim)',
+                              color: img.exists ? 'var(--color-success)' : 'var(--color-danger)',
                             }}>
                               {img.exists ? 'built' : 'missing'}
                             </span>
@@ -368,7 +368,7 @@ function SifImagesSection({ refreshKey }: { refreshKey: number }) {
                                   <div style={{
                                     height: '100%',
                                     width: `${Math.min(100, (img.size_mb / 5120) * 100)}%`,
-                                    background: '#0094ff', borderRadius: 99,
+                                    background: 'var(--color-info)', borderRadius: 99,
                                   }} />
                                 </div>
                                 <span style={{ fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--muted)', whiteSpace: 'nowrap' }}>
@@ -444,8 +444,8 @@ function PluginsSection({ refreshKey }: { refreshKey: number }) {
         {data && (
           <>
             <StatPill label="plugins" value={plugins.length} />
-            <StatPill label="present" value={data.present} color="#22c55e" />
-            <StatPill label="missing" value={data.missing} color="#ef4444" />
+            <StatPill label="present" value={data.present} color="var(--color-success)" />
+            <StatPill label="missing" value={data.missing} color="var(--color-danger)" />
           </>
         )}
       </div>
@@ -517,8 +517,8 @@ function PluginsSection({ refreshKey }: { refreshKey: number }) {
                           <td style={td}>
                             <span style={{
                               fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 99,
-                              background: p.local_status === 'present' ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
-                              color: p.local_status === 'present' ? '#22c55e' : '#ef4444',
+                              background: p.local_status === 'present' ? 'var(--color-success-dim)' : 'var(--color-danger-dim)',
+                              color: p.local_status === 'present' ? 'var(--color-success)' : 'var(--color-danger)',
                             }}>
                               {p.local_status}
                             </span>
@@ -574,9 +574,9 @@ export default function DockerPage({ refreshKey }: { refreshKey: number }) {
             style={{
               padding: '10px 16px', fontSize: 13,
               fontWeight: sub === t.id ? 600 : 400,
-              color: sub === t.id ? '#00e5a0' : 'var(--muted)',
+              color: sub === t.id ? 'var(--color-accent)' : 'var(--muted)',
               background: 'none', border: 'none',
-              borderBottom: sub === t.id ? '2px solid #00e5a0' : '2px solid transparent',
+              borderBottom: sub === t.id ? '2px solid var(--color-accent)' : '2px solid transparent',
               cursor: 'pointer', marginBottom: -1, transition: 'color 0.1s',
             }}
           >

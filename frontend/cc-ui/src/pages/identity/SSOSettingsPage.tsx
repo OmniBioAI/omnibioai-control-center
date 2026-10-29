@@ -54,7 +54,7 @@ function ErrBox({ msg }: { msg: string }) {
  * component exists for this in components/ui yet, and this page adding
  * one for two call sites isn't worth a new shared component. */
 function BoolText({ value: v, trueLabel, falseLabel }: { value: boolean; trueLabel: string; falseLabel: string }) {
-  return <span style={{ color: v ? 'var(--color-success, #22c55e)' : 'var(--muted)' }}>{v ? trueLabel : falseLabel}</span>
+  return <span style={{ color: v ? 'var(--color-success, var(--color-success))' : 'var(--muted)' }}>{v ? trueLabel : falseLabel}</span>
 }
 
 // Discovery status and Enabled/Disabled are both rendered from the same

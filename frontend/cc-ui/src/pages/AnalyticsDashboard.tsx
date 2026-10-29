@@ -28,9 +28,9 @@ import { ActionToolbar, Button, Card, DataTable, EmptyState, ErrorState, Loading
 // regardless of any filter this page could offer), so a picker for
 // them would only ever have one real choice.
 
-const CHART_LINE_COLOR = '#0094ff'
-const CHART_MUTED = '#6b7280'
-const CHART_BORDER = '#2a2d3e'
+const CHART_LINE_COLOR = 'var(--color-info)'
+const CHART_MUTED = 'var(--color-text-muted)'
+const CHART_BORDER = 'var(--color-bg-surface2)'
 
 type RangePreset = '7d' | '30d' | '90d'
 const RANGE_DAYS: Record<RangePreset, number> = { '7d': 7, '30d': 30, '90d': 90 }
@@ -214,7 +214,7 @@ function TrendChart({ data: chartData }: { data: { date: string; count: number |
           <CartesianGrid strokeDasharray="3 3" stroke={CHART_BORDER} vertical={false} />
           <XAxis dataKey="date" tick={{ fill: CHART_MUTED, fontSize: 10 }} axisLine={false} tickLine={false} />
           <YAxis tick={{ fill: CHART_MUTED, fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
-          <Tooltip contentStyle={{ background: '#1a1d2e', border: `1px solid ${CHART_BORDER}`, borderRadius: 8, fontSize: 12 }} />
+          <Tooltip contentStyle={{ background: 'var(--color-bg-surface)', border: `1px solid ${CHART_BORDER}`, borderRadius: 8, fontSize: 12 }} />
           <Line type="monotone" dataKey="count" stroke={CHART_LINE_COLOR} strokeWidth={2} dot={false} connectNulls />
         </LineChart>
       </ResponsiveContainer>

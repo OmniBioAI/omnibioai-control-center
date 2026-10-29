@@ -31,9 +31,9 @@ export default function LlmPage({ refreshKey }: { refreshKey: number }) {
     <span style={{
       fontSize: 10, fontWeight: 700, padding: '2px 8px',
       borderRadius: 99, letterSpacing: '0.05em',
-      background: ok ? 'rgba(0,229,160,0.15)' : 'rgba(239,68,68,0.15)',
-      color: ok ? '#00e5a0' : '#ef4444',
-      border: `1px solid ${ok ? 'rgba(0,229,160,0.3)' : 'rgba(239,68,68,0.3)'}`,
+      background: ok ? 'var(--color-accent-dim)' : 'var(--color-danger-dim)',
+      color: ok ? 'var(--color-accent)' : 'var(--color-danger)',
+      border: `1px solid ${ok ? 'var(--color-accent-border)' : 'var(--color-danger-border)'}`,
     }}>
       {ok ? 'CONFIGURED' : 'NOT SET'}
     </span>
@@ -68,12 +68,12 @@ export default function LlmPage({ refreshKey }: { refreshKey: number }) {
             </div>
             {data.ollama.models.length === 0 ? (
               <div style={{ padding: '20px 16px', fontSize: 12, color: 'var(--muted)' }}>
-                No models installed. Run: <code style={{ fontFamily: 'var(--mono)', color: '#00e5a0' }}>ollama pull llama3</code>
+                No models installed. Run: <code style={{ fontFamily: 'var(--mono)', color: 'var(--color-accent)' }}>ollama pull llama3</code>
               </div>
             ) : (
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
+                  <tr style={{ borderBottom: '1px solid var(--border)', background: 'color-mix(in srgb, var(--color-text) 2%, transparent)' }}>
                     {['Model', 'Size', 'Modified'].map(h => (
                       <th key={h} style={{ padding: '8px 16px', textAlign: 'left', fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--muted)' }}>{h}</th>
                     ))}
@@ -82,7 +82,7 @@ export default function LlmPage({ refreshKey }: { refreshKey: number }) {
                 <tbody>
                   {data.ollama.models.map((m, i) => (
                     <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td style={{ padding: '10px 16px', fontFamily: 'var(--mono)', color: '#a855f7' }}>{m.name}</td>
+                      <td style={{ padding: '10px 16px', fontFamily: 'var(--mono)', color: 'var(--color-purple)' }}>{m.name}</td>
                       <td style={{ padding: '10px 16px', color: 'var(--text2)' }}>{m.size_gb} GB</td>
                       <td style={{ padding: '10px 16px', color: 'var(--muted)' }}>{m.modified}</td>
                     </tr>

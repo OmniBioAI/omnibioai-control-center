@@ -37,7 +37,7 @@ function InfoBanner() {
   return (
     <div style={{
       display: 'flex', gap: 10, alignItems: 'flex-start', padding: '12px 14px', marginBottom: 16,
-      background: 'rgba(217, 119, 6, 0.08)', border: '1px solid var(--amber)', borderRadius: 8,
+      background: 'var(--color-warning-dim)', border: '1px solid var(--amber)', borderRadius: 8,
     }}>
       <Info size={16} color="var(--amber)" style={{ flexShrink: 0, marginTop: 1 }} />
       <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5 }}>

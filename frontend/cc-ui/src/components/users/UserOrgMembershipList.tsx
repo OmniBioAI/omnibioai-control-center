@@ -12,7 +12,7 @@ const th: React.CSSProperties = {
   fontSize: 10, fontWeight: 700, color: 'var(--muted)',
   textTransform: 'uppercase', letterSpacing: '0.07em',
   padding: '9px 14px', borderBottom: '1px solid var(--border)',
-  textAlign: 'left', background: 'rgba(255,255,255,0.03)', whiteSpace: 'nowrap',
+  textAlign: 'left', background: 'color-mix(in srgb, var(--color-text) 3%, transparent)', whiteSpace: 'nowrap',
 }
 const td: React.CSSProperties = {
   fontSize: 12, color: 'var(--text2)',

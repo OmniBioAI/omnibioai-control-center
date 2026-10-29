@@ -26,4 +26,8 @@ def test_admin_standalone_server_sends_deny_framing_policy():
 
     assert 'add_header Content-Security-Policy "frame-ancestors \'none\'" always;' in admin
     assert "frame-ancestors 'none'" not in control
+    assert control.count(
+        'add_header Content-Security-Policy "frame-ancestors \'self\' '
+        'https://webstudio.omnibioai.org" always;'
+    ) == 2
 

@@ -4,6 +4,7 @@ import './index.css'
 import AdminApp from './apps/AdminApp.tsx'
 import ControlApp from './apps/ControlApp.tsx'
 import UnknownModeNotice from './apps/UnknownModeNotice.tsx'
+import { connectAppearanceMessages } from './embedAppearance.ts'
 
 // Admin Console dual build architecture: VITE_APP_MODE is set at build
 // time (package.json's build:admin/build:control scripts) -- 'admin'
@@ -26,6 +27,8 @@ import UnknownModeNotice from './apps/UnknownModeNotice.tsx'
 // error (UnknownModeNotice, unit tested on its own) rather than silently
 // defaulting to either app.
 const mode = import.meta.env.VITE_APP_MODE
+
+connectAppearanceMessages()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

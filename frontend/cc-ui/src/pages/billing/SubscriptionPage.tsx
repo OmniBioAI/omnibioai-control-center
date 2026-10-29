@@ -22,9 +22,9 @@ import { formatDateOnly } from '../../format'
 // uses.
 
 const SUBSCRIPTION_STATUS_COLOR: Record<string, string> = {
-  trial: 'var(--blue, #0094ff)',
-  active: 'var(--color-success, #22c55e)',
-  suspended: 'var(--amber, #f59e0b)',
+  trial: 'var(--blue, var(--color-info))',
+  active: 'var(--color-success, var(--color-success))',
+  suspended: 'var(--amber, var(--color-warning))',
   cancelled: 'var(--red)',
 }
 
