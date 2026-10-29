@@ -184,7 +184,7 @@ function StatusAction({ org, onChanged }: { org: PlatformOrgDetail; onChanged: (
           style={{
             fontSize: 12, fontWeight: 700, padding: '7px 14px', borderRadius: 8, border: 'none',
             background: isDestructive ? 'var(--red)' : 'var(--accent)',
-            color: isDestructive ? '#fff' : '#000', cursor: busy ? 'not-allowed' : 'pointer',
+            color: isDestructive ? 'var(--color-static-white)' : 'var(--color-on-accent)', cursor: busy ? 'not-allowed' : 'pointer',
           }}
         >
           {busy ? 'Applying…' : `Confirm ${isDestructive ? 'suspend' : 'reactivate'}`}

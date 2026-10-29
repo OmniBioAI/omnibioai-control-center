@@ -119,7 +119,7 @@ export default function SidebarNav({ active, onNavigate, mobileOpen, onCloseMobi
         className="shell-sidebar-backdrop"
         data-open={mobileOpen}
         onClick={onCloseMobile}
-        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 199 }}
+        style={{ position: 'fixed', inset: 0, background: 'var(--overlay)', zIndex: 199 }}
       />
       <aside className="shell-sidebar" data-open={mobileOpen} style={aside}>
         <div style={logoWrap}>

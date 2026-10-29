@@ -21,9 +21,9 @@ const TABS: { id: Tab; label: string }[] = [
 const STATUS_CFG = {
   // ControlApp derives this from GET /health on the control center itself,
   // so the label claims only what that check proves.
-  UP:   { label: 'Control center online',   bg: 'rgba(34,197,94,0.12)',   color: '#22c55e', border: 'rgba(34,197,94,0.3)',   dot: '#22c55e', pulse: true },
-  WARN: { label: 'Services degraded',       bg: 'rgba(245,158,11,0.12)',  color: '#f59e0b', border: 'rgba(245,158,11,0.3)',  dot: '#f59e0b', pulse: false },
-  DOWN: { label: 'Control center unreachable',bg: 'rgba(239,68,68,0.12)',   color: '#ef4444', border: 'rgba(239,68,68,0.3)',   dot: '#ef4444', pulse: false },
+  UP:   { label: 'Control center online',   bg: 'var(--color-success-dim)',   color: 'var(--color-success)', border: 'var(--color-success-border)',   dot: 'var(--color-success)', pulse: true },
+  WARN: { label: 'Services degraded',       bg: 'var(--color-warning-dim)',  color: 'var(--color-warning)', border: 'var(--color-warning-border)',  dot: 'var(--color-warning)', pulse: false },
+  DOWN: { label: 'Control center unreachable',bg: 'var(--color-danger-dim)',   color: 'var(--color-danger)', border: 'var(--color-danger-border)',   dot: 'var(--color-danger)', pulse: false },
 }
 
 export default function Header({ tab, onTab, status, onRefresh }: Props) {
@@ -31,7 +31,7 @@ export default function Header({ tab, onTab, status, onRefresh }: Props) {
   const tabs = TABS
 
   return (
-    <header style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100 }}>
+    <header className="control-top-bar" style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 100 }}>
       {/* ── Row 1: logo + status + action buttons ── */}
       <div style={{
         height: 56,
@@ -40,14 +40,14 @@ export default function Header({ tab, onTab, status, onRefresh }: Props) {
         boxShadow: 'var(--shadow-header)',
         display: 'flex', alignItems: 'center',
         gap: 12,
-      }} className="cc-header-row">
+      }} className="cc-header-row control-brand-bar">
         {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
           {/* Same hexagon mark and wordmark as omnibioai.org. */}
           <a href="https://omnibioai.org" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="30" height="30" fill="none" style={{ flexShrink: 0 }} aria-hidden="true">
-              <path d="M20 4L34 12V28L20 36L6 28V12L20 4Z" stroke="var(--accent)" strokeWidth="1.5" fill="rgba(0,212,170,0.06)" />
-              <circle cx="20" cy="20" r="5" fill="rgba(0,212,170,0.2)" stroke="var(--accent)" strokeWidth="1" />
+              <path d="M20 4L34 12V28L20 36L6 28V12L20 4Z" stroke="var(--accent)" strokeWidth="1.5" fill="var(--color-accent-dim)" />
+              <circle cx="20" cy="20" r="5" fill="var(--color-accent-dim)" stroke="var(--accent)" strokeWidth="1" />
               <path d="M20 15V9M20 31V25M15 20H9M31 20H25" stroke="var(--accent)" strokeWidth="1.2" strokeLinecap="round" />
             </svg>
             <div>

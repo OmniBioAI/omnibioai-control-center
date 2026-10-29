@@ -58,7 +58,7 @@ function ErrBox({ msg }: { msg: string }) {
  * SSOSettingsPage.tsx's own BoolText gives (no separate Badge component
  * exists for this in components/ui yet). */
 function BoolText({ value: v, trueLabel, falseLabel }: { value: boolean; trueLabel: string; falseLabel: string }) {
-  return <span style={{ color: v ? 'var(--color-success, #22c55e)' : 'var(--muted)' }}>{v ? trueLabel : falseLabel}</span>
+  return <span style={{ color: v ? 'var(--color-success, var(--color-success))' : 'var(--muted)' }}>{v ? trueLabel : falseLabel}</span>
 }
 
 // ── Current Policy ───────────────────────────────────────────────────────

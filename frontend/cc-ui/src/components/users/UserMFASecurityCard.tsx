@@ -136,7 +136,7 @@ export default function UserMFASecurityCard({ user, onChanged }: Props) {
                   disabled={busy}
                   style={{
                     fontSize: 12, fontWeight: 700, padding: '7px 14px', borderRadius: 8, border: 'none',
-                    background: 'var(--red)', color: '#fff', cursor: busy ? 'not-allowed' : 'pointer',
+                    background: 'var(--red)', color: 'var(--color-static-white)', cursor: busy ? 'not-allowed' : 'pointer',
                   }}
                 >
                   {busy ? 'Resetting…' : 'Confirm reset'}

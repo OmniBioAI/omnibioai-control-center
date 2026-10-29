@@ -31,35 +31,35 @@ import type { ReportData } from '../api'
 
 // ── Dark theme tokens ──────────────────────────────────────────────────────────
 export const C = {
-  bg:      '#0f1117',
-  surface: '#1a1d2e',
-  border:  '#2a2d3e',
-  text:    '#ffffff',
-  muted:   '#6b7280',
-  teal:    '#00e5a0',
-  blue:    '#0094ff',
-  red:     '#ef4444',
-  amber:   '#f59e0b',
-  green:   '#22c55e',
-  purple:  '#a855f7',
+  bg:      'var(--color-bg)',
+  surface: 'var(--color-bg-surface)',
+  border:  'var(--color-bg-surface2)',
+  text:    'var(--color-static-white)',
+  muted:   'var(--color-text-muted)',
+  teal:    'var(--color-accent)',
+  blue:    'var(--color-info)',
+  red:     'var(--color-danger)',
+  amber:   'var(--color-warning)',
+  green:   'var(--color-success)',
+  purple:  'var(--color-purple)',
 }
 
 // ── Category colors (dark theme) ──────────────────────────────────────────────
 export const CAT: Record<string, { color: string; bg: string; label: string }> = {
-  core:  { color: C.teal,   bg: 'rgba(0,229,160,0.15)',   label: 'core workbench' },
-  sec:   { color: C.red,    bg: 'rgba(239,68,68,0.15)',    label: 'security' },
-  exec:  { color: C.purple, bg: 'rgba(168,85,247,0.15)',   label: 'execution' },
-  infra: { color: C.amber,  bg: 'rgba(245,158,11,0.15)',   label: 'infrastructure' },
-  sdk:   { color: C.blue,   bg: 'rgba(0,148,255,0.15)',    label: 'sdk / clients' },
+  core:  { color: C.teal,   bg: 'var(--color-accent-dim)',   label: 'core workbench' },
+  sec:   { color: C.red,    bg: 'var(--color-danger-dim)',    label: 'security' },
+  exec:  { color: C.purple, bg: 'var(--color-purple-dim)',   label: 'execution' },
+  infra: { color: C.amber,  bg: 'color-mix(in srgb, var(--color-warning) 10%, transparent)',   label: 'infrastructure' },
+  sdk:   { color: C.blue,   bg: 'var(--color-info-dim)',    label: 'sdk / clients' },
 }
 
 // ── Language type colors (dark theme) ─────────────────────────────────────────
 export const LANG: Record<string, { color: string; bg: string; icon: string; label: string }> = {
-  backend:  { color: C.teal,   bg: 'rgba(0,229,160,0.15)',    icon: '🐍', label: 'backend' },
-  frontend: { color: C.blue,   bg: 'rgba(0,148,255,0.15)',    icon: '🌐', label: 'frontend' },
-  docs:     { color: C.muted,  bg: 'rgba(107,114,128,0.15)',  icon: '📄', label: 'docs' },
-  config:   { color: C.amber,  bg: 'rgba(245,158,11,0.15)',   icon: '⚙️', label: 'config' },
-  infra:    { color: C.purple, bg: 'rgba(168,85,247,0.15)',   icon: '🔧', label: 'infra' },
+  backend:  { color: C.teal,   bg: 'var(--color-accent-dim)',    icon: '🐍', label: 'backend' },
+  frontend: { color: C.blue,   bg: 'var(--color-info-dim)',    icon: '🌐', label: 'frontend' },
+  docs:     { color: C.muted,  bg: 'color-mix(in srgb, var(--color-text-muted) 12%, transparent)',  icon: '📄', label: 'docs' },
+  config:   { color: C.amber,  bg: 'color-mix(in srgb, var(--color-warning) 10%, transparent)',   icon: '⚙️', label: 'config' },
+  infra:    { color: C.purple, bg: 'var(--color-purple-dim)',   icon: '🔧', label: 'infra' },
 }
 
 export function fmt(n: number) { return n.toLocaleString() }
@@ -174,7 +174,7 @@ export function Pagination({ page, pages, total, perPage, onPage, onPerPage }: {
       disabled={disabled}
       style={{
         padding: '4px 9px', fontSize: 11, border: `1px solid ${C.border}`, borderRadius: 6, cursor: disabled ? 'not-allowed' : 'pointer',
-        background: active ? C.teal : C.surface, color: active ? '#000' : C.muted, opacity: disabled ? 0.4 : 1, minWidth: 28,
+        background: active ? C.teal : C.surface, color: active ? 'var(--color-on-accent)' : C.muted, opacity: disabled ? 0.4 : 1, minWidth: 28,
       }}
     >{label}</button>
   )

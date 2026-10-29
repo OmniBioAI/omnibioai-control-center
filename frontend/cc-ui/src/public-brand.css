@@ -11,25 +11,14 @@
    by ControlApp for the same reason. */
 
 .public-brand {
-  --bg:      #04080f;
-  --bg2:     #080e1a;
-  --bg3:     #0c1422;
-  --surface: #0f1d2e;
-  --border:  rgba(0, 212, 170, 0.14);
-  --text:    #e8f0fe;
-  --text2:   #c9d6ea;
-  --text3:   #7a9bbf;
-  --muted:   #7a9bbf;
-  --accent:  #00d4aa;
-  --accent-light: rgba(0, 212, 170, 0.12);
-  --accent-dim:   rgba(0, 212, 170, 0.08);
-  --accent-dim2:  rgba(0, 212, 170, 0.15);
-  --blue:    #0098ff;
   --sans: 'Space Grotesk', system-ui, -apple-system, sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
 }
 
-body:has(.public-brand) { background: #04080f; }
+body:has(.public-brand) { background: var(--bg); }
+
+html[data-embedded="true"] .control-brand-bar { display: none !important; }
+html[data-embedded="true"] .control-content { padding-top: 44px !important; }
 
 .public-brand h1 {
   font-family: 'Playfair Display', Georgia, serif;

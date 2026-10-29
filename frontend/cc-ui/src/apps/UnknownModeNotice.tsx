@@ -13,7 +13,7 @@ export default function UnknownModeNotice({ mode }: { mode: string | undefined }
     <div style={{
       minHeight: '100vh', display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center', gap: 8,
-      background: '#0a0a0a', color: '#ef4444', fontFamily: 'monospace', fontSize: 13,
+      background: 'var(--color-bg)', color: 'var(--color-danger)', fontFamily: 'monospace', fontSize: 13,
       textAlign: 'center', padding: 24,
     }}>
       <div style={{ fontWeight: 700, fontSize: 15 }}>Configuration error</div>

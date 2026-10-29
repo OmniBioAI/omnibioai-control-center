@@ -177,7 +177,7 @@ export default function GlobalSearch({ onNavigate, onOpenRecord }: {
           style={{
             position: 'absolute', top: 'calc(100% + 6px)', right: 0, width: 380, zIndex: 50,
             background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
-            boxShadow: '0 12px 32px rgba(0,0,0,0.35)', overflow: 'hidden',
+            boxShadow: '0 12px 32px var(--overlay-soft)', overflow: 'hidden',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderBottom: '1px solid var(--border)' }}>
@@ -218,7 +218,7 @@ export default function GlobalSearch({ onNavigate, onOpenRecord }: {
                     style={{
                       display: 'flex', justifyContent: 'space-between', gap: 12, padding: '8px 10px', borderRadius: 6,
                       cursor: 'pointer', fontSize: 13,
-                      background: i === index ? 'var(--accent-dim, rgba(0,212,170,0.1))' : 'transparent',
+                      background: i === index ? 'var(--accent-dim, var(--color-accent-dim))' : 'transparent',
                       color: i === index ? 'var(--text)' : 'var(--text2)',
                     }}
                   >

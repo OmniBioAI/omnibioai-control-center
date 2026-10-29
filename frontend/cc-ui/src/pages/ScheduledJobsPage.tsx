@@ -18,7 +18,7 @@ const th: React.CSSProperties = {
   fontSize: 10, fontWeight: 700, color: 'var(--muted)',
   textTransform: 'uppercase', letterSpacing: '0.07em',
   padding: '9px 14px', borderBottom: '1px solid var(--border)',
-  textAlign: 'left', background: 'rgba(255,255,255,0.03)', whiteSpace: 'nowrap',
+  textAlign: 'left', background: 'color-mix(in srgb, var(--color-text) 3%, transparent)', whiteSpace: 'nowrap',
 }
 const td: React.CSSProperties = {
   fontSize: 12, color: 'var(--text2)',
@@ -28,10 +28,10 @@ const td: React.CSSProperties = {
 
 function StatusBadge({ status }: { status: string | null }) {
   const cfg = status === 'ok'
-    ? { bg: 'rgba(34,197,94,0.12)', color: '#22c55e' }
+    ? { bg: 'var(--color-success-dim)', color: 'var(--color-success)' }
     : status === 'error'
-      ? { bg: 'rgba(239,68,68,0.12)', color: '#ef4444' }
-      : { bg: 'rgba(255,255,255,0.05)', color: 'var(--muted)' }
+      ? { bg: 'var(--color-danger-dim)', color: 'var(--color-danger)' }
+      : { bg: 'color-mix(in srgb, var(--color-text) 5%, transparent)', color: 'var(--muted)' }
   return (
     <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 99, background: cfg.bg, color: cfg.color }}>
       {status ?? '—'}
@@ -42,8 +42,8 @@ function StatusBadge({ status }: { status: string | null }) {
 function PausedBadge({ paused }: { paused: boolean | null }) {
   if (paused == null) return <span style={{ fontSize: 11, color: 'var(--muted)' }}>unknown</span>
   const cfg = paused
-    ? { bg: 'rgba(245,158,11,0.12)', color: '#f59e0b', label: 'paused' }
-    : { bg: 'rgba(34,197,94,0.12)', color: '#22c55e', label: 'active' }
+    ? { bg: 'var(--color-warning-dim)', color: 'var(--color-warning)', label: 'paused' }
+    : { bg: 'var(--color-success-dim)', color: 'var(--color-success)', label: 'active' }
   return (
     <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 99, background: cfg.bg, color: cfg.color }}>
       {cfg.label}
@@ -107,8 +107,8 @@ export default function ScheduledJobsPage() {
 
       {error && (
         <div style={{
-          background: 'var(--red-bg, rgba(239,68,68,0.08))', border: '1px solid var(--red-border, rgba(239,68,68,0.3))',
-          borderRadius: 'var(--radius)', padding: '10px 14px', color: 'var(--red, #ef4444)', fontSize: 12, marginBottom: 16,
+          background: 'var(--red-bg, color-mix(in srgb, var(--color-danger) 8%, transparent))', border: '1px solid var(--red-border, var(--color-danger-border))',
+          borderRadius: 'var(--radius)', padding: '10px 14px', color: 'var(--red, var(--color-danger))', fontSize: 12, marginBottom: 16,
         }}>
           {error}
         </div>
@@ -164,12 +164,12 @@ export default function ScheduledJobsPage() {
                         {ls.loading ? (
                           <div style={{ fontSize: 11, color: 'var(--muted)' }}>loading log…</div>
                         ) : ls.error ? (
-                          <div style={{ fontSize: 11, color: 'var(--red, #ef4444)' }}>{ls.error}</div>
+                          <div style={{ fontSize: 11, color: 'var(--red, var(--color-danger))' }}>{ls.error}</div>
                         ) : ls.lines.length === 0 ? (
                           <div style={{ fontSize: 11, color: 'var(--muted)' }}>Log is empty.</div>
                         ) : (
                           <pre style={{
-                            margin: 0, padding: '8px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 6,
+                            margin: 0, padding: '8px 10px', background: 'color-mix(in srgb, var(--color-text) 3%, transparent)', borderRadius: 6,
                             fontFamily: 'var(--mono)', fontSize: 11, lineHeight: 1.5, maxHeight: 280, overflow: 'auto',
                             whiteSpace: 'pre-wrap', wordBreak: 'break-all',
                           }}>

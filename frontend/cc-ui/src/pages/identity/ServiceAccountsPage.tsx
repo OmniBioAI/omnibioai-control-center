@@ -19,7 +19,7 @@ const fieldStyle: React.CSSProperties = {
 
 function StatusText({ status }: { status: string }) {
   const active = status === 'active'
-  return <span style={{ color: active ? 'var(--color-success, #22c55e)' : 'var(--muted)' }}>{active ? 'Active' : 'Revoked'}</span>
+  return <span style={{ color: active ? 'var(--color-success, var(--color-success))' : 'var(--muted)' }}>{active ? 'Active' : 'Revoked'}</span>
 }
 
 // ── Generic page-local modal overlay, same structure ConfigPage.tsx's
@@ -31,10 +31,10 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
     <div
       role="dialog"
       aria-label={title}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}
+      style={{ position: 'fixed', inset: 0, background: 'var(--overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: '20px 22px', width: 440, maxWidth: '90vw', boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}>
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: '20px 22px', width: 440, maxWidth: '90vw', boxShadow: '0 20px 60px var(--overlay)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
           <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>{title}</span>
           <button onClick={onClose} aria-label="Close" style={{ fontSize: 18, color: 'var(--muted)', lineHeight: 1, cursor: 'pointer', background: 'none', border: 'none' }}>×</button>

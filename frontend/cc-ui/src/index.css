@@ -1,45 +1,64 @@
+@import '@omnibioai/design-tokens/tokens.css';
+
+/* color-token-mapping:start
+   Literal colors live only in this audited bridge. Product styles consume
+   semantic variables so theme and accent changes never rewrite CSS text. */
+:root {
+  --surface: var(--color-bg-surface);
+  --border: var(--color-border-muted);
+  --text2: var(--color-text-soft);
+  --text3: var(--color-text-muted);
+  --muted: var(--color-text-muted);
+  --accent-light: var(--color-accent-dim);
+  --accent-dim2: var(--color-accent-surface);
+  --green: var(--color-success);
+  --green-bg: var(--color-success-dim);
+  --green-border: var(--color-success-border);
+  --green-dim: color-mix(in srgb, var(--color-success) 8%, transparent);
+  --amber: var(--color-warning);
+  --amber-bg: var(--color-warning-dim);
+  --amber-border: var(--color-warning-border);
+  --amber-dim: color-mix(in srgb, var(--color-warning) 8%, transparent);
+  --red: var(--color-danger);
+  --red-bg: var(--color-danger-dim);
+  --red-border: var(--color-danger-border);
+  --red-dim: color-mix(in srgb, var(--color-danger) 8%, transparent);
+  --blue: var(--color-info);
+  --purple: var(--color-purple);
+  --overlay-soft: rgba(0,0,0,0.35);
+  --overlay: rgba(0,0,0,0.5);
+  --overlay-strong: rgba(0,0,0,0.62);
+  --color-static-white: #ffffff;
+  --brand-google-blue: #4285f4;
+  --brand-google-green: #34a853;
+  --brand-google-yellow: #fbbc05;
+  --brand-google-red: #ea4335;
+  --brand-microsoft-red: #f25022;
+  --brand-microsoft-green: #7fba00;
+  --brand-microsoft-blue: #00a4ef;
+  --brand-microsoft-yellow: #ffb900;
+}
+:root[data-theme="dark"][data-accent="teal"] { --color-accent: #00e5a0; --color-accent-dim: rgba(0,229,160,.20); --color-accent-border: rgba(0,229,160,.7); --color-on-accent: #00150e; }
+:root[data-theme="dark"][data-accent="blue"] { --color-accent: #75b8ff; --color-accent-dim: rgba(117,184,255,.20); --color-accent-border: rgba(117,184,255,.7); --color-on-accent: #00101f; }
+:root[data-theme="dark"][data-accent="purple"] { --color-accent: #c084fc; --color-accent-dim: rgba(192,132,252,.20); --color-accent-border: rgba(192,132,252,.7); --color-on-accent: #1a0828; }
+:root[data-theme="dark"][data-accent="orange"] { --color-accent: #ffb26b; --color-accent-dim: rgba(255,178,107,.20); --color-accent-border: rgba(255,178,107,.7); --color-on-accent: #241000; }
+:root[data-theme="light"][data-accent="teal"],
+:root[data-theme="light"][data-accent="blue"],
+:root[data-theme="light"][data-accent="purple"],
+:root[data-theme="light"][data-accent="orange"] {
+  --color-accent-dim: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  --color-accent-border: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  --color-accent-surface: color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+/* color-token-mapping:end */
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:      #0f1117;
-  --bg2:     #14161f;
-  --bg3:     #191c29;
-  --surface: #1a1d2e;
-  --border:  #2a2d3e;
-  --text:    #ffffff;
-  --text2:   #e2e8f0;
-  --text3:   #94a3b8;
-  --muted:   #6b7280;
   --color-text-muted: var(--muted);
-  --accent:  #00e5a0;
-  --accent-light: rgba(0,229,160,0.12);
-  --accent-dim:   rgba(0,229,160,0.08);
-  --accent-dim2:  rgba(0,229,160,0.15);
-
-  --color-success:        #22c55e;
-  --green:        #22c55e;
-  --green-bg:     rgba(34,197,94,0.12);
-  --green-border: rgba(34,197,94,0.3);
-  --green-dim:    rgba(34,197,94,0.08);
-
-  --amber:        #f59e0b;
-  --amber-bg:     rgba(245,158,11,0.12);
-  --amber-border: rgba(245,158,11,0.3);
-  --amber-dim:    rgba(245,158,11,0.08);
-
-  --red:        #ef4444;
-  --red-bg:     rgba(239,68,68,0.12);
-  --red-border: rgba(239,68,68,0.3);
-  --red-dim:    rgba(239,68,68,0.08);
-
-  --blue:   #0094ff;
-  --purple: #a855f7;
-
   --radius:    10px;
   --radius-sm: 6px;
   --radius-lg: 14px;
-  --shadow-header: 0 2px 8px rgba(0,0,0,0.4);
-  --shadow-card:   0 4px 24px rgba(0,0,0,0.3);
   --mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
   --sans: 'Inter', system-ui, -apple-system, sans-serif;
 }
@@ -47,11 +66,11 @@
 /* Admin Console sign-in layout and controls. */
 .admin-login-page {
   --muted: var(--text3);
-  --login-link: #86efac;
-  --login-dev: #93c5fd;
-  --login-stage: #fcd34d;
-  --login-prod: #86efac;
-  --login-error: #fca5a5;
+  --login-link: var(--color-success);
+  --login-dev: var(--color-info);
+  --login-stage: var(--color-warning);
+  --login-prod: var(--color-success);
+  --login-error: var(--color-danger);
   min-height: 100vh;
   width: 100%;
   display: flex;
@@ -91,9 +110,9 @@
 .admin-login-badges { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
 .admin-login-version, .admin-environment-badge { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; padding: 5px 9px; font: 11px var(--mono); white-space: nowrap; }
 .admin-login-version { color: var(--text3); }
-.admin-environment-development { color: var(--login-dev); border-color: rgba(59,130,246,.55); background: rgba(59,130,246,.10); }
-.admin-environment-staging { color: var(--login-stage); border-color: rgba(245,158,11,.55); background: rgba(245,158,11,.10); }
-.admin-environment-production { color: var(--login-prod); border-color: rgba(34,197,94,.55); background: rgba(34,197,94,.10); }
+.admin-environment-development { color: var(--login-dev); border-color: var(--color-info-border); background: var(--color-info-dim); }
+.admin-environment-staging { color: var(--login-stage); border-color: var(--color-warning-border); background: var(--color-warning-dim); }
+.admin-environment-production { color: var(--login-prod); border-color: var(--color-success-border); background: var(--color-success-dim); }
 .admin-environment-unknown { color: var(--text2); }
 .admin-environment-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .admin-login-card { padding: 30px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-card); }
@@ -116,7 +135,7 @@
 .admin-resend { width: 100%; margin: -7px 0 18px; }
 .admin-resend:disabled { cursor: not-allowed; color: var(--muted); }
 .admin-login-error { margin: 0 0 16px; padding: 10px 12px; border: 1px solid var(--red-border); border-radius: var(--radius-sm); background: var(--red-bg); color: var(--login-error); font-size: 13px; line-height: 1.45; }
-.admin-login-submit { width: 100%; min-height: 46px; border: 0; border-radius: var(--radius-sm); background: var(--accent); color: #07130f; font-size: 14px; font-weight: 700; cursor: pointer; }
+.admin-login-submit { width: 100%; min-height: 46px; border: 0; border-radius: var(--radius-sm); background: var(--accent); color: var(--color-on-accent); font-size: 14px; font-weight: 700; cursor: pointer; }
 .admin-login-submit:disabled { background: var(--accent-dim2); color: var(--text3); cursor: not-allowed; }
 .admin-back-to-login { width: 100%; margin-top: 10px; background: transparent; color: var(--text3); }
 .admin-login-studio { margin: 20px 0 0; color: var(--text3); text-align: center; font-size: 12px; }
@@ -125,9 +144,9 @@
 .admin-login-footer nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; }
 .admin-login-system-status { text-align: center; margin-top: 25px; color: var(--text3); font-size: 13px; }
 .admin-status-dot { display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--muted); }
-.admin-status-up { background: #4ade80; }
-.admin-status-warn { background: #fbbf24; }
-.admin-status-down { background: #f87171; }
+.admin-status-up { background: var(--color-success); }
+.admin-status-warn { background: var(--color-warning); }
+.admin-status-down { background: var(--color-danger); }
 @media (min-width: 1024px) {
   .admin-login-layout { grid-template-columns: minmax(0, 1fr) minmax(390px, 440px); gap: clamp(42px, 7vw, 90px); }
   .admin-login-intro { display: block; max-width: 480px; }
@@ -154,24 +173,6 @@
    :root above, so every existing component (which already reads these
    tokens, never hardcoded colors) re-themes for free -- nothing about
    this section is a redesign of any component. */
-:root[data-theme='light'] {
-  --bg:      #f8fafc;
-  --bg2:     #f1f5f9;
-  --bg3:     #e2e8f0;
-  --surface: #ffffff;
-  --border:  #e2e8f0;
-  --text:    #0f172a;
-  --text2:   #334155;
-  --text3:   #64748b;
-  --muted:   #64748b;
-  --accent:  #00b382;
-  --accent-light: rgba(0,179,130,0.10);
-  --accent-dim:   rgba(0,179,130,0.06);
-  --accent-dim2:  rgba(0,179,130,0.12);
-  --shadow-header: 0 2px 8px rgba(15,23,42,0.06);
-  --shadow-card:   0 4px 24px rgba(15,23,42,0.08);
-}
-
 html, body, #root {
   transition: background-color 0.15s ease, color 0.15s ease;
   min-height: 100%;
@@ -219,7 +220,7 @@ select option { background: var(--surface); color: var(--text); }
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #3d4155; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-border-bright); }
 
 /* ── Admin Console Phase 2: shell responsive behavior ────────────
    No @media queries existed anywhere in this codebase before this PR --
@@ -264,12 +265,12 @@ select option { background: var(--surface); color: var(--text); }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ── Table ────────────────────────────────────────────────────── */
-.data-table tbody tr:hover td { background: rgba(255,255,255,0.03); }
+.data-table tbody tr:hover td { background: color-mix(in srgb, var(--color-text) 3%, transparent); }
 .data-table th {
   font-size: 10px; font-weight: 700; color: var(--color-text-muted);
   text-transform: uppercase; letter-spacing: 0.07em;
   padding: 9px 14px; border-bottom: 1px solid var(--border);
-  text-align: left; background: rgba(255,255,255,0.03); white-space: nowrap;
+  text-align: left; background: color-mix(in srgb, var(--color-text) 3%, transparent); white-space: nowrap;
 }
 .data-table td {
   font-size: 12px; color: var(--text2);
@@ -279,11 +280,11 @@ select option { background: var(--surface); color: var(--text); }
 .data-table tr:last-child td { border-bottom: none; }
 
 :root[data-theme='light'] .admin-login-page {
-  --login-link: #166534;
-  --login-dev: #1d4ed8;
-  --login-stage: #854d0e;
-  --login-prod: #166534;
-  --login-error: #991b1b;
+  --login-link: var(--color-success);
+  --login-dev: var(--color-info);
+  --login-stage: var(--color-warning);
+  --login-prod: var(--color-success);
+  --login-error: var(--color-danger);
 }
 :root[data-theme='light'] .admin-password-toggle { color: var(--login-link); }
 

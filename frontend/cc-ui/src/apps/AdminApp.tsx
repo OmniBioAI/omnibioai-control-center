@@ -777,11 +777,11 @@ function StatusAndReportActions({
   onGenerate: () => void
 }) {
   const cfg = status === 'UP'
-    ? { label: 'All systems operational', color: '#22c55e' }
+    ? { label: 'All systems operational', color: 'var(--color-success)' }
     : status === 'WARN'
-      ? { label: 'Services degraded', color: '#f59e0b' }
+      ? { label: 'Services degraded', color: 'var(--color-warning)' }
       : status === 'DOWN'
-        ? { label: 'One or more systems down', color: '#ef4444' }
+        ? { label: 'One or more systems down', color: 'var(--color-danger)' }
         : null
 
   return (
@@ -808,8 +808,8 @@ function StatusAndReportActions({
         style={{
           fontSize: 12, fontWeight: 600, padding: '6px 12px',
           border: 'none', borderRadius: 'var(--radius-sm)',
-          background: generating ? 'rgba(0,229,160,0.4)' : 'var(--accent)',
-          color: '#000', cursor: generating ? 'not-allowed' : 'pointer',
+          background: generating ? 'var(--color-accent-border)' : 'var(--accent)',
+          color: 'var(--color-on-accent)', cursor: generating ? 'not-allowed' : 'pointer',
         }}
       >
         {generating ? 'Generating…' : '⊕ Generate Report'}

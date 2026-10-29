@@ -6,10 +6,10 @@ interface Props { refreshKey: number }
 
 /* ── KPI Card ───────────────────────────────────────────────── */
 const KPI_TOP: Record<string, string> = {
-  gray: '#6b7280', green: '#22c55e', red: '#ef4444', amber: '#f59e0b', blue: '#0094ff',
+  gray: 'var(--color-text-muted)', green: 'var(--color-success)', red: 'var(--color-danger)', amber: 'var(--color-warning)', blue: 'var(--color-info)',
 }
 const KPI_VAL: Record<string, string> = {
-  gray: '#ffffff', green: '#22c55e', red: '#ef4444', amber: '#f59e0b', blue: '#0094ff',
+  gray: 'var(--color-static-white)', green: 'var(--color-success)', red: 'var(--color-danger)', amber: 'var(--color-warning)', blue: 'var(--color-info)',
 }
 
 function KpiCard({ label, value, sub, color }: {
@@ -36,13 +36,13 @@ function KpiCard({ label, value, sub, color }: {
 /* ── Type Pill ──────────────────────────────────────────────── */
 function TypePill({ type }: { type: string }) {
   const s: Record<string, [string, string]> = {
-    http:  ['rgba(0,148,255,0.12)',   '#0094ff'],
-    mysql: ['rgba(168,85,247,0.12)',  '#a855f7'],
-    redis: ['rgba(239,68,68,0.12)',   '#ef4444'],
-    tcp:   ['rgba(245,158,11,0.12)',  '#f59e0b'],
-    disk:  ['rgba(107,114,128,0.12)', '#9ca3af'],
+    http:  ['var(--color-info-dim)',   'var(--color-info)'],
+    mysql: ['var(--color-purple-dim)',  'var(--color-purple)'],
+    redis: ['var(--color-danger-dim)',   'var(--color-danger)'],
+    tcp:   ['var(--color-warning-dim)',  'var(--color-warning)'],
+    disk:  ['color-mix(in srgb, var(--color-text-muted) 12%, transparent)', 'var(--color-text-muted)'],
   }
-  const [bg, color] = s[type] ?? ['rgba(107,114,128,0.12)', '#9ca3af']
+  const [bg, color] = s[type] ?? ['color-mix(in srgb, var(--color-text-muted) 12%, transparent)', 'var(--color-text-muted)']
   return (
     <span style={{
       fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 5,
@@ -56,9 +56,9 @@ function TypePill({ type }: { type: string }) {
 /* ── Status Badge ───────────────────────────────────────────── */
 function StatusBadge({ status }: { status: 'UP' | 'WARN' | 'DOWN' }) {
   const cfg = {
-    UP:   { bg: 'rgba(34,197,94,0.12)',  color: '#22c55e' },
-    WARN: { bg: 'rgba(245,158,11,0.12)', color: '#f59e0b' },
-    DOWN: { bg: 'rgba(239,68,68,0.12)',  color: '#ef4444' },
+    UP:   { bg: 'var(--color-success-dim)',  color: 'var(--color-success)' },
+    WARN: { bg: 'var(--color-warning-dim)', color: 'var(--color-warning)' },
+    DOWN: { bg: 'var(--color-danger-dim)',  color: 'var(--color-danger)' },
   }[status]
   return (
     <span style={{
@@ -103,7 +103,7 @@ function ServicesTable({ services }: { services: ServiceResult[] }) {
             </td>
             <td style={{ fontFamily: 'var(--mono)', fontSize: 11, whiteSpace: 'nowrap' }}>
               {svc.latency_ms != null ? (
-                <span style={{ color: svc.latency_ms < 10 ? '#22c55e' : 'var(--text)', fontWeight: svc.latency_ms < 10 ? 600 : 400 }}>
+                <span style={{ color: svc.latency_ms < 10 ? 'var(--color-success)' : 'var(--text)', fontWeight: svc.latency_ms < 10 ? 600 : 400 }}>
                   {svc.latency_ms} ms
                 </span>
               ) : (
@@ -124,8 +124,8 @@ function ServicesTable({ services }: { services: ServiceResult[] }) {
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{
-                    fontSize: 11, fontWeight: 600, color: '#00e5a0',
-                    background: 'rgba(0,229,160,0.08)', border: '1px solid rgba(0,229,160,0.2)',
+                    fontSize: 11, fontWeight: 600, color: 'var(--color-accent)',
+                    background: 'var(--color-accent-dim)', border: '1px solid var(--color-accent-dim)',
                     borderRadius: 6, padding: '3px 9px',
                     display: 'inline-block', whiteSpace: 'nowrap',
                   }}
@@ -151,12 +151,12 @@ function DiskGrid({ disks }: { disks: DiskResult[] }) {
       {disks.map(d => {
         const m = d.message?.match(/([0-9.]+)%/)
         const freePct = m ? parseFloat(m[1]) : null
-        const borderColor = d.status === 'UP' ? '#22c55e' : d.status === 'WARN' ? '#f59e0b' : '#ef4444'
+        const borderColor = d.status === 'UP' ? 'var(--color-success)' : d.status === 'WARN' ? 'var(--color-warning)' : 'var(--color-danger)'
         const fillColor   = borderColor
         const textColor   = borderColor
         return (
           <div key={d.name} style={{
-            background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)',
+            background: 'color-mix(in srgb, var(--color-text) 3%, transparent)', border: '1px solid var(--border)',
             borderLeft: `3px solid ${borderColor}`, borderRadius: 8, padding: '12px 14px',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
@@ -293,9 +293,9 @@ function MetaPill({ children, accent }: { children: React.ReactNode; accent?: bo
   return (
     <span style={{
       fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 99,
-      background: accent ? 'rgba(0,229,160,0.1)'  : 'rgba(255,255,255,0.05)',
-      color:      accent ? '#00e5a0'               : 'var(--muted)',
-      border:     `1px solid ${accent ? 'rgba(0,229,160,0.25)' : 'var(--border)'}`,
+      background: accent ? 'var(--color-accent-dim)'  : 'color-mix(in srgb, var(--color-text) 5%, transparent)',
+      color:      accent ? 'var(--color-accent)'               : 'var(--muted)',
+      border:     `1px solid ${accent ? 'var(--color-accent-border)' : 'var(--border)'}`,
     }}>
       {children}
     </span>
@@ -309,10 +309,10 @@ const card: React.CSSProperties = {
 const cardHead: React.CSSProperties = {
   padding: '11px 18px', borderBottom: '1px solid var(--border)',
   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-  background: 'rgba(255,255,255,0.03)',
+  background: 'color-mix(in srgb, var(--color-text) 3%, transparent)',
 }
 const cardTitle: React.CSSProperties = { fontSize: 13, fontWeight: 700, color: 'var(--text)' }
 const metaPillStyle: React.CSSProperties = {
   fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 99,
-  background: 'rgba(255,255,255,0.05)', color: 'var(--muted)', border: '1px solid var(--border)',
+  background: 'color-mix(in srgb, var(--color-text) 5%, transparent)', color: 'var(--muted)', border: '1px solid var(--border)',
 }

@@ -140,7 +140,7 @@ function ControlDashboard() {
         onRefresh={() => setRefreshKey(k => k + 1)}
       />
       {/* 56px header + 44px tab bar = 100px offset */}
-      <div style={{ paddingTop: 100 }}>
+      <div className="control-content" style={{ paddingTop: 100 }}>
         <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 48px' }}>
           {tab === 'overview'  && <PublicOverviewPage  refreshKey={refreshKey} />}
           {tab === 'evidence'  && <PublicEvidencePage  refreshKey={refreshKey} />}

@@ -73,8 +73,8 @@ export function classify(message: string): 'denied-401' | 'denied-404' | 'denied
 
 const INVOICE_STATUS_COLOR: Record<string, string> = {
   DRAFT: 'var(--muted)',
-  ISSUED: 'var(--blue, #0094ff)',
-  PAID: 'var(--color-success, #22c55e)',
+  ISSUED: 'var(--blue, var(--color-info))',
+  PAID: 'var(--color-success, var(--color-success))',
   VOID: 'var(--red)',
 }
 
@@ -111,9 +111,9 @@ function useOrgLabel(orgId: number): string {
 // ── Overview tab: current-period summary + a trailing cost-by-service
 // breakdown chart, mirroring EcosystemPage.tsx's own BarChart usage. ────
 
-const CHART_BAR_COLOR = '#0094ff'
-const CHART_MUTED = '#6b7280'
-const CHART_BORDER = '#2a2d3e'
+const CHART_BAR_COLOR = 'var(--color-info)'
+const CHART_MUTED = 'var(--color-text-muted)'
+const CHART_BORDER = 'var(--color-bg-surface2)'
 
 function last30DayRange(): { start: string; end: string } {
   const end = new Date()
@@ -167,7 +167,7 @@ function CostBreakdownChart({ orgId }: { orgId: number }) {
             // branch is unreachable in practice, but the type must still
             // account for it since formatCurrency requires a real number.
             formatter={(v: TooltipValueType | undefined) => typeof v === 'number' ? formatCurrency(v, state.data.currency) : ''}
-            contentStyle={{ background: '#1a1d2e', border: `1px solid ${CHART_BORDER}`, borderRadius: 8, fontSize: 12 }}
+            contentStyle={{ background: 'var(--color-bg-surface)', border: `1px solid ${CHART_BORDER}`, borderRadius: 8, fontSize: 12 }}
           />
           <Bar dataKey="value" fill={CHART_BAR_COLOR} radius={[0, 4, 4, 0]} />
         </BarChart>

@@ -19,7 +19,7 @@ const card: React.CSSProperties = {
 }
 const cardHead: React.CSSProperties = {
   padding: '11px 18px', borderBottom: '1px solid var(--border)',
-  background: 'rgba(255,255,255,0.03)', display: 'flex', alignItems: 'center',
+  background: 'color-mix(in srgb, var(--color-text) 3%, transparent)', display: 'flex', alignItems: 'center',
   justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
 }
 
@@ -99,7 +99,7 @@ function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
         onClick={() => setOpen(true)}
         style={{
           fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 8,
-          border: 'none', background: 'var(--accent)', color: '#000', cursor: 'pointer',
+          border: 'none', background: 'var(--accent)', color: 'var(--color-on-accent)', cursor: 'pointer',
         }}
       >
         + New Organization
@@ -128,7 +128,7 @@ function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
       />
       <button type="submit" disabled={busy} style={{
         fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 8,
-        border: 'none', background: 'var(--accent)', color: '#000', cursor: busy ? 'not-allowed' : 'pointer',
+        border: 'none', background: 'var(--accent)', color: 'var(--color-on-accent)', cursor: busy ? 'not-allowed' : 'pointer',
       }}>
         {busy ? 'Creating…' : 'Create'}
       </button>
@@ -210,7 +210,7 @@ function PlatformOrgsView({ onSelect, refreshSignal }: ViewProps) {
         />
         <button type="submit" style={{
           fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 8,
-          border: 'none', background: 'var(--accent)', color: '#000', cursor: 'pointer',
+          border: 'none', background: 'var(--accent)', color: 'var(--color-on-accent)', cursor: 'pointer',
         }}>
           Search
         </button>

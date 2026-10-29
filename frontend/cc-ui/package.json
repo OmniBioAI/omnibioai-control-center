@@ -12,9 +12,11 @@
     "test": "vitest run",
     "test:e2e:admin": "playwright test --config=e2e/playwright.config.ts",
     "test:e2e:admin:headed": "playwright test --config=e2e/playwright.config.ts --headed",
+    "test:e2e:theme": "playwright test --config=e2e/embedded-theme.playwright.config.ts",
     "build:control:studio": "node scripts/check-build-env.cjs && tsc -b && VITE_APP_MODE=control VITE_API_BASE=/_svc/control vite build --base=/_svc/control/ --outDir=dist-control-studio"
   },
   "dependencies": {
+    "@omnibioai/design-tokens": "file:./vendor/omnibioai-design-tokens",
     "lucide-react": "^1.28.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
