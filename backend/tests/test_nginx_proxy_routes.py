@@ -74,6 +74,15 @@ class TestPublicRoutesAreProxied(unittest.TestCase):
         self.assertTrue(_proxied("/caret/x", locations))
         self.assertFalse(_proxied("/other", locations))
 
+    def test_tenant_api_is_proxied_without_swallowing_spa_pages(self) -> None:
+        locations = _locations()
+        for path in ["/admin/tenants", "/admin/tenants/summary", "/admin/tenants/1",
+                     "/admin/tenants/1/storage-override", "/admin/tenants/1/recompute-usage",
+                     "/admin/tenants/1/plan-grant"]:
+            self.assertTrue(_proxied(path, locations), path)
+        for path in ["/tenants", "/tenants/1", "/admin/other"]:
+            self.assertFalse(_proxied(path, locations), path)
+
 
 if __name__ == "__main__":
     unittest.main()
