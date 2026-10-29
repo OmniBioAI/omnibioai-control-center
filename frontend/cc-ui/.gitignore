@@ -6,3 +6,4 @@
 # to this PR -- see docs/admin-console-build.md).
 dist-admin/
 dist-control/
+*.tsbuildinfo
