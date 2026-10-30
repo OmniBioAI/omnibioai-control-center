@@ -34,6 +34,7 @@ export interface TenantDetail extends TenantRow {
   plan_history: PlanHistoryItem[]; override: StorageOverride | null
   active_grant: PlanGrant | null; grant_history: PlanGrant[]
   top_allocations: { artifact_id: string; name: string; bytes: number; created_at: string }[]
+  folder_path?: string | null; folder_bytes?: number | null; folder_drift_bytes?: number | null; folder_usage_status?: string
   workflow_output_bytes: number; usage_trend_30d: { day: string; used_bytes: number }[]
 }
 export interface TenantListResponse { items: TenantRow[]; total: number }

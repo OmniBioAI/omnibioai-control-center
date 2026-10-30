@@ -114,6 +114,8 @@ def tenant_row(identity: dict, billing: dict, ledger: dict, now: datetime | None
         "plan_source": plan_source, "promo_expires_at": billing.get("promo_expires_at"),
         "valid_from": billing.get("valid_from"), "valid_until": billing.get("valid_until"), "auto_renew": bool(billing.get("auto_renew")), "days_remaining": days_remaining,
         "allocated_bytes": allocated, "allocation_source": "override" if override else "plan", "used_bytes": used, "reserved_bytes": reserved, "pct": pct, "storage_status": storage_status,
+        "folder_path": ledger.get("folder_path"), "folder_bytes": ledger.get("folder_bytes"),
+        "folder_drift_bytes": ledger.get("folder_drift_bytes"), "folder_usage_status": ledger.get("folder_usage_status", "unavailable"),
         "last_plan_change": ({"from_plan": last["from_plan"], "to_plan": last["to_plan"], "at": last["at"]} if last else None), "last_activity_at": identity.get("last_activity_at"),
     }
 

@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as tenants from '../../tenants'
-import TenantManagementPage from './TenantManagementPage'
+import TenantManagementPage, { TenantDetailPage } from './TenantManagementPage'
 
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks() })
 
@@ -91,5 +91,18 @@ describe('Tenant management presentation', () => {
     await user.keyboard(' ')
     expect(onSelect).toHaveBeenCalledTimes(4)
     expect(onSelect).toHaveBeenLastCalledWith('1048')
+  })
+})
+
+
+describe('tenant folder usage detail', () => {
+  it('shows disk folder bytes and path separately from quota usage', async () => {
+    vi.stubEnv('VITE_TENANTS_MOCKS', 'true')
+    const tenant = await tenants.fetchTenant('1042')
+    vi.spyOn(tenants, 'fetchTenant').mockResolvedValue({ ...tenant, folder_path: '/mnt/nas/omnibioai/tenants/tenant_1042', folder_bytes: 70_000_000_000, folder_drift_bytes: -3_000_000_000, folder_usage_status: 'ok' })
+    render(<TenantDetailPage id="1042" embedded onBack={() => {}} />)
+    expect(await screen.findByText('Disk usage (folder)')).toBeInTheDocument()
+    expect(screen.getByText('/mnt/nas/omnibioai/tenants/tenant_1042')).toBeInTheDocument()
+    expect(screen.getByText('-3 GB')).toBeInTheDocument()
   })
 })
