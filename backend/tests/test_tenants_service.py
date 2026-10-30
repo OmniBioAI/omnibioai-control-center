@@ -74,3 +74,40 @@ def test_sources_chunks_large_tenant_sets(monkeypatch):
     identities, billings, ledgers = asyncio.run(service._sources(AsyncMock(), {}, [str(i) for i in range(1001)]))
     assert len(identities) == len(billings) == len(ledgers) == 1001
     assert len(calls) == 6
+
+
+def test_detail_resolves_history_actors_in_one_deduplicated_batch(monkeypatch):
+    calls = []
+    async def fake_json(client, method, url, name, headers, **kwargs):
+        if name == "auth-service":
+            ids = kwargs["json"]["user_ids"]
+            calls.append(ids)
+            if ids == [7]:
+                return {"items": [_identity()]}
+            assert ids == [42, 43, 99]
+            return {"items": [{"user_id": "42", "email": "admin@example.org", "username": "admin"},
+                              {"user_id": "43", "email": "", "username": "operator"}]}
+        if name == "billing-service":
+            return _billing(plan_history=[{"from_plan": "free", "to_plan": "plus", "at": "2026-10-01T00:00:00Z", "actor": a} for a in ["user:42", "user:42", "user:43", "user:99", "stripe", None]])
+        return {}
+    monkeypatch.setattr(service, "_json", fake_json)
+    detail = asyncio.run(service.tenant_detail("7", None))
+    assert calls == [[7], [42, 43, 99]]
+    history = detail["plan_history"]
+    assert [h["actor_display"] for h in history] == ["admin@example.org", "admin@example.org", "operator", None, None, None]
+    assert history[0]["actor"] == "user:42"
+
+
+def test_detail_keeps_audit_actor_when_identity_lookup_fails(monkeypatch):
+    async def fake_json(client, method, url, name, headers, **kwargs):
+        if name == "auth-service":
+            if kwargs["json"]["user_ids"] == [7]:
+                return {"items": [_identity()]}
+            raise service.UpstreamError("auth-service", 503, "unavailable")
+        if name == "billing-service":
+            return _billing(plan_history=[{"from_plan": "free", "to_plan": "plus", "at": "2026-10-01T00:00:00Z", "actor": "user:42"}])
+        return {}
+    monkeypatch.setattr(service, "_json", fake_json)
+    detail = asyncio.run(service.tenant_detail("7", None))
+    assert detail["plan_history"][0]["actor"] == "user:42"
+    assert detail["plan_history"][0]["actor_display"] is None

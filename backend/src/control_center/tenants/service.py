@@ -151,6 +151,21 @@ async def tenant_detail(tenant_id: str, authorization: str | None) -> dict | Non
             return None
         billing = await _json(client, "GET", f"{BILLING_URL}/admin/tenants/{tenant_id}", "billing-service", headers)
         ledger = await _json(client, "GET", f"{WORKBENCH_URL}/api/storage/admin/tenants/{tenant_id}", "workbench", headers)
+        # Preserve audit identifiers; add display labels using Auth's batch lookup.
+        history = billing.get("plan_history", [])
+        actor_ids = sorted({int(h["actor"][5:]) for h in history
+                            if isinstance(h.get("actor"), str) and h["actor"].startswith("user:")
+                            and h["actor"][5:].isascii() and h["actor"][5:].isdigit()})
+        actors = {}
+        for start in range(0, len(actor_ids), 1000):
+            try:
+                result = await _json(client, "POST", f"{IAM_URL}/platform/users/batch", "auth-service", headers,
+                                     json={"user_ids": actor_ids[start:start + 1000]})
+            except UpstreamError:
+                continue  # Identity lookup failure must not hide the audit history.
+            actors.update({f"user:{item['user_id']}": item.get("email") or item.get("username")
+                           for item in result.get("items", [])})
+        billing["plan_history"] = [{**h, "actor_display": actors.get(h.get("actor"))} for h in history]
     row = tenant_row(identities[tenant_id], billing, ledger)
     return {**row, "plan_history": billing.get("plan_history", []), "override": billing.get("override"), "active_grant": billing.get("active_grant"), "grant_history": billing.get("grant_history", []), "top_allocations": ledger.get("top_allocations", []), "workflow_output_bytes": ledger.get("workflow_output_bytes", 0), "usage_trend_30d": ledger.get("usage_trend_30d", [])}
 
