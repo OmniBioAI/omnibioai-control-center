@@ -1,5 +1,14 @@
 from unittest.mock import AsyncMock, patch
 
+import pytest
+from control_center.tenants import service
+
+@pytest.fixture(autouse=True)
+def clear_index():
+    service._indexes.clear()
+    yield
+    service._indexes.clear()
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -23,7 +32,7 @@ def test_rbac_rejects_missing_and_non_platform_admin_tokens():
 
 def test_summary_and_filtered_paginated_list():
     rows = [_row("1", "maya"), _row("2", "zed")]
-    with patch("control_center.core.auth.verify_token", return_value=ADMIN), patch("control_center.api.routes_tenants.service.all_tenants", AsyncMock(return_value=(rows, {}, {}))):
+    with patch("control_center.core.auth.verify_token", return_value=ADMIN), patch("control_center.api.routes_tenants.service.all_tenants", AsyncMock(return_value=(rows, {}, {}))), patch("control_center.api.routes_tenants.service._sources", AsyncMock(return_value=({"2": {"user_id": "2", "username": "zed", "email": "zed@example.org"}}, {}, {}))):
         summary = client.get("/admin/tenants/summary", headers={"Authorization": "Bearer x"})
         listing = client.get("/admin/tenants?q=zed&page=1&page_size=1", headers={"Authorization": "Bearer x"})
     assert summary.status_code == 200 and summary.json()["tenants_total"] == 2

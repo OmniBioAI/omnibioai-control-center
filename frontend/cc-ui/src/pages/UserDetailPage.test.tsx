@@ -5,6 +5,10 @@ import UserDetailPage from './UserDetailPage'
 import * as users from '../users'
 import type { PlatformUserDetail } from '../users'
 import * as roles from '../roles'
+import * as auth from '../auth'
+import * as tenants from '../tenants'
+vi.mock('../auth', async (original) => ({ ...await original<typeof import('../auth')>(), hasPermission: vi.fn(() => false) }))
+vi.mock('../tenants', async (original) => ({ ...await original<typeof import('../tenants')>(), fetchTenant: vi.fn() }))
 import type { RoleSummary } from '../roles'
 
 vi.mock('../users', async () => {
@@ -43,6 +47,9 @@ const detail: PlatformUserDetail = {
 
 describe('UserDetailPage', () => {
   beforeEach(() => {
+    window.history.replaceState(null, '', '/users/42')
+    vi.mocked(auth.hasPermission).mockReturnValue(false)
+    vi.mocked(tenants.fetchTenant).mockReset()
     vi.mocked(users.fetchPlatformUserDetail).mockReset()
     vi.mocked(roles.fetchPlatformRoles).mockReset()
     vi.mocked(roles.assignUserRole).mockReset()
@@ -152,10 +159,11 @@ describe('UserDetailPage', () => {
     const expectedLastLogin = new Date(detail.last_login_at!).toLocaleString(undefined, {
       year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
     })
-    // Rendered twice: once in General Information, once in the
-    // Authentication (Security Summary) card.
-    expect(screen.getAllByText('OIDC')).toHaveLength(2)
-    expect(screen.getAllByText(expectedLastLogin)).toHaveLength(2)
+    expect(screen.getByText('OIDC')).toBeInTheDocument()
+    expect(screen.getByText(expectedLastLogin)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('tab', { name: 'Security' }))
+    expect(screen.getByText('OIDC')).toBeInTheDocument()
+    expect(screen.getByText(expectedLastLogin)).toBeInTheDocument()
   })
 
   it('shows "Not available" for a user who has never logged in since the migration', async () => {
@@ -165,10 +173,9 @@ describe('UserDetailPage', () => {
     render(<UserDetailPage userId={42} onBack={vi.fn()} />)
     await screen.findByRole('heading', { name: 'someone@acme.test' })
 
-    // Rendered twice each: General Information + the Authentication card,
-    // plus 3 more from the MFA Status card (Primary Method/Enabled At/
-    // Last Verified, all null on the shared `detail` fixture -- PR11.5.6).
-    expect(screen.getAllByText('Not available')).toHaveLength(7)
+    expect(screen.getAllByText('Not available')).toHaveLength(2)
+    await userEvent.click(screen.getByRole('tab', { name: 'Security' }))
+    expect(screen.getAllByText('Not available')).toHaveLength(5)
   })
 
   it('falls back to a read-only role list when the role catalog fails to load', async () => {
@@ -179,5 +186,37 @@ describe('UserDetailPage', () => {
 
     await waitFor(() => expect(screen.queryAllByRole('checkbox')).toHaveLength(0))
     expect(screen.getByText('user')).toBeInTheDocument()
+  })
+})
+
+
+describe('User tab permissions', () => {
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/users/42?tab=plan-storage')
+    vi.mocked(users.fetchPlatformUserDetail).mockResolvedValue(detail)
+    vi.mocked(roles.fetchPlatformRoles).mockResolvedValue([])
+    vi.mocked(tenants.fetchTenant).mockReset()
+  })
+  it('does not mount plan data or actions without manage_all_orgs, including deep links', async () => {
+    vi.mocked(auth.hasPermission).mockReturnValue(false)
+    render(<UserDetailPage userId={42} onBack={vi.fn()} />)
+    await screen.findByRole('heading', { name: detail.email })
+    expect(screen.queryByRole('tab', { name: 'Plan & storage' })).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Profile' })).toHaveAttribute('aria-selected', 'true')
+    expect(tenants.fetchTenant).not.toHaveBeenCalled()
+    for (const name of ['Security', 'Compute', 'API']) {
+      await userEvent.click(screen.getByRole('tab', { name }))
+      expect(screen.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'true')
+    }
+  })
+  it('mounts plan data for manage_all_orgs and handles browser tab history', async () => {
+    vi.mocked(auth.hasPermission).mockImplementation(p => p === 'manage_all_orgs')
+    vi.mocked(tenants.fetchTenant).mockReturnValue(new Promise(() => {}))
+    render(<UserDetailPage userId={42} onBack={vi.fn()} />)
+    await screen.findByRole('tab', { name: 'Plan & storage' })
+    expect(tenants.fetchTenant).toHaveBeenCalledWith('42')
+    expect(screen.getByRole('tab', { name: 'Plan & storage' })).toHaveAttribute('aria-selected', 'true')
+    await userEvent.click(screen.getByRole('tab', { name: 'Profile' }))
+    expect(window.location.search).toBe('?tab=profile')
   })
 })

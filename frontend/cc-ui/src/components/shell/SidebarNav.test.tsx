@@ -7,14 +7,8 @@ vi.mock('../../auth', async (importOriginal) => ({
   hasPlatformAdminAccess: () => true,
 }))
 
-it('renders the tenant management icon with the same sizing and stroke as Users', () => {
-  render(<SidebarNav active="tenants" onNavigate={() => {}} mobileOpen={false} onCloseMobile={() => {}} />)
-  const tenantIcon = screen.getByRole('button', { name: 'Tenant management' }).querySelector('svg')
-  const usersIcon = screen.getByRole('button', { name: 'Users' }).querySelector('svg')
-  expect(tenantIcon).toHaveClass('lucide', 'lucide-user-cog')
-  expect(tenantIcon).toHaveAttribute('width', '15')
-  expect(tenantIcon).toHaveAttribute('aria-hidden', 'true')
-  for (const attr of ['width', 'height', 'stroke', 'stroke-width']) {
-    expect(tenantIcon?.getAttribute(attr)).toBe(usersIcon?.getAttribute(attr))
-  }
+it('shows one Users item and no Tenant management item', () => {
+  render(<SidebarNav active="users" onNavigate={() => {}} mobileOpen={false} onCloseMobile={() => {}} />)
+  expect(screen.getAllByRole('button', { name: 'Users' })).toHaveLength(1)
+  expect(screen.queryByRole('button', { name: 'Tenant management' })).not.toBeInTheDocument()
 })

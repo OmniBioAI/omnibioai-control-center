@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  authMethodLabel, fetchPlatformUsers,
-  type PlatformUserListResponse, type UserSortField, type SortOrder,
+  authMethodLabel, fetchManagedUsers, managedUsersCsv,
+  type ManagedUserListResponse, type ManagedUser, type ManagedUserSort, type SortOrder,
 } from '../users'
 import { fetchPlatformOrgs, type PlatformOrgSummary } from '../organizations'
 import { fetchPlatformRoles, type RoleSummary } from '../roles'
 import StatusBadge from '../components/StatusBadge'
 import { LoadingState, ErrorState, EmptyState, Pagination } from '../components/ui'
 import { formatDateTime } from '../format'
+import { fetchTenantSummary, type TenantQuery, type TenantSummary } from '../tenants'
+import { TenantSummaryCards, Filter, PlanCell, Usage, date, validUntil } from './tenants/TenantManagementPage'
 
 /* ── Shared visual language (matches OrganizationsPage.tsx/DockerPage.tsx) ── */
 const card: React.CSSProperties = {
@@ -38,21 +40,21 @@ const selectStyle: React.CSSProperties = {
 function SortHeader({
   field, label, sortBy, sortOrder, onSort,
 }: {
-  field: UserSortField
+  field: ManagedUserSort
   label: string
-  sortBy: UserSortField
+  sortBy: ManagedUserSort
   sortOrder: SortOrder
-  onSort: (field: UserSortField) => void
+  onSort: (field: ManagedUserSort) => void
 }) {
   const active = sortBy === field
   return (
-    <th style={thSortable} onClick={() => onSort(field)} role="columnheader" aria-sort={active ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}>
-      {label} {active ? (sortOrder === 'asc' ? '▲' : '▼') : ''}
+    <th style={thSortable} role="columnheader" aria-sort={active ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button onClick={() => onSort(field)}>{label} {active ? (sortOrder === 'asc' ? '▲' : '▼') : ''}</button>
     </th>
   )
 }
 
-const PAGE_SIZE = 20
+const PAGE_SIZE = 50
 const ALL_STATUSES = ['active', 'suspended']
 
 interface Props {
@@ -64,17 +66,22 @@ interface Props {
 // GET /orgs/{org_id}/members (Phase 1), unrelated to this new, platform-
 // wide, cross-tenant directory.
 export default function UsersPage({ onSelect }: Props) {
-  const [data, setData] = useState<PlatformUserListResponse | null>(null)
+  const [data, setData] = useState<ManagedUserListResponse | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
+  const [tenantFilters, setTenantFilters] = useState<TenantQuery>({})
+  const [summary, setSummary] = useState<TenantSummary | null>(null)
+  const [summaryError, setSummaryError] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
+  const [reload, setReload] = useState(0)
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
-  const [sortBy, setSortBy] = useState<UserSortField>('created_at')
+  const [sortBy, setSortBy] = useState<ManagedUserSort>('created_at')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
 
   // PR11.1: filter toolbar state. Each is `''` when "All" is selected --
-  // fetchPlatformUsers only sets the corresponding query param when
+  // fetchManagedUsers only sets the corresponding query param when
   // truthy, so this stays backward compatible with the unfiltered call.
   const [orgFilter, setOrgFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -89,22 +96,58 @@ export default function UsersPage({ onSelect }: Props) {
     fetchPlatformRoles().then(setRoleOptions).catch(() => setRoleOptions(null))
   }, [])
 
-  const load = useCallback(() => {
-    setLoading(true)
-    fetchPlatformUsers({
-      page, pageSize: PAGE_SIZE, search, sortBy, sortOrder,
-      organizationId: orgFilter ? Number(orgFilter) : undefined,
-      status: statusFilter || undefined,
-      role: roleFilter || undefined,
-    })
-      .then(d => { setData(d); setErr(null) })
-      .catch(e => setErr(String(e)))
-      .finally(() => setLoading(false))
-  }, [page, search, sortBy, sortOrder, orgFilter, statusFilter, roleFilter])
+  const query = { page, pageSize: PAGE_SIZE, search, sortBy, sortOrder,
+    organizationId: orgFilter ? Number(orgFilter) : undefined,
+    status: statusFilter || undefined, role: roleFilter || undefined, tenant: tenantFilters }
+  const load = useCallback(() => setReload(value => value + 1), [])
+  useEffect(() => {
+    let cancelled = false
+    fetchTenantSummary().then(value => { if (!cancelled) { setSummary(value); setSummaryError(null) } })
+      .catch(error => { if (!cancelled) setSummaryError(String(error)) })
+    return () => { cancelled = true }
+  }, [reload])
+  useEffect(() => {
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let retries = 0
+    const request = async () => {
+      setLoading(true)
+      try {
+        const result = await fetchManagedUsers(query)
+        if (!cancelled) { setData(result); setErr(null); setLoading(false) }
+      } catch (error) {
+        if (cancelled) return
+        if ((error as { status?: number }).status === 503 && retries++ < 30) {
+          timer = setTimeout(request, 2000)
+        } else { setErr(String(error)); setLoading(false) }
+      }
+    }
+    void request()
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [page, search, sortBy, sortOrder, orgFilter, statusFilter, roleFilter, tenantFilters, reload])
 
-  useEffect(() => { load() }, [load])
+  const updateTenantFilter = (key: keyof TenantQuery, value: string) => {
+    setTenantFilters(previous => ({ ...previous, [key]: value }))
+    setPage(1)
+  }
+  const exportCsv = async () => {
+    setExporting(true)
+    try {
+      const rows: ManagedUser[] = []
+      for (let page = 1; ; page++) {
+        const batch = await fetchManagedUsers({ ...query, page, pageSize: 200 })
+        rows.push(...batch.items)
+        if (!batch.items.length || page >= batch.total_pages) break
+      }
+      const url = URL.createObjectURL(new Blob([managedUsersCsv(rows)], { type: 'text/csv;charset=utf-8' }))
+      const link = document.createElement('a')
+      link.href = url; link.download = 'users.csv'; link.click()
+      URL.revokeObjectURL(url)
+    } catch (error) { setErr(`Export failed: ${String(error)}`) }
+    finally { setExporting(false) }
+  }
 
-  const handleSort = (field: UserSortField) => {
+  const handleSort = (field: ManagedUserSort) => {
     if (field === sortBy) {
       setSortOrder(o => (o === 'asc' ? 'desc' : 'asc'))
     } else {
@@ -120,7 +163,7 @@ export default function UsersPage({ onSelect }: Props) {
     setSearch(searchInput.trim())
   }
 
-  const hasActiveFilters = !!(search || orgFilter || statusFilter || roleFilter)
+  const hasActiveFilters = !!(search || orgFilter || statusFilter || roleFilter || Object.values(tenantFilters).some(Boolean))
 
   return (
     <div>
@@ -130,6 +173,16 @@ export default function UsersPage({ onSelect }: Props) {
         enforced by the backend on every request.
       </p>
 
+      {summary && <TenantSummaryCards summary={summary} />}
+      {summaryError && <div role="alert">Summary unavailable. <button onClick={load}>Retry summary</button></div>}
+      <button disabled={exporting || loading} onClick={() => void exportCsv()}>{exporting ? 'Exporting…' : 'Export current filter'}</button>
+      <div className="tenant-filter-card">
+        <Filter label="Plan" value={tenantFilters.plan ?? ''} options={['free', 'plus', 'pro']} onChange={v => updateTenantFilter('plan', v)} />
+        <Filter label="Plan source" value={tenantFilters.plan_source ?? ''} options={['stripe', 'promo', 'free']} labels={{ stripe: 'Paid', promo: 'Promo', free: 'Free' }} onChange={v => updateTenantFilter('plan_source', v)} />
+        <Filter label="Membership" value={tenantFilters.status ?? ''} options={['active', 'trialing', 'past_due', 'canceled', 'none']} onChange={v => updateTenantFilter('status', v)} />
+        <Filter label="Validity" value={tenantFilters.validity ?? ''} options={['expiring_7d', 'expiring_30d', 'expired']} onChange={v => updateTenantFilter('validity', v)} />
+        <Filter label="Storage" value={tenantFilters.storage_status ?? ''} options={['ok', 'near', 'over_allocation']} onChange={v => updateTenantFilter('storage_status', v)} />
+      </div>
       <form
         onSubmit={submitSearch}
         style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}
@@ -137,7 +190,7 @@ export default function UsersPage({ onSelect }: Props) {
         <input
           value={searchInput}
           onChange={e => setSearchInput(e.target.value)}
-          placeholder="Search by email…"
+          placeholder="Search username, email, or ID…"
           aria-label="Search users"
           style={{
             flex: 1, minWidth: 200, maxWidth: 420, fontSize: 13, padding: '8px 12px',
@@ -190,7 +243,7 @@ export default function UsersPage({ onSelect }: Props) {
       {err && <div role="alert" style={{ marginBottom: 14 }}><ErrorState message={err} onRetry={load} /></div>}
 
       {loading ? <LoadingState label="Loading users…" /> : (
-        <div style={card}>
+        <div style={{ ...card, overflowX: 'auto' }}>
           <div style={cardHead}>
             <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>All Users</span>
             {data && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{data.total} total</span>}
@@ -211,6 +264,9 @@ export default function UsersPage({ onSelect }: Props) {
                   <th style={th}>Last Login</th>
                   <th style={th}>Auth Method</th>
                   <SortHeader field="created_at" label="Created" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
+                  <SortHeader field="effective_plan_id" label="Plan" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
+                  <SortHeader field="pct" label="Used / Allocated" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
+                  <SortHeader field="valid_until" label="Valid until" sortBy={sortBy} sortOrder={sortOrder} onSort={handleSort} />
                   <th style={th}>Actions</th>
                 </tr>
               </thead>
@@ -238,6 +294,9 @@ export default function UsersPage({ onSelect }: Props) {
                     <td style={td}>{formatDateTime(u.last_login_at)}</td>
                     <td style={td}>{authMethodLabel(u.authentication_method)}</td>
                     <td style={td}>{u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}</td>
+                    <td style={td}>{u.effective_plan_id ? <PlanCell row={u} /> : '—'}</td>
+                    <td style={td}>{u.allocated_bytes != null ? <Usage row={u} /> : '—'}</td>
+                    <td style={td}>{u.effective_plan_id ? date(validUntil(u)) : '—'}</td>
                     <td style={td}>
                       <button
                         onClick={e => { e.stopPropagation(); onSelect(u.id) }}
