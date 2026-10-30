@@ -18,37 +18,72 @@ collector = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(collector)
 
 
-def test_mount_check_matches_configured_uuid_with_findmnt(monkeypatch, tmp_path):
-    mountpoint = str(tmp_path)  # a real directory, so the read-only flag comes from a real statvfs
-    monkeypatch.setenv("STORAGE_TELEMETRY_TARGETS", f"backup|{mountpoint}|12345678-aaaa-bbbb-cccc-1234567890ab")
+UUID_A = "12345678-aaaa-bbbb-cccc-1234567890ab"
+
+
+def pairs(uuid: str = "", fstype: str = "ext4", options: str = "rw,relatime") -> str:
+    return f'UUID="{uuid}" FSTYPE="{fstype}" OPTIONS="{options}"\n'
+
+
+def test_mount_check_reads_the_host_mount_table(monkeypatch):
+    monkeypatch.setenv("STORAGE_TELEMETRY_TARGETS", f"backup|/mnt/backup|{UUID_A}")
     calls = []
 
     def fake_run(argv, **kwargs):
         calls.append(argv)
-        return "12345678-AAAA-bbbb-cccc-1234567890ab ext4\n", None
+        return pairs(UUID_A.upper().replace("BBBB", "bbbb"), options="rw,relatime,errors=remount-ro"), None
 
     monkeypatch.setattr(collector, "run", fake_run)
     assert collector.mount_records() == {"backup": {
-        "mounted": True, "uuid": "12345678-AAAA-bbbb-cccc-1234567890ab", "fstype": "ext4", "read_only": False}}
-    assert calls == [["findmnt", "-n", "-o", "UUID,FSTYPE", mountpoint]]
+        "mounted": True, "uuid": UUID_A.upper().replace("BBBB", "bbbb"), "fstype": "ext4", "read_only": False}}
+    # PID 1's mount namespace, not the service's ProtectSystem=strict view where every mount is read-only.
+    assert calls == [["findmnt", "--task", "1", "-n", "-P", "-o", "UUID,FSTYPE,OPTIONS", "/mnt/backup"]]
 
-    monkeypatch.setattr(collector, "run", lambda *_args, **_kwargs: ("00000000-0000-0000-0000-000000000000 ext4\n", None))
-    assert collector.mount_records()["backup"] == {
-        "mounted": False, "uuid": "00000000-0000-0000-0000-000000000000", "fstype": "ext4", "read_only": None}
 
-    # A filesystem without a UUID (mergerfs, tmpfs) prints only its type.
-    monkeypatch.setattr(collector, "run", lambda *_args, **_kwargs: ("     fuse.mergerfs\n", None))
-    assert collector.mount_records()["backup"] == {"mounted": False, "uuid": None, "fstype": "fuse.mergerfs", "read_only": None}
+@pytest.mark.parametrize(("options", "read_only"), (
+    ("ro,relatime,norecovery", True),
+    ("ro", True),
+    ("rw,relatime", False),
+    ("rw,errors=remount-ro", False),       # "ro" inside another option is not read-only
+    ("rw,nosuid,nodev,relatime,user_id=0,group_id=0,default_permissions,allow_other", False),
+))
+def test_mount_mode_comes_from_the_host_options(monkeypatch, options, read_only):
+    monkeypatch.setenv("STORAGE_TELEMETRY_TARGETS", f"backup|/mnt/backup|{UUID_A}")
+    monkeypatch.setattr(collector, "run", lambda *_args, **_kwargs: (pairs(UUID_A, options=options), None))
+    assert collector.mount_records()["backup"]["read_only"] is read_only
 
+
+def test_sandboxed_read_only_view_is_never_consulted(monkeypatch):
+    # Even when the service's own namespace reports every mount read-only, only findmnt --task 1 decides.
+    monkeypatch.setenv("STORAGE_TELEMETRY_TARGETS", f"backup|/mnt/backup|{UUID_A}")
+    monkeypatch.setattr(collector, "run", lambda argv, **_kwargs: (
+        pairs(UUID_A, options="rw,relatime") if argv[1:3] == ["--task", "1"] else pairs(UUID_A, options="ro"), None))
+    monkeypatch.setattr(collector.os, "statvfs", lambda _path: pytest.fail("statvfs must not decide the mount mode"), raising=False)
+    assert collector.mount_records()["backup"]["read_only"] is False
+
+
+@pytest.mark.parametrize(("output", "error", "expected"), (
+    (pairs("00000000-0000-0000-0000-000000000000"), None,
+     {"mounted": False, "uuid": "00000000-0000-0000-0000-000000000000", "fstype": "ext4", "read_only": None}),
+    # A filesystem without a UUID (mergerfs, tmpfs) has an empty UUID pair; never read the type as a UUID.
+    (pairs("", "fuse.mergerfs", "rw,allow_other"), None, {"mounted": False, "uuid": None, "fstype": "fuse.mergerfs", "read_only": None}),
     # findmnt exits 1 when the path is not a mountpoint.
-    monkeypatch.setattr(collector, "run", lambda *_args, **_kwargs: (None, "command exited with status 1"))
-    assert collector.mount_records()["backup"] == {"mounted": False, "uuid": None, "fstype": None, "read_only": None}
+    (None, "command exited with status 1", {"mounted": False, "uuid": None, "fstype": None, "read_only": None}),
+    # Two mounts stacked on one path: ambiguous, so not verified.
+    (pairs(UUID_A) + pairs(UUID_A), None, {"mounted": False, "uuid": None, "fstype": None, "read_only": None}),
+    ("garbage\n", None, {"mounted": False, "uuid": None, "fstype": None, "read_only": None}),
+))
+def test_mount_check_rejects_missing_or_ambiguous_answers(monkeypatch, output, error, expected):
+    monkeypatch.setenv("STORAGE_TELEMETRY_TARGETS", f"backup|/mnt/backup|{UUID_A}")
+    monkeypatch.setattr(collector, "run", lambda *_args, **_kwargs: (output, error))
+    assert collector.mount_records()["backup"] == expected
 
 
-def test_short_exfat_uuid_is_accepted_and_matched(monkeypatch, tmp_path):
-    monkeypatch.setenv("STORAGE_TELEMETRY_TARGETS", f"archive2tb-b|{tmp_path}|6A7F-D1A6")
-    monkeypatch.setattr(collector, "run", lambda *_args, **_kwargs: ("6A7F-D1A6                            exfat\n", None))
-    assert collector.mount_records()["archive2tb-b"]["mounted"] is True
+def test_short_exfat_uuid_is_accepted_and_matched(monkeypatch):
+    monkeypatch.setenv("STORAGE_TELEMETRY_TARGETS", "archive2tb-b|/mnt/b|6A7F-D1A6")
+    monkeypatch.setattr(collector, "run", lambda *_args, **_kwargs: (
+        pairs("6A7F-D1A6", "exfat", "ro,relatime,fmask=0022,dmask=0022,iocharset=utf8,errors=remount-ro"), None))
+    assert collector.mount_records()["archive2tb-b"] == {"mounted": True, "uuid": "6A7F-D1A6", "fstype": "exfat", "read_only": True}
 
 
 @pytest.mark.parametrize("uuid", ("12345678-aaaa", "6A7F-D1A", "6A7FD1A6", "not-a-uuid-at-all", "../etc"))

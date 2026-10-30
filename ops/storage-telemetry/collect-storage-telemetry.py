@@ -254,23 +254,25 @@ def target_list() -> list[tuple[str, str, str]]:
     return values
 
 
-def host_read_only(path: str) -> bool | None:
-    try:
-        return bool(os.statvfs(path).f_flag & os.ST_RDONLY)
-    except OSError:
-        return None
+FINDMNT_PAIR = re.compile(r'([A-Z_]+)="((?:[^"\\]|\\.)*)"')
 
 
 def mount_records() -> dict[str, dict[str, object]]:
+    """Check each target's UUID, type and mount mode in the host's mount table.
+
+    `--task 1` reads PID 1's mount namespace: the service's own view is sandboxed
+    by ProtectSystem=strict, where every mount appears read-only.
+    """
     records: dict[str, dict[str, object]] = {}
     for role, mountpoint, expected_uuid in target_list():
-        output, error = run(["findmnt", "-n", "-o", "UUID,FSTYPE", mountpoint], timeout=15)
-        fields = [] if error else (output or "").split()
-        # A filesystem without a UUID prints only its type; never read that as a UUID.
-        actual_uuid, fstype = (fields[0], fields[1]) if len(fields) == 2 else (None, fields[0] if len(fields) == 1 else None)
+        output, error = run(["findmnt", "--task", "1", "-n", "-P", "-o", "UUID,FSTYPE,OPTIONS", mountpoint], timeout=15)
+        lines = [] if error else (output or "").splitlines()
+        fields = dict(FINDMNT_PAIR.findall(lines[0])) if len(lines) == 1 else {}
+        actual_uuid = fields.get("UUID") or None
+        options = fields.get("OPTIONS", "").split(",") if fields.get("OPTIONS") else []
         mounted = actual_uuid is not None and actual_uuid.lower() == expected_uuid.lower()
-        records[role] = {"mounted": mounted, "uuid": actual_uuid, "fstype": fstype,
-                         "read_only": host_read_only(mountpoint) if mounted else None}
+        records[role] = {"mounted": mounted, "uuid": actual_uuid, "fstype": fields.get("FSTYPE") or None,
+                         "read_only": ("ro" in options) if mounted and options else None}
     return records
 
 
