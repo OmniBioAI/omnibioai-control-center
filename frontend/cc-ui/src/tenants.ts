@@ -26,7 +26,7 @@ export interface PlanHistoryItem extends PlanChange {
   old_allocated_bytes: number; new_allocated_bytes: number
   source: 'stripe_webhook' | 'admin_override' | 'payment_grace' | 'admin_promo' | 'promo_expired'
   event?: string
-  actor: string | null; reason: string | null
+  actor: string | null; actor_display?: string | null; reason: string | null
 }
 export interface StorageOverride { allocated_bytes: number; reason: string; actor: string; expires_at: string | null }
 export interface PlanGrant { id: number; plan_id: 'plus' | 'pro'; starts_at: string; expires_at: string; reason: string; granted_by: string; created_at: string; revoked_at: string | null; revoked_by: string | null; revoke_reason: string | null }
