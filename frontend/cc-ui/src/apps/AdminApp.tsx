@@ -32,7 +32,7 @@ import IntegrationsPage from '../pages/IntegrationsPage'
 import OrganizationsPage from '../pages/OrganizationsPage'
 import OrganizationDetailPage from '../pages/OrganizationDetailPage'
 import UsersPage from '../pages/UsersPage'
-import { TenantManagementRoute } from '../pages/tenants/TenantManagementPage'
+import { redirectLegacyTenants } from '../userRoutes'
 import UserDetailPage from '../pages/UserDetailPage'
 import ManualLicensesPage from '../pages/ManualLicensesPage'
 import TeamsPage from '../pages/identity/TeamsPage'
@@ -82,6 +82,7 @@ function hasConsoleAccess(): boolean {
 }
 
 export default function AdminApp() {
+  redirectLegacyTenants()
   if (window.location.pathname === '/invitations/accept') {
     return <InvitationAcceptancePage />
   }
@@ -195,7 +196,6 @@ function AdminDashboard() {
     if (window.location.pathname === '/workflows') return 'workflows'
     if (window.location.pathname.startsWith('/organizations')) return 'organizations'
     if (window.location.pathname.startsWith('/users')) return 'users'
-    if (window.location.pathname.startsWith('/tenants')) return 'tenants'
     if (window.location.pathname === '/licenses/manual') return 'manual-licenses'
     // /iam/service-accounts must be checked before the bare /iam prefix
     // below, or it would always match the SSO branch first.
@@ -276,7 +276,6 @@ function AdminDashboard() {
     const path =
       active === 'organizations' ? (selectedOrgId != null ? `/organizations/${selectedOrgId}` : '/organizations')
       : active === 'users' ? (selectedUserId != null ? `/users/${selectedUserId}` : '/users')
-      : active === 'tenants' ? (window.location.pathname.startsWith('/tenants') ? window.location.pathname : '/tenants')
       : active === 'manual-licenses' ? '/licenses/manual'
       : active === 'iam' ? (selectedSsoOrgId != null ? `/iam/${selectedSsoOrgId}` : '/iam')
       : active === 'api-keys' ? (selectedServiceAccountsOrgId != null ? `/iam/service-accounts/${selectedServiceAccountsOrgId}` : '/iam/service-accounts')
@@ -302,6 +301,7 @@ function AdminDashboard() {
 
   useEffect(() => {
     const onPopState = () => {
+      redirectLegacyTenants()
       if (window.location.pathname === '/audit-explorer') {
         setActive('audit-explorer')
       } else if (window.location.pathname === '/platform-health') {
@@ -330,8 +330,6 @@ function AdminDashboard() {
       } else if (window.location.pathname.startsWith('/users')) {
         setActive('users')
         setSelectedUserId(userIdFromPath())
-      } else if (window.location.pathname.startsWith('/tenants')) {
-        setActive('tenants')
       } else if (window.location.pathname === '/licenses/manual') {
         setActive('manual-licenses')
       } else if (window.location.pathname.startsWith('/iam/service-accounts')) {
@@ -365,10 +363,6 @@ function AdminDashboard() {
   }, [])
 
   const handleNavigate = (key: PageKey) => {
-    if (key === 'tenants' && window.location.pathname !== '/tenants') {
-      window.history.pushState(null, '', '/tenants')
-      window.dispatchEvent(new PopStateEvent('popstate'))
-    }
     setActive(key)
     if (key !== 'organizations') setSelectedOrgId(null)
     if (key !== 'users') setSelectedUserId(null)
@@ -600,11 +594,8 @@ function renderPage(active: PageKey, ctx: RenderCtx) {
     case 'users':
       if (!ctx.canSeeUsers) return null
       return ctx.selectedUserId != null
-        ? <UserDetailPage userId={ctx.selectedUserId} onBack={() => ctx.setSelectedUserId(null)} />
+        ? <UserDetailPage key={ctx.selectedUserId} userId={ctx.selectedUserId} onBack={() => ctx.setSelectedUserId(null)} />
         : <UsersPage onSelect={ctx.setSelectedUserId} />
-
-    case 'tenants':
-      return ctx.canSeeUsers ? <TenantManagementRoute /> : <div role="alert"><h1>403 — Access denied</h1><p>Tenant management requires manage_all_orgs.</p></div>
 
     case 'manual-licenses':
       return ctx.canSeeManualLicenses ? <ManualLicensesPage /> : null

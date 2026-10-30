@@ -22,25 +22,27 @@ class PlanGrantBody(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
 
 def _raise(exc: service.UpstreamError):
-    raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    raise HTTPException(status_code=exc.status_code, detail=exc.detail, headers={"Retry-After": "2"} if exc.status_code == 503 else None)
 
 @router.get("/summary")
 async def tenant_summary(authorization: str | None = Header(None)):
-    try: rows, _, _ = await service.all_tenants(authorization)
+    try: return await service.cached_summary(authorization)
     except service.UpstreamError as exc: _raise(exc)
-    return service.summary(rows)
 
 @router.get("")
 async def list_tenants(
     plan: str | None = None, plan_source: str | None = None, status: str | None = None, validity: str | None = None,
     storage_status: str | None = None, q: str | None = None, sort: str = "username",
-    page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=1000),
+    page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=200),
+    organization_id: int | None = Query(None, ge=1), user_status: str | None = None, role: str | None = None,
     authorization: str | None = Header(None),
 ):
-    try: rows, _, _ = await service.all_tenants(authorization)
+    try:
+        return await service.paginated_tenants(authorization, page=page, page_size=page_size,
+            plan=plan, plan_source=plan_source, status=status, validity=validity,
+            storage_status=storage_status, q=q, sort=sort, organization_id=organization_id,
+            user_status=user_status, role=role)
     except service.UpstreamError as exc: _raise(exc)
-    rows = service.filter_sort(rows, plan=plan, plan_source=plan_source, status=status, validity=validity, storage_status=storage_status, q=q, sort=sort)
-    return {"items": rows[(page - 1) * page_size:page * page_size], "total": len(rows)}
 
 @router.get("/{tenant_id}")
 async def get_tenant(tenant_id: str, authorization: str | None = Header(None)):

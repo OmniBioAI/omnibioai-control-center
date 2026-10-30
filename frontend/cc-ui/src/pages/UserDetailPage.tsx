@@ -9,6 +9,8 @@ import RoleAssignmentList from '../components/roles/RoleAssignmentList'
 import RoleSelector from '../components/roles/RoleSelector'
 import { BackLink } from '../components/ui'
 import { formatDateTime } from '../format'
+import { hasPermission } from '../auth'
+import { TenantDetailPage } from './tenants/TenantManagementPage'
 
 const card: React.CSSProperties = {
   background: 'var(--surface)', border: '1px solid var(--border)',
@@ -51,6 +53,21 @@ interface Props {
 // Platform-admin only, mirroring GET /platform/users/{id}'s own gate --
 // there is no org-admin variant of this page (see UsersPage.tsx).
 export default function UserDetailPage({ userId, onBack }: Props) {
+  const canManagePlan = hasPermission('manage_all_orgs')
+  const readTab = () => new URLSearchParams(window.location.search).get('tab') || 'profile'
+  const [requestedTab, setTab] = useState(readTab)
+  const tab = requestedTab === 'plan-storage' && !canManagePlan ? 'profile' : requestedTab
+  useEffect(() => {
+    const pop = () => setTab(readTab())
+    window.addEventListener('popstate', pop)
+    return () => window.removeEventListener('popstate', pop)
+  }, [])
+  const selectTab = (next: string) => {
+    setTab(next)
+    const query = new URLSearchParams(window.location.search)
+    query.set('tab', next)
+    window.history.pushState(null, '', `${window.location.pathname}?${query}`)
+  }
   const [user, setUser] = useState<PlatformUserDetail | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -106,6 +123,11 @@ export default function UserDetailPage({ userId, onBack }: Props) {
       </div>
       <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 20 }}>User #{user.id}</div>
 
+      <div className="tenant-tabs" role="tablist" aria-label="User details">
+        {([['profile', 'Profile'], ['security', 'Security'], ...(canManagePlan ? [['plan-storage', 'Plan & storage']] : []), ['compute', 'Compute'], ['api', 'API']]).map(([key, label]) =>
+          <button key={key} role="tab" id={`tab-${key}`} aria-controls={`panel-${key}`} aria-selected={tab === key} onClick={() => selectTab(key)}>{label}</button>)}
+      </div>
+      {tab === 'profile' && <div role="tabpanel" id="panel-profile" aria-labelledby="tab-profile">
       <div style={card}>
         <div style={{ ...label, marginBottom: 12 }}>General Information</div>
         <div style={grid}>
@@ -146,6 +168,8 @@ export default function UserDetailPage({ userId, onBack }: Props) {
         <UserOrgMembershipList memberships={user.memberships} />
       </div>
 
+      </div>}
+      {tab === 'security' && <div role="tabpanel" id="panel-security" aria-labelledby="tab-security">
       <div style={{ ...card, marginTop: 16 }}>
         <div style={{ ...label, marginBottom: 12 }}>Authentication</div>
         <div style={grid}>
@@ -164,6 +188,9 @@ export default function UserDetailPage({ userId, onBack }: Props) {
         <div style={{ ...label, marginBottom: 12 }}>Security Information — MFA Status</div>
         <UserMFASecurityCard user={user} onChanged={load} />
       </div>
+      </div>}
+      {tab === 'plan-storage' && canManagePlan && <div role="tabpanel" id="panel-plan-storage" aria-labelledby="tab-plan-storage"><TenantDetailPage id={String(userId)} onBack={onBack} embedded /></div>}
+      {(tab === 'compute' || tab === 'api') && <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}><p>{tab === 'compute' ? 'Compute' : 'API'} — coming soon.</p></div>}
     </div>
   )
 }

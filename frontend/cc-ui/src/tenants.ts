@@ -39,7 +39,7 @@ export interface TenantDetail extends TenantRow {
 export interface TenantListResponse { items: TenantRow[]; total: number }
 export interface TenantQuery {
   plan?: PlanId | ''; status?: MembershipStatus | ''; validity?: 'expiring_7d' | 'expiring_30d' | 'expired' | ''
-  plan_source?: PlanSource | ''; storage_status?: 'near' | 'over_allocation' | ''; q?: string; sort?: string; page?: number; page_size?: number
+  plan_source?: PlanSource | ''; storage_status?: 'ok' | 'near' | 'over_allocation' | ''; q?: string; sort?: string; page?: number; page_size?: number
 }
 
 export const DECIMAL_GB = 1_000_000_000
@@ -135,7 +135,7 @@ export async function fetchTenants(query: TenantQuery = {}): Promise<TenantListR
   Object.entries(query).forEach(([k, v]) => { if (v !== '' && v != null) params.set(k, String(v)) })
   if (!useMocks()) return jsonFetch(`/admin/tenants?${params}`)
   const filtered = filterMockTenants(seed, query)
-  const page = query.page ?? 1, size = query.page_size ?? 20
+  const page = query.page ?? 1, size = query.page_size ?? 50
   return { items: filtered.slice((page - 1) * size, page * size), total: filtered.length }
 }
 export async function fetchTenant(id: string): Promise<TenantDetail> {

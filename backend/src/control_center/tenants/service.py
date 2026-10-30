@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import time
+from dataclasses import dataclass, field
+
 import math
 import os
 from datetime import datetime, timezone
@@ -47,15 +52,19 @@ async def _json(client: httpx.AsyncClient, method: str, url: str, service: str, 
 
 
 async def _all_user_ids(client: httpx.AsyncClient, headers: dict[str, str]) -> list[str]:
-    ids: list[str] = []
+    return [str(item["id"]) for item in await _directory(client, headers)]
+
+
+async def _directory(client, headers, **filters) -> list[dict]:
+    items = []
     page = 1
     while True:
-        payload = await _json(client, "GET", f"{IAM_URL}/platform/users", "auth-service", headers, params={"page": page, "page_size": PAGE_LIMIT, "sort_by": "created_at", "sort_order": "asc"})
-        ids.extend(str(item["id"]) for item in payload.get("items", []))
+        payload = await _json(client, "GET", f"{IAM_URL}/platform/users", "auth-service", headers, params={"page": page, "page_size": PAGE_LIMIT, "sort_by": "created_at", "sort_order": "asc", **filters})
+        items.extend(payload.get("items", []))
         if page >= int(payload.get("total_pages") or 0):
             break
         page += 1
-    return ids
+    return items
 
 
 async def _sources(client: httpx.AsyncClient, headers: dict[str, str], ids: list[str]) -> tuple[dict, dict, dict]:
@@ -64,9 +73,11 @@ async def _sources(client: httpx.AsyncClient, headers: dict[str, str], ids: list
     ledgers: dict[str, dict] = {}
     for start in range(0, len(ids), 1000):
         chunk = ids[start:start + 1000]
-        identity = await _json(client, "POST", f"{IAM_URL}/platform/users/batch", "auth-service", headers, json={"user_ids": [int(value) for value in chunk]})
-        billing = await _json(client, "POST", f"{BILLING_URL}/admin/tenants/resolve", "billing-service", headers, json={"user_ids": chunk})
-        ledger = await _json(client, "POST", f"{WORKBENCH_URL}/api/storage/admin/tenants/resolve", "workbench", headers, json={"user_ids": chunk})
+        identity, billing, ledger = await asyncio.gather(
+            _json(client, "POST", f"{IAM_URL}/platform/users/batch", "auth-service", headers, json={"user_ids": [int(value) for value in chunk]}),
+            _json(client, "POST", f"{BILLING_URL}/admin/tenants/resolve", "billing-service", headers, json={"user_ids": chunk}),
+            _json(client, "POST", f"{WORKBENCH_URL}/api/storage/admin/tenants/resolve", "workbench", headers, json={"user_ids": chunk}),
+        )
         identities.update({str(item["user_id"]): item for item in identity.get("items", [])})
         billings.update({str(item["user_id"]): item for item in billing.get("items", [])})
         ledgers.update({str(item["user_id"]): item for item in ledger.get("items", [])})
@@ -82,7 +93,7 @@ def _parse(value: str | None) -> datetime | None:
 
 def tenant_row(identity: dict, billing: dict, ledger: dict, now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
-    valid_until = _parse(billing.get("valid_until"))
+    valid_until = _parse(billing.get("promo_expires_at") if billing.get("plan_source") == "promo" else billing.get("valid_until"))
     days_remaining = math.ceil((valid_until - now).total_seconds() / 86400) if valid_until else None
     raw_status = str(billing.get("membership_status", "none"))
     status = raw_status if raw_status in MEMBERSHIP_STATUSES else ("canceled" if raw_status in {"incomplete_expired", "unpaid"} else "past_due")
@@ -122,23 +133,27 @@ def filter_sort(rows: list[dict], *, plan: str | None = None, plan_source: str |
     if rows and key not in rows[0]:
         key = "username"
     def sortable(row: dict):
-        value = row.get(key)
+        value = row.get("promo_expires_at") if key == "valid_until" and row.get("plan_source") == "promo" else row.get(key)
         if isinstance(value, dict):
             value = value.get("at")
         if isinstance(value, (int, float)):
             return (value is None, 0, value)
         return (value is None, 1, str(value or "").lower())
+    # Stable tie ordering makes pagination deterministic.
+    result.sort(key=lambda row: int(row["tenant_id"]))
     return sorted(result, key=sortable, reverse=descending)
 
 
 async def all_tenants(authorization: str | None) -> tuple[list[dict], dict, dict]:
     headers = _headers(authorization)
     async with httpx.AsyncClient() as client:
-        ids = await _all_user_ids(client, headers)
+        directory = await _directory(client, headers)
+        ids = [str(item["id"]) for item in directory]
         if not ids:
             return [], {}, {}
         identities, billings, ledgers = await _sources(client, headers, ids)
-    rows = [tenant_row(identities[user_id], billings.get(user_id, {}), ledgers.get(user_id, {})) for user_id in ids if user_id in identities]
+    users = {str(item["id"]): item for item in directory}
+    rows = [{**users[user_id], **tenant_row(identities[user_id], billings.get(user_id, {}), ledgers.get(user_id, {}))} for user_id in ids if user_id in identities]
     return rows, billings, ledgers
 
 
@@ -167,6 +182,10 @@ async def tenant_detail(tenant_id: str, authorization: str | None) -> dict | Non
                            for item in result.get("items", [])})
         billing["plan_history"] = [{**h, "actor_display": actors.get(h.get("actor"))} for h in history]
     row = tenant_row(identities[tenant_id], billing, ledger)
+    for entry in _indexes.values():
+        if entry.rows is not None:
+            entry.rows = [{**item, **row} if item["tenant_id"] == tenant_id else item for item in entry.rows]
+            entry.aggregate = summary(entry.rows)
     return {**row, "plan_history": billing.get("plan_history", []), "override": billing.get("override"), "active_grant": billing.get("active_grant"), "grant_history": billing.get("grant_history", []), "top_allocations": ledger.get("top_allocations", []), "workflow_output_bytes": ledger.get("workflow_output_bytes", 0), "usage_trend_30d": ledger.get("usage_trend_30d", [])}
 
 
@@ -186,4 +205,115 @@ async def mutate(method: str, tenant_id: str, suffix: str, body: dict, authoriza
     base, service = (BILLING_URL, "billing-service") if target == "billing" else (WORKBENCH_URL + "/api/storage", "workbench")
     headers = _headers(authorization)
     async with httpx.AsyncClient() as client:
-        return await _json(client, method, f"{base}/admin/tenants/{tenant_id}/{suffix}", service, headers, json=body)
+        result = await _json(client, method, f"{base}/admin/tenants/{tenant_id}/{suffix}", service, headers, json=body)
+    invalidate_index()
+    return result
+
+
+# A bounded per-credential cache: permission checks still run on every route,
+# and one administrator's upstream-authorized data is never reused for another.
+# Only the background refresh enumerates the directory. List requests resolve
+# at most their selected page, even while an expired index is refreshing.
+INDEX_TTL = 60.0
+MAX_INDEXES = 8
+
+
+@dataclass
+class TenantIndex:
+    rows: list[dict] | None = None
+    aggregate: dict = field(default_factory=dict)
+    updated_at: float = 0.0
+    retry_after: float = 0.0
+    task: asyncio.Task | None = None
+    error: UpstreamError | None = None
+
+
+_indexes: dict[str, TenantIndex] = {}
+
+
+async def _refresh_index(entry: TenantIndex, authorization: str | None):
+    try:
+        rows, _, _ = await all_tenants(authorization)
+        entry.rows = rows
+        entry.aggregate = summary(rows)
+        entry.updated_at = time.monotonic()
+        entry.error = None
+        entry.retry_after = 0.0
+    except UpstreamError as exc:
+        entry.error = exc
+        entry.retry_after = time.monotonic() + 5.0
+        # Never serve cached data after upstream authorization is revoked.
+        if exc.status_code in {401, 403}:
+            entry.rows = None
+    except (KeyError, TypeError, ValueError):
+        entry.error = UpstreamError("aggregation", 502, "Invalid upstream user data")
+        entry.retry_after = time.monotonic() + 5.0
+    finally:
+        if entry.task is asyncio.current_task():
+            entry.task = None
+
+
+def _index(authorization: str | None) -> TenantIndex:
+    key = hashlib.sha256((authorization or "").encode()).hexdigest()
+    if key not in _indexes:
+        if len(_indexes) >= MAX_INDEXES:
+            oldest = min(_indexes, key=lambda k: _indexes[k].updated_at)
+            removed = _indexes.pop(oldest)
+            if removed.task:
+                removed.task.cancel()
+        _indexes[key] = TenantIndex()
+    entry = _indexes[key]
+    if entry.task is None and time.monotonic() >= entry.retry_after and (entry.rows is None or time.monotonic() - entry.updated_at >= INDEX_TTL):
+        entry.task = asyncio.create_task(_refresh_index(entry, authorization))
+    return entry
+
+
+def invalidate_index():
+    for entry in _indexes.values():
+        entry.updated_at = 0.0
+        entry.retry_after = 0.0
+        if entry.task:
+            entry.task.cancel()
+            entry.task = None
+
+
+async def cached_summary(authorization: str | None) -> dict:
+    entry = _index(authorization)
+    if entry.task:
+        await asyncio.shield(entry.task)
+    if entry.error and time.monotonic() - entry.updated_at >= INDEX_TTL:
+        raise entry.error
+    if entry.rows is None:
+        raise entry.error or UpstreamError("aggregation", 503, "User index is warming up; retry shortly")
+    return entry.aggregate
+
+
+async def paginated_tenants(authorization: str | None, *, page=1, page_size=50,
+                            organization_id=None, user_status=None, role=None, **filters) -> dict:
+    entry = _index(authorization)
+    if entry.rows is None:
+        raise entry.error or UpstreamError("aggregation", 503, "User index is warming up; retry shortly")
+    headers = _headers(authorization)
+    async with httpx.AsyncClient() as client:
+        rows = entry.rows
+        # Preserve Auth's organization-role semantics (roles within the selected
+        # organization, global roles otherwise); do not infer them from labels.
+        if organization_id is not None or role:
+            params = {}
+            if organization_id is not None:
+                params["organization_id"] = organization_id
+            if role:
+                params["role"] = role
+            allowed = {str(item["id"]) for item in await _directory(client, headers, **params)}
+            rows = [row for row in rows if row["tenant_id"] in allowed]
+        if user_status:
+            rows = [row for row in rows if row.get("status") == user_status]
+        rows = filter_sort(rows, **filters)
+        selected = rows[(page - 1) * page_size:page * page_size]
+        ids = [row["tenant_id"] for row in selected]
+        if ids:
+            identities, billings, ledgers = await _sources(client, headers, ids)
+            selected = [{**row, **tenant_row(identities[row["tenant_id"]], billings.get(row["tenant_id"], {}), ledgers.get(row["tenant_id"], {}))}
+                        for row in selected if row["tenant_id"] in identities]
+    return {"items": selected, "total": len(rows), "page": page, "page_size": page_size,
+            "total_pages": math.ceil(len(rows) / page_size), "index_age_seconds": round(time.monotonic() - entry.updated_at, 1)}

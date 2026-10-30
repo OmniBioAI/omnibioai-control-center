@@ -1,3 +1,4 @@
+import type { TenantQuery, TenantRow } from './tenants'
 // Phase 3 PR3A: Users page data layer, mirroring organizations.ts's own
 // shape exactly (Phase 3 PR2) -- kept as its own module for the same
 // reason organizations.ts is: a genuinely new feature area, not one more
@@ -162,4 +163,35 @@ export async function setUserStatus(
   })
   if (!r.ok) throw new Error(`/platform/users/${userId} ${r.status}`)
   return r.json()
+}
+
+
+export type ManagedUser = PlatformUserSummary & TenantRow
+export interface ManagedUserListResponse extends PlatformUserListResponse { items: ManagedUser[] }
+export type ManagedUserSort = UserSortField | 'effective_plan_id' | 'pct' | 'valid_until'
+export type ManagedUserQuery = Omit<PlatformUserListParams, 'sortBy'> & { sortBy?: ManagedUserSort; tenant?: TenantQuery }
+
+export async function fetchManagedUsers(params: ManagedUserQuery = {}): Promise<ManagedUserListResponse> {
+  const query = new URLSearchParams()
+  Object.entries(params.tenant ?? {}).forEach(([key, value]) => { if (value !== '' && value != null) query.set(key, String(value)) })
+  query.set('page', String(params.page ?? 1))
+  query.set('page_size', String(params.pageSize ?? 50))
+  query.set('sort', `${params.sortOrder === 'desc' ? '-' : ''}${params.sortBy ?? 'created_at'}`)
+  if (params.search) query.set('q', params.search)
+  if (params.organizationId != null) query.set('organization_id', String(params.organizationId))
+  if (params.status) query.set('user_status', params.status)
+  if (params.role) query.set('role', params.role)
+  const response = await apiFetch(`/admin/tenants?${query}`)
+  if (!response.ok) throw Object.assign(new Error(`Users API ${response.status}`), { status: response.status })
+  return response.json()
+}
+
+export function managedUsersCsv(rows: ManagedUser[]): string {
+  const keys: (keyof ManagedUser)[] = ['id', 'username', 'email', 'status', 'global_roles', 'org_count', 'last_login_at', 'authentication_method', 'created_at', 'effective_plan_id', 'plan_source', 'membership_status', 'used_bytes', 'allocated_bytes', 'pct', 'valid_until', 'promo_expires_at']
+  const quote = (value: unknown) => {
+    let text = Array.isArray(value) ? value.join('; ') : String(value ?? '')
+    if (/^[\s]*[=+@-]/.test(text)) text = `'${text}`
+    return `"${text.replace(/"/g, '""')}"`
+  }
+  return [keys.join(','), ...rows.map(row => keys.map(key => quote(row[key])).join(','))].join('\r\n')
 }

@@ -32,7 +32,7 @@ export type PageKey =
   | 'overview'
   | 'health' | 'regression-health' | 'deployment-health' | 'integration-health' | 'storage' | 'docker' | 'ecosystem' | 'config' | 'llms' | 'cloud'
   | 'actions' | 'scheduled-jobs' | 'known-issues'
-  | 'organizations' | 'users' | 'tenants' | 'teams' | 'roles' | 'manual-licenses'
+  | 'organizations' | 'users' | 'teams' | 'roles' | 'manual-licenses'
   | 'infrastructure' | 'workflows' | 'tool-execution' | 'ai-models' | 'agentic-ai'
   | 'security-overview' | 'security-posture' | 'mfa-policy' | 'iam' | 'saml' | 'audit-logs' | 'audit-explorer' | 'sessions' | 'interactions' | 'api-keys' | 'compliance-report'
   | 'hipaa-compliance'
@@ -71,7 +71,6 @@ export const NAVIGATION: NavSection[] = [
     items: [
       { key: 'organizations', label: 'Organizations', functional: true, visible: hasOrganizationsAccess },
       { key: 'users', label: 'Users', functional: true, visible: hasPlatformAdminAccess },
-      { key: 'tenants', label: 'Tenant management', functional: true, visible: hasPlatformAdminAccess },
       // PR11.2: promoted from Coming Soon to standalone pages
       // (src/pages/identity/TeamsPage.tsx, RolesPage.tsx). Both reuse the
       // exact same components and endpoints OrganizationDetailPage's

@@ -613,6 +613,41 @@ describe('AdminApp auth gate', () => {
     expect(screen.queryByTestId('UserDetailPage')).not.toBeInTheDocument()
   })
 
+  it('redirects a legacy tenant detail to the user Plan & storage tab', async () => {
+    window.history.pushState(null, '', '/tenants/17')
+    vi.mocked(auth.getToken).mockReturnValue('token-admin3')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+
+    const detail = await screen.findByTestId('UserDetailPage')
+    expect(detail.getAttribute('data-user-id')).toBe('17')
+    expect(window.location.pathname + window.location.search).toBe('/users/17?tab=plan-storage')
+    expect(screen.queryByTestId('UsersPage')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('DashboardPage')).not.toBeInTheDocument()
+  })
+
+  it('redirects the legacy tenants list to Users', async () => {
+    window.history.pushState(null, '', '/tenants')
+    vi.mocked(auth.getToken).mockReturnValue('token-admin4')
+    vi.mocked(auth.ensureSession).mockResolvedValue(admin)
+    vi.mocked(auth.getSessionUser).mockReturnValue(admin)
+    vi.mocked(auth.hasAdminAccess).mockReturnValue(true)
+    vi.mocked(auth.hasOrganizationsAccess).mockReturnValue(true)
+    vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(true)
+
+    render(<AdminApp />)
+
+    expect(await screen.findByTestId('UsersPage')).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/users')
+    expect(screen.queryByText('Tenant management')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('UserDetailPage')).not.toBeInTheDocument()
+  })
+
   // ── Phase 2: new shell-specific coverage ──────────────────────────────────
 
   // Billing was the "unimplemented module" example here until PR14.5C
