@@ -12,7 +12,7 @@ vi.mock('../auth', async () => {
 
 vi.mock('../organizations', async () => {
   const actual = await vi.importActual<typeof import('../organizations')>('../organizations')
-  return { ...actual, fetchPlatformOrgs: vi.fn(), fetchMyOrgs: vi.fn(), createOrganization: vi.fn() }
+  return { ...actual, fetchPlatformOrgs: vi.fn(), fetchMyOrgs: vi.fn(), createPlatformOrganization: vi.fn() }
 })
 
 const platformRow = (overrides: Partial<organizations.PlatformOrgSummary> = {}): organizations.PlatformOrgSummary => ({
@@ -26,6 +26,7 @@ describe('OrganizationsPage -- platform admin', () => {
     vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(true)
     vi.mocked(organizations.fetchPlatformOrgs).mockReset()
     vi.mocked(organizations.fetchMyOrgs).mockClear()
+    vi.mocked(organizations.createPlatformOrganization).mockReset()
   })
 
   it('lists every organization via GET /platform/orgs, never the org-scoped endpoint', async () => {
@@ -121,26 +122,74 @@ describe('OrganizationsPage -- platform admin', () => {
     expect(onSelect).toHaveBeenCalledWith(99)
   })
 
-  it('creates an organization via the existing POST /orgs and refreshes the list', async () => {
+  it('creates a tenant through the platform API, confirms server success, and refreshes the list', async () => {
     const user = userEvent.setup()
-    vi.mocked(organizations.fetchPlatformOrgs).mockResolvedValue({
-      items: [], total: 0, page: 1, page_size: 20, total_pages: 0,
-    })
-    vi.mocked(organizations.createOrganization).mockResolvedValue({
-      id: 3, slug: 'new-org', name: 'New Org', plan: 'beta', status: 'active',
-      status_changed_at: null, status_changed_reason: null, status_changed_by_user_id: null,
-    })
+    vi.mocked(organizations.fetchPlatformOrgs)
+      .mockResolvedValueOnce({ items: [], total: 0, page: 1, page_size: 20, total_pages: 0 })
+      .mockResolvedValueOnce({ items: [platformRow({ id: 3, name: 'New Tenant' })], total: 1, page: 1, page_size: 20, total_pages: 1 })
+    let confirmCreated!: (tenant: organizations.MyOrg) => void
+    vi.mocked(organizations.createPlatformOrganization).mockReturnValue(new Promise(resolve => { confirmCreated = resolve }))
     render(<OrganizationsPage onSelect={vi.fn()} />)
     await screen.findByText('No organizations exist yet.')
 
-    await user.click(screen.getByRole('button', { name: '+ New Organization' }))
-    await user.type(screen.getByLabelText('Organization name'), 'New Org')
-    await user.type(screen.getByLabelText('Organization slug'), 'new-org')
-    await user.click(screen.getByRole('button', { name: 'Create' }))
+    await user.click(screen.getByRole('button', { name: '+ Create Tenant' }))
+    await user.type(screen.getByLabelText('Tenant name'), 'New Tenant')
+    await user.type(screen.getByLabelText('Tenant slug'), 'new-tenant')
+    await user.click(screen.getByRole('button', { name: 'Create Tenant' }))
 
-    await waitFor(() => expect(organizations.createOrganization).toHaveBeenCalledWith('New Org', 'new-org'))
-    // Triggers a refetch (the list-refresh signal) -- not just a silent success.
-    await waitFor(() => expect(organizations.fetchPlatformOrgs).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(organizations.createPlatformOrganization).toHaveBeenCalledWith('New Tenant', 'new-tenant'))
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(organizations.fetchPlatformOrgs).toHaveBeenCalledTimes(1)
+
+    confirmCreated({
+      id: 3, slug: 'new-tenant', name: 'New Tenant', plan: 'beta', status: 'active',
+      status_changed_at: null, status_changed_reason: null, status_changed_by_user_id: null,
+    })
+    expect(await screen.findByRole('status')).toHaveTextContent('Tenant “New Tenant” created successfully.')
+    expect(await screen.findByText('New Tenant')).toBeInTheDocument()
+    expect(organizations.fetchPlatformOrgs).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not report success or refresh after a failed create', async () => {
+    const user = userEvent.setup()
+    vi.mocked(organizations.fetchPlatformOrgs).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, total_pages: 0 })
+    vi.mocked(organizations.createPlatformOrganization).mockRejectedValue(new Error('Organization slug already exists'))
+    render(<OrganizationsPage onSelect={vi.fn()} />)
+    await screen.findByText('No organizations exist yet.')
+    await user.click(screen.getByRole('button', { name: '+ Create Tenant' }))
+    await user.type(screen.getByLabelText('Tenant name'), 'Duplicate')
+    await user.type(screen.getByLabelText('Tenant slug'), 'duplicate')
+    await user.click(screen.getByRole('button', { name: 'Create Tenant' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Organization slug already exists')
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(organizations.fetchPlatformOrgs).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText('Duplicate')).not.toBeInTheDocument()
+  })
+
+  it('validates trimmed required fields before sending a request', async () => {
+    const user = userEvent.setup()
+    vi.mocked(organizations.fetchPlatformOrgs).mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, total_pages: 0 })
+    render(<OrganizationsPage onSelect={vi.fn()} />)
+    await screen.findByText('No organizations exist yet.')
+    await user.click(screen.getByRole('button', { name: '+ Create Tenant' }))
+    await user.type(screen.getByLabelText('Tenant name'), '   ')
+    await user.type(screen.getByLabelText('Tenant slug'), 'slug')
+    await user.click(screen.getByRole('button', { name: 'Create Tenant' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Enter both a tenant name and a tenant slug.')
+    expect(organizations.createPlatformOrganization).not.toHaveBeenCalled()
+  })
+
+  it('does not offer platform tenant creation in the organization-scoped view', async () => {
+    vi.mocked(organizations.fetchMyOrgs).mockResolvedValue([
+      { id: 5, slug: 'my-org', name: 'My Org', plan: 'beta', status: 'active',
+        status_changed_at: null, status_changed_reason: null, status_changed_by_user_id: null },
+    ])
+    vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(false)
+    render(<OrganizationsPage onSelect={vi.fn()} />)
+    await screen.findByText('My Org')
+    expect(screen.queryByRole('button', { name: '+ Create Tenant' })).not.toBeInTheDocument()
   })
 })
 
@@ -149,6 +198,7 @@ describe('OrganizationsPage -- organization admin', () => {
     vi.mocked(auth.hasPlatformAdminAccess).mockReturnValue(false)
     vi.mocked(organizations.fetchMyOrgs).mockReset()
     vi.mocked(organizations.fetchPlatformOrgs).mockClear()
+    vi.mocked(organizations.createPlatformOrganization).mockReset()
   })
 
   it('shows only organizations the caller belongs to, via GET /orgs, never the platform endpoint', async () => {
