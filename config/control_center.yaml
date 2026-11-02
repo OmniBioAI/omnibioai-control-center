@@ -90,10 +90,11 @@ services:
   jupyter:
     type: http
     # Jupyter serves under ServerApp.base_url=/jupyter/ (Studio compose), so
-    # its API and UI live below that prefix on the container port too.
+    # its API lives below that prefix on the container port too. The UI link
+    # is the same-origin, Studio-session-gated route (token added server-side).
     url: http://jupyter:8888/jupyter/api
     timeout_s: 5
-    ui_url: http://192.168.86.234:8888/jupyter/
+    ui_url: https://webstudio.omnibioai.org/jupyter/
   rstudio:
     type: http
     url: http://rstudio:8787/auth-sign-in
