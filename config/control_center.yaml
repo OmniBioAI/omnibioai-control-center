@@ -89,9 +89,11 @@ services:
     ui_url: http://192.168.86.234:5190
   jupyter:
     type: http
-    url: http://jupyter:8888/api
+    # Jupyter serves under ServerApp.base_url=/jupyter/ (Studio compose), so
+    # its API and UI live below that prefix on the container port too.
+    url: http://jupyter:8888/jupyter/api
     timeout_s: 5
-    ui_url: http://192.168.86.234:8888
+    ui_url: http://192.168.86.234:8888/jupyter/
   rstudio:
     type: http
     url: http://rstudio:8787/auth-sign-in
