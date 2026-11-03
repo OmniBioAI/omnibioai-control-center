@@ -97,9 +97,12 @@ services:
     ui_url: https://webstudio.omnibioai.org/jupyter/
   rstudio:
     type: http
-    url: http://rstudio:8787/auth-sign-in
+    # Only nginx-router can reach rstudio:8787 (Studio's ide-rstudio network),
+    # so the router answers for it: 204 when RStudio responds, 503 when not.
+    # The UI link is the Studio-session-gated route.
+    url: http://nginx-router/internal/ide-health/rstudio
     timeout_s: 5
-    ui_url: http://192.168.86.234:8787
+    ui_url: https://webstudio.omnibioai.org/rstudio/
   vscode:
     type: http
     url: http://vscode:8080/healthz
