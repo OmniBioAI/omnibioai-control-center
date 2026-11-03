@@ -13,6 +13,7 @@ from control_center.tenants import service
 
 AUTH = 'Bearer pagination-test'
 ADMIN = {'sub': '1', 'permissions': ['manage_all_orgs']}
+PLANS = {'free': 1_000_000_000, 'plus': 20_000_000_000, 'pro': 100_000_000_000}
 app = FastAPI()
 app.include_router(router)
 
@@ -22,7 +23,8 @@ def row(i):
     billing = {'plan_id': 'pro' if i % 2 else 'free', 'effective_plan_id': 'pro' if i % 2 else 'free',
                'plan_source': 'promo' if i % 2 else 'free', 'membership_status': 'active',
                'promo_expires_at': '2099-01-01T00:00:00Z' if i % 2 else None}
-    return {**service.tenant_row(identity, billing, {'used_bytes': i}), 'id': i, 'status': 'active',
+    ledger = {'used_bytes': i, 'storage_account_exists': True, 'folder_status': 'done'}
+    return {**service.tenant_row(identity, billing, ledger, plans=PLANS), 'id': i, 'status': 'active',
             'global_roles': [], 'org_count': 0, 'created_at': None}
 
 
@@ -43,7 +45,8 @@ async def sources(client, headers, ids):
     identities = {i: {'user_id': i, 'username': f'user{int(i):04d}', 'email': f'user{i}@example.test'} for i in ids}
     billings = {i: {'plan_id': 'pro' if int(i) % 2 else 'free', 'effective_plan_id': 'pro' if int(i) % 2 else 'free',
                     'membership_status': 'active', 'plan_source': 'promo' if int(i) % 2 else 'free'} for i in ids}
-    return identities, billings, {i: {'used_bytes': int(i)} for i in ids}
+    ledgers = {i: {'used_bytes': int(i), 'storage_account_exists': True, 'folder_status': 'done'} for i in ids}
+    return identities, billings, ledgers, PLANS
 
 
 def test_api_filters_before_pagination_and_only_resolves_page():
@@ -155,8 +158,10 @@ def test_mutation_invalidates_summary_and_refreshed_detail_updates_filter_index(
             if name == 'auth-service':
                 return {'items': [{'user_id': '1', 'username': 'user0001', 'email': 'user1@example.test'}]}
             if name == 'billing-service':
+                if url.endswith('/admin/tenants/plans/catalog'):
+                    return {'plans': {plan: {'storage_quota_bytes': quota} for plan, quota in PLANS.items()}}
                 return {'plan_id': 'free', 'effective_plan_id': 'free', 'plan_source': 'free'}
-            return {'used_bytes': 0}
+            return {'used_bytes': 0, 'storage_account_exists': True, 'folder_status': 'done'}
         monkeypatch.setattr(service, '_json', fake_json)
         await service.mutate('DELETE', '1', 'plan-grant', {'reason': 'test'}, AUTH, 'billing')
         assert entry.updated_at == 0

@@ -31,6 +31,9 @@ dependencies = [
   # in the workspace during discovery, zero hits.
   "weasyprint>=62.0",
   "jinja2>=3.1",
+  # scripts/generate_report.py is imported by the backend authentication
+  # contract suite and uses pandas for report tables.
+  "pandas>=2.0",
   # Admin Console HIPAA Compliance Report (persistent change history):
   # this service's first ORM/database code -- everywhere else in this
   # repo is a stateless proxy/health-checker (confirmed by reading every
