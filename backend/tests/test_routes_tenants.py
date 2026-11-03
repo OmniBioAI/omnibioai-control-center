@@ -47,7 +47,43 @@ def test_detail_not_found_and_mutation_reason_required():
     with patch("control_center.core.auth.verify_token", return_value=ADMIN), patch("control_center.api.routes_tenants.service.tenant_detail", AsyncMock(return_value=None)):
         assert client.get("/admin/tenants/999", headers={"Authorization": "Bearer x"}).status_code == 404
         response = client.post("/admin/tenants/1/recompute-usage", headers={"Authorization": "Bearer x"}, json={"reason": "   "})
+        clear = client.request("DELETE", "/admin/tenants/1/storage-override", headers={"Authorization": "Bearer x"}, json={"reason": "   "})
+        revoke = client.request("DELETE", "/admin/tenants/1/plan-grant", headers={"Authorization": "Bearer x"}, json={"reason": "   "})
     assert response.status_code == 422
+    assert clear.status_code == 422
+    assert revoke.status_code == 422
+
+
+def test_detail_returns_resolved_tenant():
+    detail = {**_row(), "plan_history": [], "override": None, "top_allocations": []}
+    with patch("control_center.core.auth.verify_token", return_value=ADMIN), patch(
+        "control_center.api.routes_tenants.service.tenant_detail", AsyncMock(return_value=detail)
+    ):
+        response = client.get("/admin/tenants/1", headers={"Authorization": "Bearer x"})
+    assert response.status_code == 200 and response.json()["tenant_id"] == "1"
+
+
+def test_upstream_errors_preserve_status_and_retry_header():
+    error = service.UpstreamError("billing-service", 503, "temporarily unavailable")
+    with patch("control_center.core.auth.verify_token", return_value=ADMIN), patch(
+        "control_center.api.routes_tenants.service.cached_summary", AsyncMock(side_effect=error)
+    ):
+        response = client.get("/admin/tenants/summary", headers={"Authorization": "Bearer x"})
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "2"
+    assert response.json()["detail"] == "temporarily unavailable"
+
+
+def test_override_returns_not_found_when_refresh_loses_tenant():
+    with patch("control_center.core.auth.verify_token", return_value=ADMIN), patch(
+        "control_center.api.routes_tenants.service.mutate", AsyncMock(return_value={})
+    ), patch("control_center.api.routes_tenants.service.tenant_detail", AsyncMock(return_value=None)):
+        response = client.put(
+            "/admin/tenants/404/storage-override",
+            headers={"Authorization": "Bearer x"},
+            json={"allocated_bytes": 3_000_000_000, "reason": "test missing tenant"},
+        )
+    assert response.status_code == 404
 
 
 def test_override_and_recompute_mutations_return_refreshed_detail():

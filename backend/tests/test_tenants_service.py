@@ -1,8 +1,10 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, Mock
 
+import httpx
+import pytest
 from control_center.tenants import service
-from unittest.mock import AsyncMock
 
 PLANS = {"free": 1_000_000_000, "plus": 20_000_000_000, "pro": 100_000_000_000}
 
@@ -126,3 +128,127 @@ def test_detail_keeps_audit_actor_when_identity_lookup_fails(monkeypatch):
     detail = asyncio.run(service.tenant_detail("7", None))
     assert detail["plan_history"][0]["actor"] == "user:42"
     assert detail["plan_history"][0]["actor_display"] is None
+
+
+@pytest.mark.asyncio
+async def test_json_normalizes_transport_http_and_decode_failures():
+    request = httpx.Request("GET", "http://upstream.test/value")
+    client = AsyncMock()
+    client.request.side_effect = httpx.ConnectError("offline", request=request)
+    with pytest.raises(service.UpstreamError, match="billing-service unavailable") as unavailable:
+        await service._json(client, "GET", str(request.url), "billing-service", {})
+    assert unavailable.value.status_code == 503
+
+    client.request.side_effect = None
+    client.request.return_value = httpx.Response(409, request=request, json={"detail": "conflict"})
+    with pytest.raises(service.UpstreamError, match="conflict") as conflict:
+        await service._json(client, "GET", str(request.url), "billing-service", {})
+    assert conflict.value.status_code == 409
+
+    client.request.return_value = httpx.Response(500, request=request, text="not-json")
+    with pytest.raises(service.UpstreamError, match="billing-service returned 500"):
+        await service._json(client, "GET", str(request.url), "billing-service", {})
+
+    client.request.return_value = httpx.Response(200, request=request, text="not-json")
+    with pytest.raises(service.UpstreamError, match="invalid JSON") as invalid:
+        await service._json(client, "GET", str(request.url), "billing-service", {})
+    assert invalid.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_directory_paginates_and_all_user_ids_are_strings(monkeypatch):
+    calls = []
+
+    async def fake_json(client, method, url, name, headers, **kwargs):
+        page = kwargs["params"]["page"]
+        calls.append(page)
+        return {"items": [{"id": page}], "total_pages": 2}
+
+    monkeypatch.setattr(service, "_json", fake_json)
+    assert await service._all_user_ids(AsyncMock(), {}) == ["1", "2"]
+    assert calls == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_empty_directory_and_missing_detail_are_real_missing_states(monkeypatch):
+    monkeypatch.setattr(service, "_directory", AsyncMock(return_value=[]))
+    assert await service.all_tenants("Bearer admin") == ([], {}, {})
+
+    monkeypatch.setattr(service, "_json", AsyncMock(return_value={"items": []}))
+    assert await service.tenant_detail("404", "Bearer admin") is None
+
+
+@pytest.mark.asyncio
+async def test_refresh_index_records_success_upstream_denial_and_bad_payload(monkeypatch):
+    entry = service.TenantIndex()
+    monkeypatch.setattr(service, "all_tenants", AsyncMock(return_value=([_row(_identity(), _billing(), {}, datetime.now(timezone.utc))], {}, {})))
+    await service._refresh_index(entry, "Bearer admin")
+    assert entry.rows and entry.aggregate["tenants_total"] == 1
+    assert entry.error is None and entry.retry_after == 0
+
+    denied = service.UpstreamError("auth-service", 403, "denied")
+    monkeypatch.setattr(service, "all_tenants", AsyncMock(side_effect=denied))
+    await service._refresh_index(entry, "Bearer admin")
+    assert entry.rows is None and entry.error is denied and entry.retry_after > 0
+
+    monkeypatch.setattr(service, "all_tenants", AsyncMock(side_effect=KeyError("user_id")))
+    await service._refresh_index(entry, "Bearer admin")
+    assert entry.error.service == "aggregation" and entry.error.status_code == 502
+
+
+def test_row_exposes_no_account_folder_pending_and_invalid_membership_states():
+    now = datetime(2026, 10, 29, tzinfo=timezone.utc)
+    no_account = service.tenant_row(_identity(), _billing(), {}, now, plans=PLANS)
+    folder_pending = service.tenant_row(
+        _identity(), _billing(), {"storage_account_exists": True, "folder_status": "pending"}, now, plans=PLANS
+    )
+    invalid = service.tenant_row(
+        _identity(), _billing(effective_plan_id="retired"), {"storage_account_exists": True}, now, plans=PLANS
+    )
+    assert no_account["storage_status"] == "no_account"
+    assert folder_pending["storage_status"] == "folder_pending"
+    assert invalid["storage_status"] == "invalid_membership"
+
+
+@pytest.mark.asyncio
+async def test_all_tenants_combines_directory_and_resolved_sources(monkeypatch):
+    directory = [{"id": 7, "status": "active"}]
+    monkeypatch.setattr(service, "_directory", AsyncMock(return_value=directory))
+    monkeypatch.setattr(
+        service,
+        "_sources",
+        AsyncMock(return_value=({"7": _identity()}, {"7": _billing()}, {"7": {"storage_account_exists": True, "folder_status": "done"}}, PLANS)),
+    )
+    rows, billings, ledgers = await service.all_tenants("Bearer admin")
+    assert rows[0]["tenant_id"] == "7" and rows[0]["status"] == "active"
+    assert billings["7"]["plan_id"] == "plus" and ledgers["7"]["folder_status"] == "done"
+
+
+def test_filter_sort_supports_history_dict_values():
+    rows = [{"tenant_id": "7", "username": "maya", "last_plan_change": {"at": "2026-10-01T00:00:00Z"}}]
+    assert service.filter_sort(rows, sort="last_plan_change") == rows
+
+
+@pytest.mark.asyncio
+async def test_index_eviction_invalidation_and_warmup(monkeypatch):
+    old_task = Mock()
+    old = service.TenantIndex(rows=[], updated_at=1.0, task=old_task)
+    monkeypatch.setattr(service, "MAX_INDEXES", 1)
+    monkeypatch.setattr(service, "_indexes", {"old": old})
+    created = service._index("Bearer new")
+    old_task.cancel.assert_called_once_with()
+    assert created.task is not None
+    created.task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await created.task
+
+    pending = Mock()
+    created.task = pending
+    service.invalidate_index()
+    pending.cancel.assert_called_once_with()
+    assert created.task is None and created.updated_at == 0 and created.retry_after == 0
+
+    monkeypatch.setattr(service, "_index", lambda authorization: service.TenantIndex())
+    with pytest.raises(service.UpstreamError, match="warming up") as warming:
+        await service.cached_summary("Bearer admin")
+    assert warming.value.status_code == 503
