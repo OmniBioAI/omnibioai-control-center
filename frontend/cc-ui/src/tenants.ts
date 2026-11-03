@@ -2,17 +2,17 @@ import { authHeaders, reportUnauthorized } from './auth'
 
 export type PlanId = 'free' | 'plus' | 'pro'
 export type MembershipStatus = 'active' | 'trialing' | 'past_due' | 'canceled' | 'none'
-export type StorageStatus = 'ok' | 'near' | 'over_allocation'
+export type StorageStatus = 'ok' | 'near' | 'over_allocation' | 'no_membership' | 'invalid_membership' | 'no_account' | 'folder_pending'
 export type PlanSource = 'stripe' | 'promo' | 'free'
 
 export interface PlanChange { from_plan: PlanId; to_plan: PlanId; at: string }
 export interface TenantRow {
-  tenant_id: string; username: string; email: string; plan_id: PlanId
-  membership_status: MembershipStatus; effective_plan_id: PlanId
-  plan_source: PlanSource; promo_expires_at: string | null
+  tenant_id: string; username: string; email: string; plan_id: PlanId | null
+  membership_status: MembershipStatus; effective_plan_id: PlanId | null
+  plan_source: PlanSource | null; promo_expires_at: string | null
   valid_from: string | null; valid_until: string | null; auto_renew: boolean
-  days_remaining: number | null; allocated_bytes: number
-  allocation_source: 'plan' | 'override'; used_bytes: number; reserved_bytes: number
+  days_remaining: number | null; allocated_bytes: number | null
+  allocation_source: 'plan' | 'override' | 'none'; used_bytes: number; reserved_bytes: number
   pct: number; storage_status: StorageStatus; last_plan_change: PlanChange | null
   last_activity_at: string | null
 }
@@ -40,11 +40,11 @@ export interface TenantDetail extends TenantRow {
 export interface TenantListResponse { items: TenantRow[]; total: number }
 export interface TenantQuery {
   plan?: PlanId | ''; status?: MembershipStatus | ''; validity?: 'expiring_7d' | 'expiring_30d' | 'expired' | ''
-  plan_source?: PlanSource | ''; storage_status?: 'ok' | 'near' | 'over_allocation' | ''; q?: string; sort?: string; page?: number; page_size?: number
+  plan_source?: PlanSource | ''; storage_status?: StorageStatus | ''; q?: string; sort?: string; page?: number; page_size?: number
 }
 
 export const DECIMAL_GB = 1_000_000_000
-export function formatGB(bytes: number): string { return `${(bytes / DECIMAL_GB).toLocaleString(undefined, { maximumFractionDigits: 2 })} GB` }
+export function formatGB(bytes: number | null): string { return bytes == null ? '—' : `${(bytes / DECIMAL_GB).toLocaleString(undefined, { maximumFractionDigits: 2 })} GB` }
 export function storageStatus(used: number, allocated: number): StorageStatus {
   if (used > allocated) return 'over_allocation'
   return allocated > 0 && used / allocated >= .8 ? 'near' : 'ok'
@@ -106,7 +106,7 @@ export async function fetchTenantSummary(): Promise<TenantSummary> {
   return {
     tenants_total: rows.length,
     per_plan: { free: rows.filter(x => x.effective_plan_id === 'free').length, plus: rows.filter(x => x.effective_plan_id === 'plus').length, pro: rows.filter(x => x.effective_plan_id === 'pro').length },
-    allocated_sum_bytes: rows.reduce((n, x) => n + x.allocated_bytes, 0), used_sum_bytes: rows.reduce((n, x) => n + x.used_bytes, 0), pool_capacity_bytes: 2_000 * DECIMAL_GB,
+    allocated_sum_bytes: rows.reduce((n, x) => n + (x.allocated_bytes ?? 0), 0), used_sum_bytes: rows.reduce((n, x) => n + x.used_bytes, 0), pool_capacity_bytes: 2_000 * DECIMAL_GB,
     expiring_7d: rows.filter(x => x.days_remaining != null && x.days_remaining >= 0 && x.days_remaining <= 7).length,
     past_due: rows.filter(x => x.membership_status === 'past_due').length,
     over_allocation: rows.filter(x => x.storage_status === 'over_allocation').length,
@@ -153,7 +153,8 @@ export async function clearStorageOverride(id: string, reason: string): Promise<
   if (!reason.trim()) throw new Error('Reason is required')
   if (!useMocks()) return jsonFetch(`/admin/tenants/${encodeURIComponent(id)}/storage-override`, { method: 'DELETE', body: JSON.stringify({ reason }) })
   const row = seed.find(x => x.tenant_id === id); if (!row) throw new Error('Tenant not found')
-  row.override = null; row.allocated_bytes = planBytes[row.effective_plan_id]; row.allocation_source = 'plan'; row.pct = Math.round(row.used_bytes / row.allocated_bytes * 10_000) / 100; row.storage_status = storageStatus(row.used_bytes, row.allocated_bytes); return structuredClone(row)
+  const effective = row.effective_plan_id ?? 'free'
+  row.override = null; row.allocated_bytes = planBytes[effective]; row.allocation_source = 'plan'; row.pct = Math.round(row.used_bytes / row.allocated_bytes * 10_000) / 100; row.storage_status = storageStatus(row.used_bytes, row.allocated_bytes); return structuredClone(row)
 }
 export async function recomputeTenantUsage(id: string, reason: string): Promise<TenantDetail> {
   if (!reason.trim()) throw new Error('Reason is required')
@@ -165,14 +166,15 @@ export async function grantPromoPlan(id: string, body: { plan_id: 'plus' | 'pro'
   if (!body.reason.trim()) throw new Error('Reason is required')
   if (!useMocks()) return jsonFetch(`/admin/tenants/${encodeURIComponent(id)}/plan-grant`, { method: 'POST', body: JSON.stringify(body) })
   const row = seed.find(x => x.tenant_id === id); if (!row) throw new Error('Tenant not found')
-  const expires = body.expires_at ?? iso(body.days ?? 30), previous = row.effective_plan_id
-  const paid = (row.membership_status === 'active' || row.membership_status === 'trialing') && row.plan_id !== 'free' ? row.plan_id : 'free'
+  const expires = body.expires_at ?? iso(body.days ?? 30), previous = row.effective_plan_id ?? 'free'
+  const paid: PlanId = (row.membership_status === 'active' || row.membership_status === 'trialing') && row.plan_id && row.plan_id !== 'free' ? row.plan_id : 'free'
   const effective = planBytes[paid] >= planBytes[body.plan_id] ? paid : body.plan_id
   row.plan_source = effective === paid && paid !== 'free' ? 'stripe' : 'promo'; row.effective_plan_id = effective; row.promo_expires_at = expires
   row.active_grant = { id: Date.now(), plan_id: body.plan_id, starts_at: new Date().toISOString(), expires_at: expires, reason: body.reason, granted_by: 'mock-platform-admin', created_at: new Date().toISOString(), revoked_at: null, revoked_by: null, revoke_reason: null }
   row.grant_history.unshift(row.active_grant); row.plan_history.unshift({ from_plan: previous, to_plan: effective, at: new Date().toISOString(), old_allocated_bytes: planBytes[previous], new_allocated_bytes: planBytes[effective], source: 'admin_promo', event: 'promo_granted', actor: 'mock-platform-admin', reason: body.reason })
   if (!row.override) { row.allocated_bytes = planBytes[effective]; row.allocation_source = 'plan' }
-  row.pct = Math.round(row.used_bytes / row.allocated_bytes * 10_000) / 100; row.storage_status = storageStatus(row.used_bytes, row.allocated_bytes)
+  const allocated = row.allocated_bytes ?? planBytes[effective]
+  row.pct = Math.round(row.used_bytes / allocated * 10_000) / 100; row.storage_status = storageStatus(row.used_bytes, allocated)
   return structuredClone(row)
 }
 
@@ -180,12 +182,13 @@ export async function revokePromoPlan(id: string, reason: string): Promise<Tenan
   if (!reason.trim()) throw new Error('Reason is required')
   if (!useMocks()) return jsonFetch(`/admin/tenants/${encodeURIComponent(id)}/plan-grant`, { method: 'DELETE', body: JSON.stringify({ reason }) })
   const row = seed.find(x => x.tenant_id === id); if (!row) throw new Error('Tenant not found')
-  const previous = row.effective_plan_id, paid = (row.membership_status === 'active' || row.membership_status === 'trialing') && row.plan_id !== 'free'
-  row.effective_plan_id = paid ? row.plan_id : 'free'; row.plan_source = paid ? 'stripe' : 'free'; row.promo_expires_at = null
+  const previous = row.effective_plan_id ?? 'free', paid = (row.membership_status === 'active' || row.membership_status === 'trialing') && row.plan_id != null && row.plan_id !== 'free'
+  row.effective_plan_id = paid ? row.plan_id! : 'free'; row.plan_source = paid ? 'stripe' : 'free'; row.promo_expires_at = null
   if (row.active_grant) { row.active_grant.revoked_at = new Date().toISOString(); row.active_grant.revoked_by = 'mock-platform-admin'; row.active_grant.revoke_reason = reason }
   row.active_grant = null; row.plan_history.unshift({ from_plan: previous, to_plan: row.effective_plan_id, at: new Date().toISOString(), old_allocated_bytes: planBytes[previous], new_allocated_bytes: planBytes[row.effective_plan_id], source: 'admin_promo', event: 'promo_revoked', actor: 'mock-platform-admin', reason })
   if (!row.override) { row.allocated_bytes = planBytes[row.effective_plan_id]; row.allocation_source = 'plan' }
-  row.pct = Math.round(row.used_bytes / row.allocated_bytes * 10_000) / 100; row.storage_status = storageStatus(row.used_bytes, row.allocated_bytes)
+  const allocated = row.allocated_bytes ?? planBytes[row.effective_plan_id]
+  row.pct = Math.round(row.used_bytes / allocated * 10_000) / 100; row.storage_status = storageStatus(row.used_bytes, allocated)
   return structuredClone(row)
 }
 

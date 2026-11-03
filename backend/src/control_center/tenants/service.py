@@ -17,7 +17,7 @@ BILLING_URL = os.environ.get("BILLING_URL", "http://billing-service:8005")
 WORKBENCH_URL = os.environ.get("WORKBENCH_URL", "http://workbench:8000")
 POOL_CAPACITY_BYTES = int(os.environ.get("TENANT_STORAGE_POOL_CAPACITY_BYTES", "0"))
 PAGE_LIMIT = 100
-PLAN_BYTES = {"free": 1_000_000_000, "plus": 20_000_000_000, "pro": 100_000_000_000}
+PLAN_IDS = ("free", "plus", "pro")
 MEMBERSHIP_STATUSES = {"active", "trialing", "past_due", "canceled", "none"}
 
 
@@ -67,10 +67,16 @@ async def _directory(client, headers, **filters) -> list[dict]:
     return items
 
 
-async def _sources(client: httpx.AsyncClient, headers: dict[str, str], ids: list[str]) -> tuple[dict, dict, dict]:
+async def _plan_catalog(client, headers) -> dict[str, int]:
+    payload = await _json(client, "GET", f"{BILLING_URL}/admin/tenants/plans/catalog", "billing-service", headers)
+    return {plan_id: int(item["storage_quota_bytes"]) for plan_id, item in payload.get("plans", {}).items()}
+
+
+async def _sources(client: httpx.AsyncClient, headers: dict[str, str], ids: list[str]) -> tuple[dict, dict, dict, dict]:
     identities: dict[str, dict] = {}
     billings: dict[str, dict] = {}
     ledgers: dict[str, dict] = {}
+    plans = await _plan_catalog(client, headers)
     for start in range(0, len(ids), 1000):
         chunk = ids[start:start + 1000]
         identity, billing, ledger = await asyncio.gather(
@@ -81,7 +87,7 @@ async def _sources(client: httpx.AsyncClient, headers: dict[str, str], ids: list
         identities.update({str(item["user_id"]): item for item in identity.get("items", [])})
         billings.update({str(item["user_id"]): item for item in billing.get("items", [])})
         ledgers.update({str(item["user_id"]): item for item in ledger.get("items", [])})
-    return identities, billings, ledgers
+    return identities, billings, ledgers, plans
 
 
 def _parse(value: str | None) -> datetime | None:
@@ -91,29 +97,32 @@ def _parse(value: str | None) -> datetime | None:
     return result.replace(tzinfo=timezone.utc) if result.tzinfo is None else result.astimezone(timezone.utc)
 
 
-def tenant_row(identity: dict, billing: dict, ledger: dict, now: datetime | None = None) -> dict:
+def tenant_row(identity: dict, billing: dict, ledger: dict, now: datetime | None = None, *, plans: dict[str, int]) -> dict:
     now = now or datetime.now(timezone.utc)
     valid_until = _parse(billing.get("promo_expires_at") if billing.get("plan_source") == "promo" else billing.get("valid_until"))
     days_remaining = math.ceil((valid_until - now).total_seconds() / 86400) if valid_until else None
     raw_status = str(billing.get("membership_status", "none"))
     status = raw_status if raw_status in MEMBERSHIP_STATUSES else ("canceled" if raw_status in {"incomplete_expired", "unpaid"} else "past_due")
-    plan_id = billing.get("plan_id") if billing.get("plan_id") in PLAN_BYTES else "free"
-    effective_plan = billing.get("effective_plan_id") if billing.get("effective_plan_id") in PLAN_BYTES else "free"
-    plan_source = billing.get("plan_source") if billing.get("plan_source") in {"stripe", "promo", "free"} else ("stripe" if effective_plan != "free" else "free")
+    membership_exists = bool(billing.get("membership_exists", bool(billing)))
+    account_exists = bool(ledger.get("storage_account_exists", False))
+    plan_id = billing.get("plan_id") if membership_exists and billing.get("plan_id") in plans else None
+    effective_plan = billing.get("effective_plan_id") if membership_exists and billing.get("effective_plan_id") in plans else None
+    plan_source = billing.get("plan_source") if membership_exists and billing.get("plan_source") in {"stripe", "promo", "free"} else None
     override = billing.get("override")
-    allocated = int(override["allocated_bytes"]) if override else PLAN_BYTES[effective_plan]
+    allocated = int(override["allocated_bytes"]) if override else (plans[effective_plan] if effective_plan else None)
     used = int(ledger.get("used_bytes") or 0)
     reserved = int(ledger.get("reserved_bytes") or 0)
     pct = round((used / allocated * 100) if allocated else 0, 2)
-    storage_status = "over_allocation" if used > allocated else ("near" if pct >= 80 else "ok")
+    storage_status = "no_membership" if not membership_exists else ("invalid_membership" if allocated is None else ("no_account" if not account_exists else ("folder_pending" if ledger.get("folder_status") != "done" else ("over_allocation" if used > allocated else ("near" if pct >= 80 else "ok")))))
     history = billing.get("plan_history") or []
     last = history[0] if history else None
     return {
         "tenant_id": str(identity["user_id"]), "username": identity.get("username") or identity.get("email", "").split("@", 1)[0], "email": identity.get("email", ""),
+        "membership_exists": membership_exists, "storage_account_exists": account_exists,
         "plan_id": plan_id, "membership_status": status, "effective_plan_id": effective_plan,
         "plan_source": plan_source, "promo_expires_at": billing.get("promo_expires_at"),
         "valid_from": billing.get("valid_from"), "valid_until": billing.get("valid_until"), "auto_renew": bool(billing.get("auto_renew")), "days_remaining": days_remaining,
-        "allocated_bytes": allocated, "allocation_source": "override" if override else "plan", "used_bytes": used, "reserved_bytes": reserved, "pct": pct, "storage_status": storage_status,
+        "allocated_bytes": allocated, "allocation_source": "override" if override else ("plan" if allocated is not None else "none"), "used_bytes": used, "reserved_bytes": reserved, "pct": pct, "storage_status": storage_status,
         "folder_path": ledger.get("folder_path"), "folder_bytes": ledger.get("folder_bytes"),
         "folder_drift_bytes": ledger.get("folder_drift_bytes"), "folder_usage_status": ledger.get("folder_usage_status", "unavailable"),
         "last_plan_change": ({"from_plan": last["from_plan"], "to_plan": last["to_plan"], "at": last["at"]} if last else None), "last_activity_at": identity.get("last_activity_at"),
@@ -153,9 +162,9 @@ async def all_tenants(authorization: str | None) -> tuple[list[dict], dict, dict
         ids = [str(item["id"]) for item in directory]
         if not ids:
             return [], {}, {}
-        identities, billings, ledgers = await _sources(client, headers, ids)
+        identities, billings, ledgers, plans = await _sources(client, headers, ids)
     users = {str(item["id"]): item for item in directory}
-    rows = [{**users[user_id], **tenant_row(identities[user_id], billings.get(user_id, {}), ledgers.get(user_id, {}))} for user_id in ids if user_id in identities]
+    rows = [{**users[user_id], **tenant_row(identities[user_id], billings.get(user_id, {}), ledgers.get(user_id, {}), plans=plans)} for user_id in ids if user_id in identities]
     return rows, billings, ledgers
 
 
@@ -168,6 +177,7 @@ async def tenant_detail(tenant_id: str, authorization: str | None) -> dict | Non
             return None
         billing = await _json(client, "GET", f"{BILLING_URL}/admin/tenants/{tenant_id}", "billing-service", headers)
         ledger = await _json(client, "GET", f"{WORKBENCH_URL}/api/storage/admin/tenants/{tenant_id}", "workbench", headers)
+        plans = await _plan_catalog(client, headers)
         # Preserve audit identifiers; add display labels using Auth's batch lookup.
         history = billing.get("plan_history", [])
         actor_ids = sorted({int(h["actor"][5:]) for h in history
@@ -183,7 +193,7 @@ async def tenant_detail(tenant_id: str, authorization: str | None) -> dict | Non
             actors.update({f"user:{item['user_id']}": item.get("email") or item.get("username")
                            for item in result.get("items", [])})
         billing["plan_history"] = [{**h, "actor_display": actors.get(h.get("actor"))} for h in history]
-    row = tenant_row(identities[tenant_id], billing, ledger)
+    row = tenant_row(identities[tenant_id], billing, ledger, plans=plans)
     for entry in _indexes.values():
         if entry.rows is not None:
             entry.rows = [{**item, **row} if item["tenant_id"] == tenant_id else item for item in entry.rows]
@@ -195,8 +205,8 @@ def summary(rows: list[dict], now: datetime | None = None) -> dict:
     moment = now or datetime.now(timezone.utc)
     return {
         "tenants_total": len(rows),
-        "per_plan": {plan: sum(row["effective_plan_id"] == plan for row in rows) for plan in PLAN_BYTES},
-        "allocated_sum_bytes": sum(row["allocated_bytes"] for row in rows), "used_sum_bytes": sum(row["used_bytes"] for row in rows), "pool_capacity_bytes": POOL_CAPACITY_BYTES,
+        "per_plan": {plan: sum(row["effective_plan_id"] == plan for row in rows) for plan in PLAN_IDS},
+        "allocated_sum_bytes": sum(row["allocated_bytes"] or 0 for row in rows), "used_sum_bytes": sum(row["used_bytes"] for row in rows), "pool_capacity_bytes": POOL_CAPACITY_BYTES,
         "expiring_7d": sum(row["days_remaining"] is not None and 0 <= row["days_remaining"] <= 7 for row in rows), "past_due": sum(row["membership_status"] == "past_due" for row in rows), "over_allocation": sum(row["storage_status"] == "over_allocation" for row in rows),
         "promos_active": sum(bool(row["promo_expires_at"]) for row in rows),
         "promos_expiring_7d": sum(bool(row["promo_expires_at"]) and 0 <= math.ceil((_parse(row["promo_expires_at"]) - moment).total_seconds() / 86400) <= 7 for row in rows),
@@ -314,8 +324,8 @@ async def paginated_tenants(authorization: str | None, *, page=1, page_size=50,
         selected = rows[(page - 1) * page_size:page * page_size]
         ids = [row["tenant_id"] for row in selected]
         if ids:
-            identities, billings, ledgers = await _sources(client, headers, ids)
-            selected = [{**row, **tenant_row(identities[row["tenant_id"]], billings.get(row["tenant_id"], {}), ledgers.get(row["tenant_id"], {}))}
+            identities, billings, ledgers, plans = await _sources(client, headers, ids)
+            selected = [{**row, **tenant_row(identities[row["tenant_id"]], billings.get(row["tenant_id"], {}), ledgers.get(row["tenant_id"], {}), plans=plans)}
                         for row in selected if row["tenant_id"] in identities]
     return {"items": selected, "total": len(rows), "page": page, "page_size": page_size,
             "total_pages": math.ceil(len(rows) / page_size), "index_age_seconds": round(time.monotonic() - entry.updated_at, 1)}
