@@ -18,6 +18,7 @@ app = FastAPI()
 app.include_router(router)
 client = TestClient(app)
 ADMIN = {"sub": "1", "permissions": ["manage_all_orgs"]}
+PLANS = {"free": 1_000_000_000, "plus": 20_000_000_000, "pro": 100_000_000_000}
 
 
 def _row(user_id="1", username="maya"):
@@ -32,7 +33,10 @@ def test_rbac_rejects_missing_and_non_platform_admin_tokens():
 
 def test_summary_and_filtered_paginated_list():
     rows = [_row("1", "maya"), _row("2", "zed")]
-    with patch("control_center.core.auth.verify_token", return_value=ADMIN), patch("control_center.api.routes_tenants.service.all_tenants", AsyncMock(return_value=(rows, {}, {}))), patch("control_center.api.routes_tenants.service._sources", AsyncMock(return_value=({"2": {"user_id": "2", "username": "zed", "email": "zed@example.org"}}, {}, {}))):
+    identities = {"2": {"user_id": "2", "username": "zed", "email": "zed@example.org"}}
+    billing = {"2": {"membership_exists": False}}
+    ledger = {"2": {"storage_account_exists": False}}
+    with patch("control_center.core.auth.verify_token", return_value=ADMIN), patch("control_center.api.routes_tenants.service.all_tenants", AsyncMock(return_value=(rows, {}, {}))), patch("control_center.api.routes_tenants.service._sources", AsyncMock(return_value=(identities, billing, ledger, PLANS))):
         summary = client.get("/admin/tenants/summary", headers={"Authorization": "Bearer x"})
         listing = client.get("/admin/tenants?q=zed&page=1&page_size=1", headers={"Authorization": "Bearer x"})
     assert summary.status_code == 200 and summary.json()["tenants_total"] == 2

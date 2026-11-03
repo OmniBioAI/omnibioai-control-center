@@ -55,7 +55,7 @@ describe('Tenant management presentation', () => {
     return { ...await tenants.fetchTenant('1048'), promo_expires_at: '2026-12-01T23:30:00-05:00', valid_until: '2026-10-01T00:00:00Z', days_remaining: -10, auto_renew: true }
   }
 
-  it('uses promo validity, UTC dates, default membership and resolved history actors', async () => {
+  it('uses promo validity, UTC dates, real membership state and resolved history actors', async () => {
     const tenant = await promoFixture()
     tenant.plan_history[0].actor = 'user:42'
     tenant.plan_history[0].actor_display = 'admin@example.org'
@@ -65,7 +65,7 @@ describe('Tenant management presentation', () => {
     const expected = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(tenant.promo_expires_at)) + ' UTC'
     expect(screen.getByText('Valid until').nextElementSibling).toHaveTextContent(expected)
     expect(screen.getByText('Renewal').nextElementSibling).toHaveTextContent('Promo — reverts to Free')
-    expect(screen.getByText('Free (default)')).toBeInTheDocument()
+    expect(screen.getByText('No membership')).toBeInTheDocument()
     expect(screen.getByText('admin@example.org')).toBeInTheDocument()
     expect(screen.queryByText('user:42')).not.toBeInTheDocument()
   })
@@ -76,7 +76,7 @@ describe('Tenant management presentation', () => {
     const onSelect = vi.fn()
     render(<TenantManagementPage tenantId={null} onSelect={onSelect} onBack={() => {}} />)
     const row = (await screen.findByText('priya@example.org')).closest('tr')!
-    expect(within(row).getByText('Free (default)')).toBeInTheDocument()
+    expect(within(row).getByText('No membership')).toBeInTheDocument()
     expect(row.cells[5]).toHaveTextContent('UTC')
     expect(row.cells[5]).toHaveTextContent('Promo — reverts to Free')
     expect(row.cells[5]).not.toHaveTextContent('Expired')
