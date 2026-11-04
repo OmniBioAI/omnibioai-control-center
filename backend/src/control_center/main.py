@@ -182,6 +182,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.get("/access/neo4j")
+def neo4j_access(
+    _operator: dict = Depends(require_permission("platform.manage_infra")),
+) -> dict[str, object]:
+    """Permission-aware nginx auth_request target for Neo4j Browser."""
+    return {"allowed": True, "permission": "platform.manage_infra"}
+
 app.include_router(health_router)
 # summary/config/docker/services expose internal topology (hostnames, LAN
 # IPs, container inventory, mount paths) -- control.omnibioai.org routes
