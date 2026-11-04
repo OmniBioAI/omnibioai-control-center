@@ -46,7 +46,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
@@ -181,6 +181,39 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/access/neo4j")
+def neo4j_access(
+    _operator: dict = Depends(require_permission("platform.manage_infra")),
+) -> dict[str, object]:
+    """Permission-aware nginx auth_request target for Neo4j Browser."""
+    return {"allowed": True, "permission": "platform.manage_infra"}
+
+
+_NGINX_GATE_PERMISSIONS = frozenset({
+    "manage_all_orgs",
+    "manage_config",
+    "platform.manage_infra",
+})
+
+
+@app.get("/access/permission")
+def permission_access(
+    x_required_permission: str = Header(alias="X-Required-Permission"),
+    authorization: str | None = Header(default=None),
+) -> dict[str, object]:
+    """Permission oracle for Studio's internal nginx auth_request gate.
+
+    nginx supplies the required permission from its route configuration;
+    callers cannot turn this endpoint into a check for unreviewed scopes.
+    Token validation and revocation remain authoritative in verify_token via
+    the same require_permission dependency used by operator APIs.
+    """
+    if x_required_permission not in _NGINX_GATE_PERMISSIONS:
+        raise HTTPException(400, "Unsupported nginx gate permission")
+    require_permission(x_required_permission)(authorization)
+    return {"allowed": True, "permission": x_required_permission}
 
 app.include_router(health_router)
 # summary/config/docker/services expose internal topology (hostnames, LAN
