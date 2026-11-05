@@ -22,6 +22,7 @@ Developer:
 from __future__ import annotations
 
 import unittest
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -209,6 +210,33 @@ class TestListPlatformOrgsProxy(unittest.TestCase):
         forwarded_params = call_kwargs["params"]
         self.assertEqual(forwarded_params["search"], "acme")
         self.assertEqual(forwarded_params["sort_by"], "name")
+
+
+class TestCreatePlatformOrgProxy(unittest.TestCase):
+    """POST /platform/orgs relays tenant creation to auth-service."""
+
+    def test_forwards_method_path_authorization_and_body(self) -> None:
+        payload = {"name": "Acme", "slug": "acme"}
+        upstream = _mock_response(201, {"id": 7, "name": "Acme", "slug": "acme", "status": "active"})
+        mock_ctx = _mock_async_client(upstream)
+        with patch("control_center.api.routes_org_proxy.httpx.AsyncClient", return_value=mock_ctx):
+            resp = client.post("/platform/orgs", json=payload, headers={"Authorization": "Bearer admin-token"})
+        self.assertEqual(resp.status_code, 201)
+        call = mock_ctx.__aenter__.return_value.request.call_args
+        self.assertEqual(call.args[0], "POST")
+        self.assertTrue(call.args[1].endswith("/platform/orgs"))
+        self.assertEqual(call.kwargs["headers"]["Authorization"], "Bearer admin-token")
+        self.assertEqual(json.loads(call.kwargs["content"]), payload)
+
+    def test_forwards_upstream_authorization_and_validation_errors(self) -> None:
+        for status, body in ((403, {"detail": "Forbidden"}), (409, {"detail": "Organization slug already exists"}),
+                             (422, {"detail": "Organization name and slug must not be blank"})):
+            with patch("control_center.api.routes_org_proxy.httpx.AsyncClient",
+                       return_value=_mock_async_client(_mock_response(status, body))):
+                resp = client.post("/platform/orgs", json={"name": "x", "slug": "x"},
+                                   headers={"Authorization": "Bearer tok"})
+            self.assertEqual(resp.status_code, status)
+            self.assertEqual(resp.json(), body)
 
     def test_forwards_403_for_non_platform_admin(self) -> None:
         """A 403 from the upstream auth-service is relayed as a 403."""

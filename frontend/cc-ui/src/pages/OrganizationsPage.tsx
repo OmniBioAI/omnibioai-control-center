@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  createOrganization,
+  createPlatformOrganization,
   fetchMyOrgs,
   fetchPlatformOrgs,
   type MyOrg,
@@ -64,12 +64,7 @@ interface ViewProps extends Props {
 
 const PAGE_SIZE = 20
 
-/* ── Create Organization: POST /orgs already exists and requires no
-   permission beyond being an authenticated user (any caller becomes the
-   new org's org_admin) -- reused as-is, no duplicate endpoint. Shown to
-   both audiences for the same reason the backend imposes no extra
-   restriction here. ───────────────────────────────────────────────── */
-function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
+function CreateOrgForm({ onCreated }: { onCreated: (name: string) => void }) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [slug, setSlug] = useState('')
@@ -78,16 +73,22 @@ function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
+    const cleanName = name.trim()
+    const cleanSlug = slug.trim()
+    if (!cleanName || !cleanSlug) {
+      setErr('Enter both a tenant name and a tenant slug.')
+      return
+    }
     setBusy(true)
     setErr(null)
     try {
-      await createOrganization(name.trim(), slug.trim())
+      const created = await createPlatformOrganization(cleanName, cleanSlug)
       setOpen(false)
       setName('')
       setSlug('')
-      onCreated()
+      onCreated(created.name)
     } catch (e) {
-      setErr(String(e))
+      setErr(e instanceof Error ? e.message : 'Tenant creation failed.')
     } finally {
       setBusy(false)
     }
@@ -102,7 +103,7 @@ function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
           border: 'none', background: 'var(--accent)', color: 'var(--color-on-accent)', cursor: 'pointer',
         }}
       >
-        + New Organization
+        + Create Tenant
       </button>
     )
   }
@@ -113,16 +114,16 @@ function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
       <input
         value={name}
         onChange={e => setName(e.target.value)}
-        placeholder="Organization name"
-        aria-label="Organization name"
+        placeholder="Tenant name"
+        aria-label="Tenant name"
         required
         style={{ fontSize: 13, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
       />
       <input
         value={slug}
         onChange={e => setSlug(e.target.value)}
-        placeholder="slug"
-        aria-label="Organization slug"
+        placeholder="tenant-slug"
+        aria-label="Tenant slug"
         required
         style={{ fontSize: 13, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
       />
@@ -130,7 +131,7 @@ function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
         fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 8,
         border: 'none', background: 'var(--accent)', color: 'var(--color-on-accent)', cursor: busy ? 'not-allowed' : 'pointer',
       }}>
-        {busy ? 'Creating…' : 'Create'}
+        {busy ? 'Creating…' : 'Create Tenant'}
       </button>
       <button type="button" onClick={() => setOpen(false)} disabled={busy} style={{
         fontSize: 13, fontWeight: 600, padding: '8px 16px', borderRadius: 8,
@@ -298,6 +299,8 @@ export default function OrganizationsPage({ onSelect, title, description }: Prop
   // reflected on next visit to this page, not stuck at login-time state.
   const [isPlatformAdmin] = useState(() => hasPlatformAdminAccess())
   const [refreshSignal, setRefreshSignal] = useState(0)
+  const [createSuccess, setCreateSuccess] = useState<string | null>(null)
+  const canCreateTenant = isPlatformAdmin && !title
 
   return (
     <div>
@@ -310,11 +313,17 @@ export default function OrganizationsPage({ onSelect, title, description }: Prop
               : 'Organizations you belong to.')}
           </p>
         </div>
-        <CreateOrgForm onCreated={() => setRefreshSignal(s => s + 1)} />
+        {canCreateTenant && (
+          <CreateOrgForm onCreated={name => {
+            setCreateSuccess(`Tenant “${name}” created successfully.`)
+            setRefreshSignal(s => s + 1)
+          }} />
+        )}
       </div>
+      {createSuccess && <div role="status" style={{ marginTop: 12, color: 'var(--green, #38a169)', fontSize: 13 }}>{createSuccess}</div>}
       <div style={{ marginTop: 20 }}>
         {isPlatformAdmin
-          ? <PlatformOrgsView onSelect={onSelect} refreshSignal={refreshSignal} />
+          ? <PlatformOrgsView key={refreshSignal} onSelect={onSelect} refreshSignal={refreshSignal} />
           : <MyOrgsView onSelect={onSelect} refreshSignal={refreshSignal} />}
       </div>
     </div>
