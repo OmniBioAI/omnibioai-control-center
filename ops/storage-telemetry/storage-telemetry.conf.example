@@ -1,5 +1,5 @@
 # role|host-path|expected-UUID, matching control_center.yaml. Checked with
-# findmnt -n -o UUID,FSTYPE <path>. exFAT UUIDs are the short XXXX-XXXX form.
+# findmnt --task 1 -n -P -o UUID,FSTYPE,OPTIONS <path>. exFAT UUIDs are the short XXXX-XXXX form.
 STORAGE_TELEMETRY_TARGETS="root|/|9f3cd4b6-f34e-435e-9fcf-ed7861f7cf99 backup|/mnt/omnibioai-backup20tb|9d872bab-a481-4fca-8ad8-8031d78c0dbc archive|/mnt/omnibioai-archive22tb|6a805bb7-2513-435f-9cd4-b9970a0e4fc4 data2tb|/media/manish/omnibioai-data|39b9324a-640e-4d64-9980-b1f1c9d5578b archive2tb-b|/mnt/omnibioai-archive2tb-b|6A7F-D1A6"
 # role|mountpoint|branch:branch:branch for mergerfs pools. mergerfs has no UUID:
 # the pool is verified as fuse.mergerfs with exactly these branches, in order.
