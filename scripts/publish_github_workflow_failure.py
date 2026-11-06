@@ -10,7 +10,7 @@ import re
 import sys
 from pathlib import Path
 
-from publish_discord_event import build_envelope, submit
+from publish_discord_event import SubmissionError, build_envelope, submit
 
 SEND_CONCLUSIONS = {"failure", "timed_out"}
 _SAFE_REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -76,11 +76,14 @@ def main() -> int:
         if resolved is None:
             return 0
         args = argparse.Namespace(**resolved)
-        status, _receipt = submit(build_envelope(args), base_url=base_url, secret=secret)
+        submit(build_envelope(args), base_url=base_url, secret=secret)
+    except SubmissionError as exc:
+        print(f"GitHub workflow event submission failed: {exc}", file=sys.stderr)
+        return 1
     except (OSError, ValueError, json.JSONDecodeError):
         print("GitHub workflow event submission failed", file=sys.stderr)
         return 1
-    return 0 if status in {200, 202} else 1
+    return 0
 
 
 if __name__ == "__main__":

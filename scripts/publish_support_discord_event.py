@@ -12,7 +12,7 @@ import argparse
 import os
 import sys
 
-from publish_discord_event import submit
+from publish_discord_event import SubmissionError, submit
 
 EVENTS = {
     "incident": ("support.incident", "Public support incident", "An operator submitted a public support incident for review.", "warning"),
@@ -54,11 +54,11 @@ def main() -> int:
     envelope = build_envelope(args.kind, args.event_id, datetime.now(timezone.utc).isoformat())
     try:
         status, receipt = submit(envelope, base_url=base, secret=secret)
+    except SubmissionError as exc:
+        print(f"support event submission failed: {exc}", file=sys.stderr)
+        return 1
     except (ValueError, OSError) as exc:
         print(f"support event submission failed: {type(exc).__name__}", file=sys.stderr)
-        return 1
-    if status not in {200, 202}:
-        print(f"support event submission rejected: HTTP {status}", file=sys.stderr)
         return 1
     print(f"support event accepted for review: {receipt.get('event_id', args.event_id)}")
     return 0

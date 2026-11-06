@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from publish_discord_event import build_envelope, submit
+from publish_discord_event import SubmissionError, build_envelope, submit
 
 CONFIRMED_BUG_LABEL = "discord-confirmed-bug"
 APPROVED_FEATURE_LABEL = "discord-approved-feature"
@@ -158,11 +158,11 @@ def main() -> int:
         )
         envelope = build_envelope(args)
         status, receipt = submit(envelope, base_url=base_url, secret=secret)
+    except SubmissionError as exc:
+        print(f"GitHub Discord event submission failed: {exc}", file=sys.stderr)
+        return 1
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"GitHub Discord event submission failed: {type(exc).__name__}", file=sys.stderr)
-        return 1
-    if status not in {200, 202}:
-        print(f"GitHub Discord event rejected: HTTP {status}", file=sys.stderr)
         return 1
     print(json.dumps({
         "event_id": receipt.get("event_id", event["event_id"]),
