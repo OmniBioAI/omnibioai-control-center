@@ -21,13 +21,16 @@ from publish_discord_event import build_envelope, submit
 
 CONFIRMED_BUG_LABEL = "discord-confirmed-bug"
 APPROVED_FEATURE_LABEL = "discord-approved-feature"
+ALLOW_PRERELEASE_ENV = "DISCORD_ALLOW_PRERELEASE"
 
 
 def _stable_suffix(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
 
 
-def resolve_github_event(event_name: str, action: str, payload: dict[str, Any]) -> dict[str, str] | None:
+def resolve_github_event(
+    event_name: str, action: str, payload: dict[str, Any], *, allow_prerelease: bool = False,
+) -> dict[str, str] | None:
     """Return a sanitized central event description, or None to ignore it."""
     # GitHub supplies this field on repository events. Fail closed so private
     # issue/release metadata can never cross the public Discord boundary.
@@ -40,10 +43,18 @@ def resolve_github_event(event_name: str, action: str, payload: dict[str, Any]) 
         if (
             not isinstance(release, dict)
             or release.get("draft") is not False
-            or release.get("prerelease") is not False
+            or not isinstance(release.get("prerelease"), bool)
+            or (release["prerelease"] and not allow_prerelease)
             or not isinstance(release.get("id"), int)
         ):
             return None
+        if release["prerelease"]:
+            return {
+                "event_id": f"github-release-{release['id']}",
+                "event_type": "platform.release",
+                "title": "OmniBioAI pre-release published",
+                "message": "A new public pre-release is available in the OmniBioAI release catalog.",
+            }
         return {
             "event_id": f"github-release-{release['id']}",
             "event_type": "platform.release",
@@ -128,7 +139,10 @@ def main() -> int:
         payload = json.loads(Path(event_path).read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
             raise ValueError("event payload must be an object")
-        event = resolve_github_event(event_name, str(payload.get("action", "")), payload)
+        allow_prerelease = os.environ.get(ALLOW_PRERELEASE_ENV, "").strip().lower() == "true"
+        event = resolve_github_event(
+            event_name, str(payload.get("action", "")), payload, allow_prerelease=allow_prerelease,
+        )
         if event is None:
             print("github_discord_event=ignored")
             return 0
