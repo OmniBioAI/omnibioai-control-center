@@ -26,6 +26,9 @@ from datetime import datetime, timezone
 ACCEPTED_STATUSES = frozenset({200, 202})
 ACCESS_CLIENT_ID_ENV = "DISCORD_EVENT_ACCESS_CLIENT_ID"
 ACCESS_CLIENT_SECRET_ENV = "DISCORD_EVENT_ACCESS_CLIENT_SECRET"
+# Cloudflare bans urllib's default "Python-urllib/x.y" signature (error 1010)
+# at the edge, before Access or the router see the request.
+USER_AGENT = "omnibioai-discord-publisher/1.0"
 
 ROUTES = {
     "platform.release": "announcements", "platform.milestone": "announcements",
@@ -142,6 +145,7 @@ def submit(envelope: dict, *, base_url: str, secret: str, timeout: float = 8.0) 
     url = base_url.rstrip("/") + "/integrations/discord/events"
     headers = {
         "Content-Type": "application/json",
+        "User-Agent": USER_AGENT,
         "X-Omni-Discord-Source": envelope["source_service"],
         "X-Omni-Discord-Timestamp": timestamp,
         "X-Omni-Discord-Nonce": nonce,
