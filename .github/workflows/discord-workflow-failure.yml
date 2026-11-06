@@ -2,6 +2,10 @@ name: Queue failed workflow for Discord alerts
 
 on:
   workflow_run:
+    workflows:
+      - CI
+      - Queue reviewed GitHub community events for Discord
+      - Queue approved Discord release announcement
     types: [completed]
 
 permissions:
