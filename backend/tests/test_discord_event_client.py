@@ -77,6 +77,7 @@ def test_submit_signs_request_and_returns_safe_receipt(monkeypatch):
     assert "x" * 43 not in str(request.headers)
     assert request.get_header("Cf-access-client-id") is None
     assert request.get_header("Cf-access-client-secret") is None
+    assert request.get_header("User-agent") == "omnibioai-discord-publisher/1.0"
 
 
 SOURCE_SECRET = "s" * 43
@@ -170,6 +171,15 @@ def test_access_headers_are_sent_only_when_both_are_set(router, monkeypatch):
     assert "cf-access-client-id" not in without and "cf-access-client-secret" not in without
     assert with_access["cf-access-client-id"] == ACCESS_ID
     assert with_access["cf-access-client-secret"] == ACCESS_SECRET
+
+
+def test_explicit_user_agent_is_sent_on_the_wire(router):
+    """Cloudflare rejects urllib's default UA with error 1010; the opener must not substitute it."""
+    router.plan[EVENTS_PATH] = _json(202, {"event_id": "docs:abc"})
+    _submit(router)
+    (_, _, headers), = router.seen
+    assert headers["user-agent"] == "omnibioai-discord-publisher/1.0"
+    assert not headers["user-agent"].startswith("Python-urllib")
 
 
 @pytest.mark.parametrize("name", [client.ACCESS_CLIENT_ID_ENV, client.ACCESS_CLIENT_SECRET_ENV])
