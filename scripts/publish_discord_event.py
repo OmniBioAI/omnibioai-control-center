@@ -21,6 +21,12 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
+# Statuses the router's ingest handler returns for accepted or duplicate
+# events (routes_discord_events.py): 200 once delivered, 202 otherwise.
+ACCEPTED_STATUSES = frozenset({200, 202})
+ACCESS_CLIENT_ID_ENV = "DISCORD_EVENT_ACCESS_CLIENT_ID"
+ACCESS_CLIENT_SECRET_ENV = "DISCORD_EVENT_ACCESS_CLIENT_SECRET"
+
 ROUTES = {
     "platform.release": "announcements", "platform.milestone": "announcements",
     "github.issue.confirmed": "bug-reports", "github.issue.resolved": "bug-reports",
@@ -76,7 +82,51 @@ def build_envelope(args: argparse.Namespace) -> dict:
     }
 
 
+class SubmissionError(ValueError):
+    """The router did not durably accept the event.
+
+    Messages are fixed text plus an HTTP status; they never include response
+    bodies, URLs or credentials.
+    """
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects so an Access login page can never count as accepted."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect())
+
+
+def _access_headers() -> dict[str, str]:
+    client_id = os.environ.get(ACCESS_CLIENT_ID_ENV, "").strip()
+    client_secret = os.environ.get(ACCESS_CLIENT_SECRET_ENV, "").strip()
+    if not client_id and not client_secret:
+        return {}
+    if not client_id or not client_secret:
+        raise SubmissionError(f"{ACCESS_CLIENT_ID_ENV} and {ACCESS_CLIENT_SECRET_ENV} must be set together")
+    return {"CF-Access-Client-Id": client_id, "CF-Access-Client-Secret": client_secret}
+
+
+def check_receipt(status: int, content_type: str, raw: bytes, event_id: str) -> dict:
+    """The single success rule for every caller of submit()."""
+    if status not in ACCEPTED_STATUSES:
+        raise SubmissionError(f"router did not accept the event: HTTP {status}")
+    if content_type.split(";", 1)[0].strip().lower() != "application/json":
+        raise SubmissionError(f"router response is not JSON (HTTP {status})")
+    try:
+        receipt = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise SubmissionError(f"router response is not valid JSON (HTTP {status})") from None
+    if not isinstance(receipt, dict) or receipt.get("event_id") != event_id:
+        raise SubmissionError(f"router receipt does not match the submitted event (HTTP {status})")
+    return receipt
+
+
 def submit(envelope: dict, *, base_url: str, secret: str, timeout: float = 8.0) -> tuple[int, dict]:
+    """Return (status, receipt) only when check_receipt() accepts the response."""
     if len(secret) < 43 or not secret.isascii() or not secret.replace("-", "").replace("_", "").isalnum():
         raise ValueError("DISCORD_EVENT_SOURCE_SECRET is invalid")
     parsed = urllib.parse.urlsplit(base_url)
@@ -90,19 +140,24 @@ def submit(envelope: dict, *, base_url: str, secret: str, timeout: float = 8.0) 
     signed = timestamp.encode() + b"\n" + nonce.encode() + b"\n" + body
     signature = "v1=" + hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
     url = base_url.rstrip("/") + "/integrations/discord/events"
-    request = urllib.request.Request(url, data=body, method="POST", headers={
+    headers = {
         "Content-Type": "application/json",
         "X-Omni-Discord-Source": envelope["source_service"],
         "X-Omni-Discord-Timestamp": timestamp,
         "X-Omni-Discord-Nonce": nonce,
         "X-Omni-Discord-Signature": signature,
-    })
+    }
+    headers.update(_access_headers())
+    request = urllib.request.Request(url, data=body, method="POST", headers=headers)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.status, json.loads(response.read())
+        with _OPENER.open(request, timeout=timeout) as response:
+            status, content_type, raw = response.status, response.headers.get("Content-Type", ""), response.read()
     except urllib.error.HTTPError as exc:
         # Do not echo response bodies: upstream errors may contain internal data.
-        return exc.code, {}
+        if 300 <= exc.code < 400:
+            raise SubmissionError(f"router redirect refused: HTTP {exc.code}") from None
+        raise SubmissionError(f"router rejected the event: HTTP {exc.code}") from None
+    return status, check_receipt(status, content_type, raw, envelope["event_id"])
 
 
 def main() -> int:
@@ -114,11 +169,11 @@ def main() -> int:
         return 2
     try:
         status, receipt = submit(build_envelope(args), base_url=base_url, secret=secret)
+    except SubmissionError as exc:
+        print(f"Discord event submission failed: {exc}", file=sys.stderr)
+        return 1
     except (ValueError, json.JSONDecodeError, OSError) as exc:
         print(f"Discord event submission failed: {type(exc).__name__}", file=sys.stderr)
-        return 1
-    if status not in {200, 202}:
-        print(f"Discord event submission rejected: HTTP {status}", file=sys.stderr)
         return 1
     print(json.dumps({
         "event_id": receipt.get("event_id", args.event_id),
