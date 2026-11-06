@@ -106,6 +106,26 @@ def test_only_stable_public_releases_are_queued():
     ) is None
 
 
+def test_prereleases_require_opt_in_and_drafts_stay_dropped():
+    payload = {
+        "repository": {"private": False},
+        "release": {"id": 9002, "draft": False, "prerelease": True, "name": "untrusted text"},
+    }
+    assert MODULE.resolve_github_event("release", "published", payload) is None
+    event = MODULE.resolve_github_event("release", "published", payload, allow_prerelease=True)
+    assert event == {
+        "event_id": "github-release-9002",
+        "event_type": "platform.release",
+        "title": "OmniBioAI pre-release published",
+        "message": "A new public pre-release is available in the OmniBioAI release catalog.",
+    }
+    assert "untrusted" not in str(event)
+    draft = {**payload, "release": {**payload["release"], "draft": True}}
+    assert MODULE.resolve_github_event("release", "published", draft, allow_prerelease=True) is None
+    private = {**payload, "repository": {"private": True}}
+    assert MODULE.resolve_github_event("release", "published", private, allow_prerelease=True) is None
+
+
 def test_private_repository_and_pull_request_issues_fail_closed():
     payload = {
         "repository": {"private": True},

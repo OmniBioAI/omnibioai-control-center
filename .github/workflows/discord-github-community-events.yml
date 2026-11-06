@@ -5,6 +5,16 @@ on:
     types: [labeled, closed]
   milestone:
     types: [closed]
+  workflow_call:
+    inputs:
+      DISCORD_EVENT_ROUTER_URL:
+        description: Central Discord event router base URL
+        type: string
+        required: false
+        default: ''
+    secrets:
+      DISCORD_EVENT_GITHUB_SECRET:
+        required: false
 
 permissions:
   contents: read
@@ -19,14 +29,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
+      # Callers in other repos need CC's script, not their own checkout.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.repository.default_branch }}
+          repository: OmniBioAI/omnibioai-control-center
+          ref: main
           persist-credentials: false
       - name: Submit sanitized event for central approval
         env:
-          DISCORD_EVENT_ROUTER_URL: ${{ vars.DISCORD_EVENT_ROUTER_URL }}
+          DISCORD_EVENT_ROUTER_URL: ${{ inputs.DISCORD_EVENT_ROUTER_URL || vars.DISCORD_EVENT_ROUTER_URL }}
           DISCORD_EVENT_SOURCE_SECRET: ${{ secrets.DISCORD_EVENT_GITHUB_SECRET }}
           GITHUB_EVENT_PATH: ${{ github.event_path }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
-        run: python scripts/publish_github_community_event.py
+        run: |
+          if [ -z "$DISCORD_EVENT_ROUTER_URL" ] || [ -z "$DISCORD_EVENT_SOURCE_SECRET" ]; then
+            echo "::notice::Discord event router not configured; skipping"
+            exit 0
+          fi
+          python scripts/publish_github_community_event.py
