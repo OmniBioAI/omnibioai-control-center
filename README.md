@@ -21,6 +21,8 @@ Mutation reasons must be non-empty. Authorization is independently enforced by C
 
 **Operational health dashboard, ecosystem report server, and observability hub for the OmniBioAI stack.**
 
+![OmniBioAI Control Center Architecture](docs/architecture/omnibioai-control-center-architecture.png)
+
 The Control Center is a FastAPI service that aggregates health status across all OmniBioAI components, serves an interactive ecosystem report, exposes Prometheus metrics, and auto-generates reports on a configurable schedule.
 
 ---
