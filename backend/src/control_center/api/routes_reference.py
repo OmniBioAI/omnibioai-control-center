@@ -10,6 +10,7 @@ Author:
 
 from __future__ import annotations
 
+import fnmatch
 import os
 from pathlib import Path
 
@@ -39,6 +40,16 @@ ORGANISMS = {
 
 INDEXES = ["star", "bwa", "bowtie2", "salmon", "cellranger"]
 
+# A built index leaves these files at the top of its directory; an empty or
+# half-built directory (e.g. a Salmon run that left only twopaco_tmp/) has none.
+INDEX_SENTINELS = {
+    "star":       ["SA"],
+    "bwa":        ["*.bwt"],
+    "bowtie2":    ["*.1.bt2", "*.1.bt2l"],
+    "salmon":     ["versionInfo.json", "refseq.bin"],
+    "cellranger": ["reference.json"],
+}
+
 VARIANT_DBS = ["clinvar", "dbsnp", "gnomad", "cosmic", "gatk_bundle"]
 
 DATABASES = ["clinvar", "cosmic", "dbsnp", "gnomad", "go",
@@ -56,6 +67,22 @@ def _dir_exists_nonempty(path: Path) -> bool:
             f.stat().st_size > 0
             for f in path.rglob("*")
             if f.is_file()
+        )
+    except Exception:
+        return False
+
+
+def _index_built(index_dir: Path, tool: str) -> bool:
+    """Return True if index_dir holds a non-empty sentinel file for tool
+    (or is itself one, for an index whose files sit directly in indexes/<tool>/)."""
+    try:
+        if index_dir.is_file():
+            return index_dir.stat().st_size > 0 and any(
+                fnmatch.fnmatch(index_dir.name, p) for p in INDEX_SENTINELS[tool])
+        return any(
+            f.is_file() and f.stat().st_size > 0
+            for pattern in INDEX_SENTINELS[tool]
+            for f in index_dir.glob(pattern)
         )
     except Exception:
         return False
@@ -99,7 +126,7 @@ def _reference_status() -> dict:
             for idx in INDEXES:
                 idx_path = ref_root / "indexes" / idx
                 matches = list(idx_path.glob(f"{organism}*")) if idx_path.exists() else []
-                index_status[idx] = len(matches) > 0
+                index_status[idx] = any(_index_built(m, idx) for m in matches)
 
             variant_status = {}
             for vdb in VARIANT_DBS:
