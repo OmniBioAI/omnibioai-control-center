@@ -7,6 +7,7 @@ Webhook values are never returned, logged, or written to the dead-letter file.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import hmac
 import json
@@ -264,17 +265,29 @@ class DiscordPublisher:
         return connection
 
     def _initialize_store(self) -> None:
-        with closing(self._connect()) as connection, connection:
-            connection.execute(
-                """CREATE TABLE IF NOT EXISTS discord_deliveries (
-                    event_id TEXT PRIMARY KEY,
-                    event_type TEXT NOT NULL,
-                    channel TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    attempts INTEGER NOT NULL DEFAULT 0,
-                    updated_at REAL NOT NULL
-                )"""
-            )
+        # Two publishers starting on a new state dir both switch it to WAL, and
+        # SQLite can refuse the second switch with "database is locked" without
+        # waiting for the busy timeout. Serialise first use across threads and
+        # processes with a lock file next to the database; once the database is
+        # in WAL mode, later connections don't need the lock.
+        lock_path = self.state_dir / "deliveries.init.lock"
+        with open(lock_path, "a") as lock:
+            os.chmod(lock_path, 0o600)
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                with closing(self._connect()) as connection, connection:
+                    connection.execute(
+                        """CREATE TABLE IF NOT EXISTS discord_deliveries (
+                            event_id TEXT PRIMARY KEY,
+                            event_type TEXT NOT NULL,
+                            channel TEXT NOT NULL,
+                            status TEXT NOT NULL,
+                            attempts INTEGER NOT NULL DEFAULT 0,
+                            updated_at REAL NOT NULL
+                        )"""
+                    )
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
     def _claim(self, event: DiscordEvent, channel: str, *, replay: bool = False) -> bool:
         now = time.time()
