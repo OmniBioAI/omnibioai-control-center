@@ -394,7 +394,7 @@ def test_local_2xx_receipt_recovers_crash_before_event_receipt_write(tmp_path):
 
 def test_concurrent_publisher_claim_allows_exactly_one_delivery(tmp_path):
     calls = []
-    barrier = threading.Barrier(2)
+    barrier = threading.Barrier(2, timeout=10)
 
     class Response:
         status_code = 204
@@ -419,9 +419,40 @@ def test_concurrent_publisher_claim_allows_exactly_one_delivery(tmp_path):
     for thread in threads:
         thread.start()
     for thread in threads:
-        thread.join()
+        thread.join(timeout=30)
+    # A worker that dies before the barrier must fail this test, not hang the suite.
+    assert not any(thread.is_alive() for thread in threads), "a publisher thread is stuck"
     assert sorted(results) == ["delivered", "duplicate"]
     assert calls == [1]
+
+
+def test_concurrent_publisher_start_on_a_new_state_dir(tmp_path):
+    """Many publishers starting at once on the same new state dir all initialize the store.
+
+    Without the init lock, SQLite refuses some of the concurrent WAL switches
+    with "database is locked" (seen in about 1 in 20 two-thread starts).
+    """
+    errors = []
+    previous_hook = threading.excepthook
+    threading.excepthook = lambda args: errors.append(f"{args.exc_type.__name__}: {args.exc_value}")
+    try:
+        for attempt in range(100):
+            state_dir = tmp_path / f"state-{attempt}"
+            barrier = threading.Barrier(8, timeout=10)
+
+            def start():
+                barrier.wait()
+                DiscordPublisher({"support": WEBHOOK}, state_dir=state_dir)
+
+            threads = [threading.Thread(target=start) for _ in range(8)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=30)
+            assert not any(thread.is_alive() for thread in threads), f"attempt {attempt}: a publisher thread is stuck"
+    finally:
+        threading.excepthook = previous_hook
+    assert errors == []
 
 
 def test_failed_delivery_can_only_be_replayed_explicitly(tmp_path):
