@@ -72,7 +72,7 @@ class TestPublicReference(unittest.TestCase):
                 "annotation": {"human": {"gencode": True}}}
         self.assertEqual(pv.public_reference(full), {
             "available": True,
-            "organisms": [{"organism": "human", "assembly": "GRCh38",
+            "organisms": [{"organism": "human", "common_name": "", "assembly": "GRCh38",
                            "indexes": {"star": True}, "variants": {"dbsnp": False}}],
             "databases": {"clinvar": True},
             "annotation": {"human": {"gencode": True}},

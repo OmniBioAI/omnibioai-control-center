@@ -60,7 +60,7 @@ export interface PublicAiAndWorkflow {
 
 export interface ReferenceStatus {
   available: boolean
-  organisms: { organism: string; assembly: string; indexes: Record<string, boolean> }[]
+  organisms: { organism: string; common_name?: string; assembly: string; indexes: Record<string, boolean> }[]
 }
 
 export type BackendStatus = Record<string, { label: string; configured: boolean }>

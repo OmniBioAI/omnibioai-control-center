@@ -61,7 +61,7 @@ def reference_section_html(control_center_url: str) -> str:
         name = org["organism"]
         assembly = org["assembly"]
         icon = ORGANISM_ICONS.get(name, "🧬")
-        label = ORGANISM_LABELS.get(name, name.title())
+        label = org.get("common_name") or ORGANISM_LABELS.get(name, name.replace("_", " ").capitalize())
         indexes = org.get("indexes", {})
         variants = org.get("variants", {})
 
@@ -71,7 +71,7 @@ def reference_section_html(control_center_url: str) -> str:
         )
         var_cells = "".join(
             f'<td style="padding:8px 12px;text-align:center">{check(variants.get(vdb, False))}</td>'
-            for vdb in ["clinvar", "dbsnp", "gnomad", "cosmic"]
+            for vdb in ["clinvar", "dbsnp", "gnomad"]
         )
 
         org_rows += f"""
@@ -83,7 +83,7 @@ def reference_section_html(control_center_url: str) -> str:
         </tr>"""
 
     if not org_rows:
-        org_rows = '<tr><td colspan="11" style="padding:20px 16px;color:var(--color-text-muted)">No reference organisms found</td></tr>'
+        org_rows = '<tr><td colspan="10" style="padding:20px 16px;color:var(--color-text-muted)">No reference organisms found</td></tr>'
 
     DB_LABELS = {
         "clinvar": "ClinVar", "cosmic": "COSMIC", "dbsnp": "dbSNP",
@@ -134,7 +134,6 @@ def reference_section_html(control_center_url: str) -> str:
             <th style="padding:8px 12px;text-align:center;color:var(--color-text-muted);font-size:10px;font-weight:700;text-transform:uppercase">ClinVar</th>
             <th style="padding:8px 12px;text-align:center;color:var(--color-text-muted);font-size:10px;font-weight:700;text-transform:uppercase">dbSNP</th>
             <th style="padding:8px 12px;text-align:center;color:var(--color-text-muted);font-size:10px;font-weight:700;text-transform:uppercase">gnomAD</th>
-            <th style="padding:8px 12px;text-align:center;color:var(--color-text-muted);font-size:10px;font-weight:700;text-transform:uppercase">COSMIC</th>
           </tr>
         </thead>
         <tbody>{org_rows}</tbody>
