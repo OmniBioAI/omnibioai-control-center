@@ -247,7 +247,7 @@ function GenomesSection({ reference }: { reference: Load<ReferenceStatus> }) {
         <tbody>
           {reference.data.organisms.map(o => (
             <tr key={`${o.organism}/${o.assembly}`} style={{ borderTop: '1px solid var(--border)' }}>
-              <td style={{ padding: '8px 14px', color: 'var(--text)', textTransform: 'capitalize' }}>{o.organism}</td>
+              <td style={{ padding: '8px 14px', color: 'var(--text)' }}>{o.common_name || o.organism.replace(/_/g, ' ')}</td>
               <td style={{ padding: '8px 14px', fontFamily: 'var(--mono)', color: 'var(--text2)' }}>{o.assembly}</td>
               <td style={{ padding: '6px 14px' }}>
                 {Object.entries(o.indexes).map(([idx, ok]) => <Badge key={idx} ok={ok}>{INDEX_LABELS[idx] ?? idx}</Badge>)}

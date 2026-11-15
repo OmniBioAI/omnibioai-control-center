@@ -43,6 +43,7 @@ def public_reference(data: Any) -> dict[str, Any]:
         "organisms": [
             {
                 "organism": o.get("organism"),
+                "common_name": o.get("common_name") or "",
                 "assembly": o.get("assembly"),
                 "indexes": _dict(o.get("indexes")),
                 "variants": _dict(o.get("variants")),
