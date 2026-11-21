@@ -29,6 +29,7 @@ verify RS256 tokens once that switch is made in a later, separate change.
 """
 from __future__ import annotations
 
+import datetime
 import os
 from typing import Any
 
@@ -38,6 +39,16 @@ from jwt import PyJWKClient
 from jwt.exceptions import PyJWKClientError
 
 JWT_SECRET = os.environ.get("JWT_SECRET", "change-me")
+
+# Key rotation: an optional previous HS256 key, accepted for verification
+# only until JWT_SECRET_PREVIOUS_UNTIL (ISO-8601, UTC offset required, e.g.
+# 2026-11-16T06:35:27Z). Nothing in this service ever signs with it. An
+# unset, empty or whitespace-only value never becomes a key, and a previous
+# key without a parseable, timezone-aware UNTIL is ignored, so an overlap
+# window always ends. Read at call time (see _hs256_keys) so tests can patch
+# these module attributes the same way they already patch JWT_SECRET.
+JWT_SECRET_PREVIOUS = os.environ.get("JWT_SECRET_PREVIOUS", "")
+JWT_SECRET_PREVIOUS_UNTIL = os.environ.get("JWT_SECRET_PREVIOUS_UNTIL", "")
 
 # PR12: omnibioai-auth now stamps every token with iss=omnibioai-auth,
 # aud=omnibioai-platform (app/core/jwt.py::_sign there). PyJWT's `aud`
@@ -96,6 +107,36 @@ class TokenInvalid(Exception):
     missing-required-claim, or revoked token. Callers decide how to
     surface this (HTTPException, ...) -- this module only verifies, it
     never decides what an invalid token means to its caller."""
+
+
+def _previous_key_until(raw: str) -> datetime.datetime | None:
+    """JWT_SECRET_PREVIOUS_UNTIL as an aware datetime, or None when it is
+    unset, unparseable or has no UTC offset (each of which disables the
+    previous key)."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    try:
+        until = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if until.tzinfo is None:
+        return None
+    return until
+
+
+def _hs256_keys(now: datetime.datetime | None = None) -> list[str]:
+    """The HS256 keys a token may verify against, in order: the current key,
+    then the previous key while its UNTIL is still in the future. Empty
+    values are dropped, so an empty string is never tried as a key."""
+    keys = [JWT_SECRET] if JWT_SECRET else []
+    previous = (JWT_SECRET_PREVIOUS or "").strip()
+    until = _previous_key_until(JWT_SECRET_PREVIOUS_UNTIL)
+    if previous and until is not None and previous not in keys:
+        now = now or datetime.datetime.now(datetime.timezone.utc)
+        if now < until:
+            keys.append(previous)
+    return keys
 
 
 def _migration_aware_claims_kwargs(token: str) -> dict[str, Any]:
@@ -159,12 +200,22 @@ def _decode(token: str) -> dict[str, Any]:
             raise TokenInvalid(f"invalid token: {e}")
 
     if alg == "HS256":
-        try:
-            return jwt.decode(token, JWT_SECRET, algorithms=["HS256"], **claims_kwargs)
-        except jwt.ExpiredSignatureError:
-            raise TokenInvalid("expired")
-        except jwt.InvalidTokenError as e:
-            raise TokenInvalid(f"invalid token: {e}")
+        # Only a signature mismatch moves on to the next key. PyJWT checks
+        # the signature before exp/aud/iss, so any other error means this
+        # key verified the signature and the token itself is unacceptable.
+        keys = _hs256_keys()
+        if not keys:
+            raise TokenInvalid("no HS256 verification key configured")
+        for key in keys:
+            try:
+                return jwt.decode(token, key, algorithms=["HS256"], **claims_kwargs)
+            except jwt.InvalidSignatureError:
+                continue
+            except jwt.ExpiredSignatureError:
+                raise TokenInvalid("expired")
+            except jwt.InvalidTokenError as e:
+                raise TokenInvalid(f"invalid token: {e}")
+        raise TokenInvalid("invalid token: Signature verification failed")
 
     raise TokenInvalid(f"unsupported alg: {alg!r}")
 
