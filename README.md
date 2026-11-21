@@ -166,6 +166,52 @@ JWKS-fetch failure fails closed. No production deployment has switched
 issuance to RS256 yet — see [omnibioai-auth's README](../omnibioai-auth#jwt)
 and the ecosystem root README's Deployment Notes.
 
+### JWT key rotation
+
+HS256 verification accepts two keys during a rotation; signing never
+changes. `core/jwt_verify.py` tries `JWT_SECRET` first, then
+`JWT_SECRET_PREVIOUS`, and stops trying the previous key once
+`JWT_SECRET_PREVIOUS_UNTIL` has passed. Anything this service signs (its
+own audit events) always uses `JWT_SECRET`.
+
+- `JWT_SECRET_PREVIOUS` unset, empty or whitespace-only: disabled. An empty
+  value is never used as a key, and neither is an empty `JWT_SECRET`.
+- `JWT_SECRET_PREVIOUS_UNTIL` is ISO-8601 with a UTC offset (`Z` or
+  `+00:00`). If it is unset, does not parse, or has no offset, the previous
+  key is ignored, so an overlap window always has an end.
+- The window ends at `UNTIL` itself: a token verified at or after that
+  instant must match the current key.
+- Only a signature mismatch falls through to the previous key. A token that
+  one key verifies but that is expired or has the wrong `aud`/`iss` is
+  rejected on that ground.
+
+Rotation steps (worked example: auth-service starts signing with the new
+key at 2026-11-16T06:20:27Z; access tokens live 15 minutes):
+
+1. Generate the new key in the deployment secret manager; never paste it
+   into a shell history, ticket or log.
+2. Control Center first: set `JWT_SECRET` to the new key,
+   `JWT_SECRET_PREVIOUS` to the old key, and
+   `JWT_SECRET_PREVIOUS_UNTIL=2026-11-16T06:35:27Z` (auth-service switch
+   time + the 15-minute access-token lifetime). Recreate Control Center. It
+   now accepts tokens from either key.
+3. Switch auth-service's `JWT_SECRET` to the new key at 06:20:27Z and
+   recreate it. Tokens it issued before the switch keep verifying here
+   through the previous key until they expire.
+4. If step 3 slips, move `JWT_SECRET_PREVIOUS_UNTIL` later by the same
+   amount and recreate Control Center before the old value passes;
+   otherwise still-valid old-key tokens are rejected after 06:35:27Z.
+5. After 06:35:27Z the previous key is ignored. Remove
+   `JWT_SECRET_PREVIOUS` and `JWT_SECRET_PREVIOUS_UNTIL` from the
+   deployment at the next recreate.
+6. Verify: a fresh login works; a token signed with the old key is
+   rejected after `UNTIL` (401).
+
+`JWT_SECRET` also keys the HMAC on audit events read from the shared Redis
+stream. That check uses the current key only, so during a rotation events
+signed by a service still on the old key show `integrity_status: invalid`
+until that service has the new key too.
+
 ### Authentication sequence
 
 ```
@@ -506,6 +552,8 @@ The redirect URI must exactly match Auth's `LIMS_SSO_REDIRECT_URI` value.
 | `REPORT_SCHEDULE_HOURS` | `6`                           | Auto-regenerate report every N hours |
 | `WORK_DIR`              | `/workspace/omnibioai-work`   | Work/output directory; use a path valid for the selected local or container deployment |
 | Runtime credentials | deployment-only | JWT verification and service access; keep in the deployment secret manager |
+| `JWT_SECRET_PREVIOUS` | *(unset — disabled)* | Previous HS256 key, accepted for verification only until `JWT_SECRET_PREVIOUS_UNTIL` — see [JWT key rotation](#jwt-key-rotation) |
+| `JWT_SECRET_PREVIOUS_UNTIL` | *(unset — previous key ignored)* | ISO-8601 UTC end of the overlap window, e.g. `2026-11-16T06:35:27Z` |
 | `CRONTAB_SPOOL_PATH`    | `/var/spool/cron/crontabs/manish` | Host crontab spool file, bind-mounted in so `/cron/jobs/{id}/pause\|resume\|schedule` can read/write it directly |
 | `DISCORD_ALERT_WEBHOOK_URL` | *(empty)*                 | Discord webhook for new high-severity known-issue alerts — empty disables alerting gracefully, same pattern as `SENTRY_DSN` |
 | `DISCORD_CHANNEL_WEBHOOKS` | *(empty JSON object)* | Secret JSON map for the six automated Discord channels; see `docs/discord-multichannel-integration-v1.md`. Never expose this value through an API or log. |
