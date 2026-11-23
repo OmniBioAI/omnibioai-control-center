@@ -16,7 +16,8 @@ services:
 
   tes:
     type: http
-    url: http://tes:8081/health
+    # readiness: 503 (shown as WARN) when TES's HTTP tool registration failed or nothing is runnable
+    url: http://tes:8081/health/ready
     timeout_s: 2
 
   omnibioai:
