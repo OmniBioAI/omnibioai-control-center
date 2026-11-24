@@ -59,9 +59,11 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Copy source BEFORE pip install
 COPY backend/pyproject.toml .
+# Exact third-party versions (from the production image); see backend/constraints.txt.
+COPY backend/constraints.txt .
 COPY backend/src/ ./src/
 
-RUN pip install --no-cache-dir --no-build-isolation .
+RUN pip install --no-cache-dir --no-build-isolation -c constraints.txt .
 
 ENV PYTHONPATH=/app/src PYTHONUNBUFFERED=1
 EXPOSE 7070

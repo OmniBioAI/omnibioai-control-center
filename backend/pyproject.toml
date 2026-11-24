@@ -11,7 +11,8 @@ dependencies = [
   "PyYAML>=6.0.1",
   "httpx>=0.27",
   "prometheus-fastapi-instrumentator==7.1.0",
-  "sentry-sdk[fastapi,starlette]>=2.0.0",
+  # <3: sentry-sdk 3.0 rejects send_default_pii (main.py); exact version in constraints.txt
+  "sentry-sdk[fastapi,starlette]>=2.0.0,<3",
   "celery[redis]>=5.3",
   "pymysql>=1.1",
   "neo4j>=5.0",
