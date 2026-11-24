@@ -561,6 +561,24 @@ def _legacy_event_id(title: str, message: str) -> str:
     return f"legacy-alert:{int(time.time() // 300)}:{digest}"
 
 
+def _infrastructure_alert_preapproved() -> bool:
+    """True when this deployment's DISCORD_EVENT_APPROVAL_SOURCES lets the
+    infrastructure source publish infrastructure.alert without manual review
+    (owner decision 2026-11-23: operational alerts must reach #omnibioai-alerts
+    on their own). An unset or invalid policy keeps the review step."""
+    from control_center.notifications.discord_events import (
+        DiscordSourceAuthError,
+        load_approval_sources,
+    )
+    try:
+        return "infrastructure.alert" in load_approval_sources().get("infrastructure", frozenset())
+    except DiscordSourceAuthError:
+        _LOGGER.warning("Discord approval policy is invalid; alert kept for review", extra={
+            "extra_fields": {"reason": "invalid_approval_policy"},
+        })
+        return False
+
+
 def _submit_legacy_alert(router_url: str, secret: str, event_id: str) -> bool:
     if not _EVENT_ID.fullmatch(event_id):
         _LOGGER.warning("central Discord alert rejected", extra={"extra_fields": {"reason": "invalid_event_id"}})
@@ -579,7 +597,7 @@ def _submit_legacy_alert(router_url: str, secret: str, event_id: str) -> bool:
     envelope = {
         "event_id": event_id, "event_type": "infrastructure.alert",
         "source_service": "infrastructure", "created_at": datetime.now(timezone.utc).isoformat(),
-        "destination_channel": "omnibioai-alerts", "approved_publication": False,
+        "destination_channel": "omnibioai-alerts", "approved_publication": _infrastructure_alert_preapproved(),
         "safe_message_payload": {
             "title": "OmniBioAI operational alert",
             "message": "A sanitized operational alert was reported by a trusted monitor. Review details in Control Center.",

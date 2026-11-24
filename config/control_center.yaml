@@ -14,7 +14,8 @@ services:
     ui_url: http://192.168.86.234:9090
   tes:
     type: http
-    url: http://tes:8081/health
+    # readiness: 503 (shown as WARN) when TES's HTTP tool registration failed or nothing is runnable
+    url: http://tes:8081/health/ready
     timeout_s: 2
     ui_url: http://192.168.86.234:8081
   workbench:

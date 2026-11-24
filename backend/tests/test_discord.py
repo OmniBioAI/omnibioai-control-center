@@ -177,6 +177,31 @@ class TestNotify(unittest.TestCase):
         self.assertNotIn("dataset", kwargs["content"].decode())
         self.assertEqual(kwargs["headers"]["X-Omni-Discord-Source"], "infrastructure")
 
+    def _central_alert_envelope(self, extra_env: dict) -> dict:
+        accepted = httpx.Response(
+            202, request=httpx.Request("POST", "https://control.example.test/integrations/discord/events"),
+        )
+        with patch.dict(os.environ, {
+            "DISCORD_EVENT_ROUTER_URL": "https://control.example.test",
+            "DISCORD_EVENT_INFRASTRUCTURE_SECRET": "s" * 43,
+            **extra_env,
+        }, clear=False), patch.object(discord_module.httpx, "post", return_value=accepted) as post:
+            self.assertTrue(discord_module.notify("legacy", "title", "message", event_id="alert:approval"))
+        return json.loads(post.call_args.kwargs["content"])
+
+    def test_central_alert_is_preapproved_only_when_the_policy_allows_infrastructure_alerts(self) -> None:
+        on = self._central_alert_envelope(
+            {"DISCORD_EVENT_APPROVAL_SOURCES": '{"infrastructure":["infrastructure.alert"]}'})
+        self.assertTrue(on["approved_publication"])
+        self.assertEqual(on["destination_channel"], "omnibioai-alerts")
+        self.assertFalse(self._central_alert_envelope({"DISCORD_EVENT_APPROVAL_SOURCES": ""})["approved_publication"])
+        self.assertFalse(self._central_alert_envelope(
+            {"DISCORD_EVENT_APPROVAL_SOURCES": '{"infrastructure":["security.alert"]}'})["approved_publication"])
+
+    def test_invalid_approval_policy_keeps_the_review_step(self) -> None:
+        self.assertFalse(self._central_alert_envelope(
+            {"DISCORD_EVENT_APPROVAL_SOURCES": "not json"})["approved_publication"])
+
     def test_central_alert_without_caller_id_generates_stable_fallback_identity(self) -> None:
         accepted = httpx.Response(
             202, request=httpx.Request("POST", "https://control.example.test/integrations/discord/events"),
