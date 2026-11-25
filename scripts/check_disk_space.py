@@ -104,7 +104,9 @@ def _usage_percent(path: str) -> int:
 
 
 def _existing_open_issue(marker: str) -> dict | None:
-    resp = requests.get(f"{CONTROL_CENTER_URL}/known-issues", timeout=10)
+    # authenticated: anonymous callers only see issues marked public (never these), so an
+    # unauthenticated lookup never finds the open issue: a new one (and alert) every run, no resolve
+    resp = requests.get(f"{CONTROL_CENTER_URL}/known-issues", headers=_admin_headers(), timeout=10)
     resp.raise_for_status()
     for issue in resp.json().get("issues", []):
         if issue.get("title", "").startswith(marker) and issue.get("status") != "resolved":
