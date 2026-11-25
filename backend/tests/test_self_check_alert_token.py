@@ -52,3 +52,26 @@ def test_the_old_roles_only_token_is_what_got_403():
 def test_every_check_script_is_covered():
     minting = sorted(p.stem for p in SCRIPTS.glob("check_*.py") if "jwt.encode(" in p.read_text())
     assert minting == sorted(CHECKS)
+
+
+LOOKUPS = ["check_cron_health", "check_disk_space", "check_domain_health", "check_platform_health",
+           "check_tes_runnable"]
+
+
+@pytest.mark.parametrize("name", LOOKUPS)
+def test_open_issue_lookup_is_authenticated(name, monkeypatch):
+    """Anonymous GET /known-issues returns only public issues, so an unauthenticated lookup never
+    finds the open issue: a new issue (and alert) every run and no auto-resolve (2026-11-25)."""
+    from unittest.mock import MagicMock, patch
+
+    monkeypatch.setenv("AUTH_SECRET_KEY", JWT_SECRET)
+    module = _load(name)
+    resp = MagicMock()
+    resp.json.return_value = {"issues": []}
+    with patch.object(module.requests, "get", return_value=resp) as get:
+        if name == "check_tes_runnable":
+            module._existing_open_issue()
+        else:
+            module._existing_open_issue("[marker]")
+    header = get.call_args.kwargs["headers"]["Authorization"]
+    assert require_permission("platform.manage_content")(authorization=header)["sub"]
