@@ -21,6 +21,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -51,8 +52,14 @@ def _load_jwt_secret() -> str:
     raise RuntimeError(f"AUTH_SECRET_KEY not found in {STUDIO_ENV_PATH}")
 
 
+# The known-issues write routes check the `permissions` claim (CC 7887ea6, 2026-08-03); a
+# `roles: ["admin"]` token is rejected with 403, so no self-check could file an issue after that.
+ALERT_PERMISSION = "platform.manage_content"
+
+
 def _admin_headers() -> dict:
-    token = jwt.encode({"sub": "redis-aof-autofix-check", "roles": ["admin"]}, _load_jwt_secret(), algorithm="HS256")
+    token = jwt.encode({"sub": "redis-aof-autofix-check", "type": "access", "permissions": [ALERT_PERMISSION],
+                        "exp": int(time.time()) + 300}, _load_jwt_secret(), algorithm="HS256")
     return {"Authorization": f"Bearer {token}"}
 
 
