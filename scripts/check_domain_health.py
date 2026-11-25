@@ -21,15 +21,11 @@ config, not assumed from memory:
   - webstudio.omnibioai.org  current public web app (nginx-router.conf's
                              own comment: OAuth callback base domain)
   - control.omnibioai.org    public Control Center dashboard
-  - app.omnibioai.org        old web domain pre-webstudio migration --
-                             CHANGELOG.md claims this was "kept working
-                             during the transition period", but it no
-                             longer resolves at all (see live-validation
-                             notes: this is a REAL unreachable domain,
-                             not a hypothetical one)
   - omnibioai.org            apex/marketing domain
+  (app.omnibioai.org, the pre-webstudio domain, was dropped 2026-11-25: NXDOMAIN since
+   at least 2026-07-27, no route, nothing links to it; see known issue f14b39b2.)
   - lims.omnibioai.org       present in every docker-compose*.yml's
-                             CORS_ALLOWED_ORIGINS alongside the other 4 --
+                             CORS_ALLOWED_ORIGINS alongside the others --
                              a real dependency even though it wasn't in
                              the original ask
   workbench.omnibioai.org resolves too (Cloudflare zone wildcard) but is
@@ -76,7 +72,6 @@ CONNECT_TIMEOUT = 8
 DOMAINS = [
     {"id": "webstudio", "domain": "webstudio.omnibioai.org", "label": "Web Studio (webstudio.omnibioai.org)"},
     {"id": "control", "domain": "control.omnibioai.org", "label": "Control Center dashboard (control.omnibioai.org)"},
-    {"id": "app", "domain": "app.omnibioai.org", "label": "Legacy app domain (app.omnibioai.org)"},
     {"id": "apex", "domain": "omnibioai.org", "label": "Apex/marketing domain (omnibioai.org)"},
     {"id": "lims", "domain": "lims.omnibioai.org", "label": "LIMS (lims.omnibioai.org)"},
 ]
